@@ -1,0 +1,22 @@
+[package]
+name = "mrrp-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.mrrp]
+path = "../mrrp"
+
+[dependencies]
+clap = { version = "4.5.41", features = ["derive"] }
+color-eyre = "0.6.5"
+crossterm = { version = "0.29.0", features = ["event-stream"] }
+derive_more = "2.0.1"
+dotenvy = "0.15.7"
+futures-util = "0.3.31"
+num-complex = { version = "0.4.6", features = ["bytemuck"] }
+ratatui = { version = "0.29.0", features = ["palette"] }
+rtlsdr-async = { git = "https://github.com/jgraef/rtlsdr-async.git", version = "0.1.0" }
+rustfft = "6.4.0"
+tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "time"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }

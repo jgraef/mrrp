@@ -1,0 +1,18 @@
+[package]
+name = "mrrp"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = { version = "1.23.1", features = ["derive"] }
+futures-util = "0.3.31"
+num-complex = { version = "0.4.6", features = ["bytemuck"] }
+pin-project-lite = "0.2.16"
+rtlsdr-async = { git = "https://github.com/jgraef/rtlsdr-async.git", version = "0.1.0", optional = true }
+rustfft = "6.4.0"
+thiserror = "2.0.12"
+
+[features]
+default = ["rtlsdr", "adsb"]
+adsb = []
+rtlsdr = ["dep:rtlsdr-async"]
