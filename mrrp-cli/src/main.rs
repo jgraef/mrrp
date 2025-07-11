@@ -39,7 +39,10 @@ use rtlsdr_async::{
 use tracing_subscriber::EnvFilter;
 
 use crate::{
-    fft::Fft,
+    fft::{
+        Fft,
+        Window,
+    },
     reader::SampleReader,
     waterfall::Waterfall,
 };
@@ -117,8 +120,16 @@ struct Args {
     #[clap(long, default_value = "250")]
     scroll_interval: u64,
 
+    /// Size of segments that are FFT'd
     #[clap(long, default_value = "1024")]
     fft_size: usize,
+
+    /// Overlap of segments that are FFT'd
+    #[clap(long, default_value = "256")]
+    fft_overlap: usize,
+
+    #[clap(long, default_value = "boxcar")]
+    fft_window: Window,
 }
 
 #[derive(Debug)]
@@ -142,7 +153,9 @@ where
         rtl_sdr.set_center_frequency(args.frequency).await?;
         rtl_sdr.set_sample_rate(args.sample_rate).await?;
         rtl_sdr.set_tuner_gain(args.gain.into()).await?;
-        let sample_reader = SampleReader::new(rtl_sdr.samples().await?);
+
+        let sample_reader =
+            SampleReader::new(rtl_sdr.samples().await?, args.fft_size, args.fft_overlap);
 
         let waterfall = Waterfall::new(args.sample_rate as f32, args.frequency as f32);
 
@@ -153,7 +166,7 @@ where
             exit: false,
             rtl_sdr,
             sample_reader,
-            fft: Fft::new(args.fft_size),
+            fft: Fft::new(args.fft_size, args.fft_window),
             mouse_position: None,
         })
     }
@@ -175,7 +188,7 @@ where
                     self.waterfall.scroll();
                     self.draw()?;
                 }
-                result = self.sample_reader.read(self.fft.size()) => {
+                result = self.sample_reader.read() => {
                     let Some(samples) = result?
                     else {
                         tracing::warn!("sample stream stopped");
@@ -186,7 +199,6 @@ where
                     // attach it to the fft
 
                     self.waterfall.push(self.fft.forward(samples));
-                    //self.exit = true;
                 }
             }
         }
