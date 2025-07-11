@@ -1,7 +1,12 @@
+pub mod fft;
+pub mod reader;
+pub mod resample;
 pub mod waterfall;
 
 use std::{
+    fmt::Debug,
     fs::OpenOptions,
+    str::FromStr,
     time::Duration,
 };
 
@@ -22,24 +27,22 @@ use crossterm::{
     execute,
 };
 use futures_util::TryStreamExt;
-use num_complex::Complex;
 use ratatui::{
     DefaultTerminal,
     layout::Position,
 };
 use rtlsdr_async::{
     Backend,
-    Chunk,
-    Gain,
-    Iq,
     RtlSdr,
-    Samples,
     rtl_tcp::client::RtlTcpClient,
 };
-use rustfft::FftPlanner;
 use tracing_subscriber::EnvFilter;
 
-use crate::waterfall::Waterfall;
+use crate::{
+    fft::Fft,
+    reader::SampleReader,
+    waterfall::Waterfall,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -52,6 +55,7 @@ async fn main() -> Result<(), Error> {
 
     tracing::info!("Starting mrrp-cli");
     let args = Args::parse();
+    tracing::debug!(?args);
 
     // we need to get this before creating the terminal window, as librtlsdr just
     // prints stuff (how rude!).
@@ -105,9 +109,16 @@ struct Args {
     #[clap(short, long, default_value = "7000000")]
     frequency: u32,
 
+    /// Gain
+    #[clap(short, long, default_value = "auto")]
+    gain: Gain,
+
     /// Scroll down one line every X milliseconds.
-    #[clap(short, long, default_value = "250")]
+    #[clap(long, default_value = "250")]
     scroll_interval: u64,
+
+    #[clap(long, default_value = "1024")]
+    fft_size: usize,
 }
 
 #[derive(Debug)]
@@ -130,11 +141,10 @@ where
     async fn new(args: &Args, terminal: DefaultTerminal, rtl_sdr: B) -> Result<Self, Error> {
         rtl_sdr.set_center_frequency(args.frequency).await?;
         rtl_sdr.set_sample_rate(args.sample_rate).await?;
-        rtl_sdr.set_tuner_gain(Gain::Auto).await?;
+        rtl_sdr.set_tuner_gain(args.gain.into()).await?;
         let sample_reader = SampleReader::new(rtl_sdr.samples().await?);
 
-        let waterfall =
-            Waterfall::new(-80.0, -70.0, args.sample_rate as f32, args.frequency as f32);
+        let waterfall = Waterfall::new(args.sample_rate as f32, args.frequency as f32);
 
         Ok(Self {
             terminal,
@@ -143,7 +153,7 @@ where
             exit: false,
             rtl_sdr,
             sample_reader,
-            fft: Default::default(),
+            fft: Fft::new(args.fft_size),
             mouse_position: None,
         })
     }
@@ -165,12 +175,18 @@ where
                     self.waterfall.scroll();
                     self.draw()?;
                 }
-                result = self.sample_reader.read(self.waterfall.width()), if self.waterfall.width() > 0 => {
+                result = self.sample_reader.read(self.fft.size()) => {
                     let Some(samples) = result?
                     else {
+                        tracing::warn!("sample stream stopped");
                         break;
                     };
-                    self.waterfall.push(self.fft.spectrum(samples));
+
+                    // here is possibly a good place to get the center frequency and bandwith and
+                    // attach it to the fft
+
+                    self.waterfall.push(self.fft.forward(samples));
+                    //self.exit = true;
                 }
             }
         }
@@ -216,91 +232,30 @@ where
     }
 }
 
-#[derive(derive_more::Debug)]
-struct Fft {
-    #[debug(skip)]
-    fft_planner: FftPlanner<f32>,
-    fft_buffer: Vec<Complex<f32>>,
-    fft_scratch: Vec<Complex<f32>>,
+#[derive(Clone, Copy, Debug)]
+enum Gain {
+    Value(f32),
+    Auto,
 }
 
-impl Default for Fft {
-    fn default() -> Self {
-        Self {
-            fft_planner: FftPlanner::new(),
-            fft_buffer: vec![],
-            fft_scratch: vec![],
+impl From<Gain> for rtlsdr_async::Gain {
+    fn from(value: Gain) -> Self {
+        match value {
+            Gain::Value(gain) => Self::ManualValue((gain * 10.0) as i32),
+            Gain::Auto => Self::Auto,
         }
     }
 }
 
-impl Fft {
-    fn spectrum(&mut self, samples: &[Complex<f32>]) -> &[Complex<f32>] {
-        let fft = self.fft_planner.plan_fft_forward(samples.len());
+impl FromStr for Gain {
+    type Err = Error;
 
-        self.fft_buffer.resize(samples.len(), Default::default());
-        self.fft_scratch
-            .resize(fft.get_immutable_scratch_len(), Default::default());
-
-        fft.process_immutable_with_scratch(samples, &mut self.fft_buffer, &mut self.fft_scratch);
-
-        // the fft output needs to be normalized with 1/sqrt(n)
-        let normalization = 1.0 / (samples.len() as f32).sqrt();
-        for x in &mut self.fft_buffer {
-            *x *= normalization;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s == "auto" {
+            Ok(Self::Auto)
         }
-
-        &self.fft_buffer
-    }
-}
-
-#[derive(Debug)]
-struct SampleReader {
-    samples: Samples<Iq>,
-    chunk: Option<Chunk<Iq>>,
-    read_pos: usize,
-    buffer: Vec<Complex<f32>>,
-    write_pos: usize,
-}
-
-impl SampleReader {
-    pub fn new(samples: Samples<Iq>) -> Self {
-        Self {
-            samples,
-            chunk: None,
-            read_pos: 0,
-            buffer: vec![],
-            write_pos: 0,
+        else {
+            Ok(Self::Value(s.parse()?))
         }
-    }
-
-    pub async fn read(&mut self, num_samples: usize) -> Result<Option<&'_ [Complex<f32>]>, Error> {
-        self.buffer.resize(num_samples, Default::default());
-
-        while self.write_pos < num_samples {
-            if let Some(chunk) = &self.chunk {
-                let samples = chunk.samples();
-                while self.write_pos < num_samples && self.read_pos < samples.len() {
-                    self.buffer[self.write_pos] = samples[self.read_pos].into();
-                    self.write_pos += 1;
-                    self.read_pos += 1;
-                }
-
-                if self.read_pos >= samples.len() {
-                    self.chunk = None;
-                    self.read_pos = 0;
-                }
-            }
-            else {
-                self.chunk = self.samples.try_next().await?;
-                if self.chunk.is_none() {
-                    return Ok(None);
-                }
-            }
-        }
-
-        self.write_pos = 0;
-
-        Ok(Some(&self.buffer))
     }
 }
