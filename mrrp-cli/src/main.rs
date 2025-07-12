@@ -1,6 +1,6 @@
 pub mod fft;
 pub mod reader;
-pub mod resample;
+pub mod util;
 pub mod waterfall;
 
 use std::{
@@ -44,6 +44,7 @@ use crate::{
         Window,
     },
     reader::SampleReader,
+    util::FrequencyBand,
     waterfall::Waterfall,
 };
 
@@ -157,7 +158,13 @@ where
         let sample_reader =
             SampleReader::new(rtl_sdr.samples().await?, args.fft_size, args.fft_overlap);
 
-        let waterfall = Waterfall::new(args.sample_rate as f32, args.frequency as f32);
+        let half_bandwidth = args.sample_rate / 2;
+        let sampled_frequency_band = FrequencyBand {
+            start: args.frequency - half_bandwidth,
+            end: args.frequency + half_bandwidth,
+        };
+
+        let waterfall = Waterfall::new(sampled_frequency_band);
 
         Ok(Self {
             terminal,

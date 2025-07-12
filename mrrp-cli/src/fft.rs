@@ -71,13 +71,9 @@ impl Debug for Fft {
     }
 }
 
-fn hann_window(n: usize) -> Vec<f32> {
-    let mut buf = vec![0.0; n + 1];
+fn hann_window(n: usize) -> impl Iterator<Item = f32> {
     let n_f32 = n as f32;
-    for i in 0..=n {
-        buf[i] = (PI * i as f32 / n_f32).sin().powi(2);
-    }
-    buf
+    (0..=n).map(move |i| (PI * i as f32 / n_f32).sin().powi(2))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,8 +97,8 @@ impl FromStr for Window {
 impl Window {
     fn to_vec(&self, size: usize) -> Vec<f32> {
         match self {
-            Window::Boxcar => vec![1.0; size],
-            Window::Hann => hann_window(size - 1),
+            Window::Boxcar => std::iter::repeat_n(1.0, size).collect(),
+            Window::Hann => hann_window(size - 1).collect(),
         }
     }
 }
