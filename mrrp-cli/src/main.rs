@@ -14,6 +14,7 @@ use clap::Parser;
 use color_eyre::eyre::{
     Error,
     bail,
+    eyre,
 };
 use crossterm::{
     event::{
@@ -151,18 +152,19 @@ where
     <B as Backend>::Error: std::error::Error + Send + Sync + 'static,
 {
     async fn new(args: &Args, terminal: DefaultTerminal, rtl_sdr: B) -> Result<Self, Error> {
-        rtl_sdr.set_center_frequency(args.frequency).await?;
+        let half_bandwidth = args.sample_rate / 2;
+        let center_frequency = args.frequency.max(half_bandwidth);
+        let sampled_frequency_band = FrequencyBand {
+            start: args.frequency - half_bandwidth,
+            end: args.frequency + half_bandwidth,
+        };
+
+        rtl_sdr.set_center_frequency(center_frequency).await?;
         rtl_sdr.set_sample_rate(args.sample_rate).await?;
         rtl_sdr.set_tuner_gain(args.gain.into()).await?;
 
         let sample_reader =
             SampleReader::new(rtl_sdr.samples().await?, args.fft_size, args.fft_overlap);
-
-        let half_bandwidth = args.sample_rate / 2;
-        let sampled_frequency_band = FrequencyBand {
-            start: args.frequency - half_bandwidth,
-            end: args.frequency + half_bandwidth,
-        };
 
         let waterfall = Waterfall::new(sampled_frequency_band);
 

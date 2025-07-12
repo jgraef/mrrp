@@ -53,10 +53,25 @@ impl Fft {
             .process_with_scratch(&mut self.buffer, &mut self.scratch);
 
         // the fft output needs to be normalized with 1/sqrt(n)
-        // todo: can't we do the normalization with the input when we apply the window
-        // function. is this even worth it? lol
-        for x in &mut self.buffer {
-            *x *= self.normalization;
+        // todo: i need clarification about what this does exactly. as far as I can see
+        // this is undone in later normalization anyway.
+
+        // https://stackoverflow.com/questions/20165193/fft-normalization
+        // we will normalize later
+        //for x in &mut self.buffer {
+        //    *x *= self.normalization;
+        //}
+
+        // center frequency will be in bin 0. right of center upto n/2 - 1. rest is left
+        // of center, so we need to swap halves.
+        // of course we could combine this with the earlier normalization loop, but for
+        // clarity we'll keep it separate for now.
+        let upper_half_offset = self.size.div_ceil(2);
+        for i in 0..(self.size / 2) {
+            let j = upper_half_offset + i;
+            let tmp = self.buffer[i];
+            self.buffer[i] = self.buffer[j];
+            self.buffer[j] = tmp;
         }
 
         &self.buffer
