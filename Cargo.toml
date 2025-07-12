@@ -2,5 +2,5 @@
 resolver = "3"
 members = ["mrrp", "mrrp-cli"]
 
-[profile.dev.package.rustfft]
+[profile.dev.package."*"]
 opt-level = 3

@@ -1,10 +1,16 @@
+pub mod bandplan;
+pub mod frequencies;
+pub mod waterfall;
+
 use crossterm::event::{
     Event as TerminalEvent,
     KeyCode,
+    KeyModifiers,
     MouseEventKind,
 };
 use num_complex::Complex;
 use ratatui::{
+    buffer::Buffer,
     layout::{
         Constraint,
         Layout,
@@ -16,14 +22,18 @@ use ratatui::{
 
 use crate::{
     ui::{
+        bandplan::{
+            Bandplan,
+            BandplanWidget,
+        },
         frequencies::Frequencies,
         waterfall::Waterfall,
     },
-    util::FrequencyBand,
+    util::{
+        FrequencyBand,
+        StaticOrArc,
+    },
 };
-
-pub mod frequencies;
-pub mod waterfall;
 
 #[derive(Debug)]
 pub struct Ui {
@@ -32,19 +42,31 @@ pub struct Ui {
     mouse_position: Option<Position>,
     exit_requested: bool,
 
+    sampled_frequency_band: FrequencyBand,
     view_frequency_band: FrequencyBand,
+    zoom_level: u32,
+    bandwidth_resolution: f32,
 
     waterfall: Waterfall,
+    bandplan: StaticOrArc<Bandplan>,
 }
 
 impl Ui {
     pub fn new(sampled_frequency_band: FrequencyBand) -> Self {
         Self {
-            layout: Layout::vertical([Constraint::Length(1), Constraint::Fill(100)]),
+            layout: Layout::vertical([
+                Constraint::Length(1),
+                Constraint::Length(1),
+                Constraint::Fill(100),
+            ]),
             mouse_position: None,
             exit_requested: false,
+            sampled_frequency_band,
             view_frequency_band: sampled_frequency_band,
+            zoom_level: 0,
+            bandwidth_resolution: 1.0,
             waterfall: Waterfall::new(sampled_frequency_band),
+            bandplan: Bandplan::international().into(),
         }
     }
 
@@ -82,6 +104,18 @@ impl Ui {
                     KeyCode::Char('q') => {
                         self.exit_requested = true;
                     }
+                    KeyCode::Char('+') => {
+                        self.zoom(1);
+                    }
+                    KeyCode::Char('-') => {
+                        self.zoom(-1);
+                    }
+                    KeyCode::Left => {
+                        self.shift(-1, key_event.modifiers.contains(KeyModifiers::SHIFT));
+                    }
+                    KeyCode::Right => {
+                        self.shift(1, key_event.modifiers.contains(KeyModifiers::SHIFT));
+                    }
                     _ => {}
                 }
             }
@@ -102,23 +136,71 @@ impl Ui {
             _ => {}
         }
     }
+
+    fn zoom(&mut self, delta: i32) {
+        self.zoom_level = self.zoom_level.saturating_add_signed(delta).min(30);
+
+        // the sampled bandwidth corresponds to zoom 0
+        let half = self.sampled_frequency_band.bandwidth() / 2;
+
+        // linear zoom
+        //let half_visible = half / (1 + self.zoom_level);
+
+        // exponential zoom
+        let half_visible = half / (1 << self.zoom_level);
+
+        // keep center, but adjust visible bandwidth
+        let center = self.view_frequency_band.center();
+        self.view_frequency_band.start = center - half_visible;
+        self.view_frequency_band.end = center + half_visible;
+    }
+
+    fn shift(&mut self, direction: i32, big_step: bool) {
+        let bandwidth = self.view_frequency_band.bandwidth();
+
+        let step_size = if big_step {
+            // move half the bandwidth
+            bandwidth as i32 / 2
+        }
+        else {
+            // move one cell worth of bandwidth
+            self.bandwidth_resolution.ceil() as i32
+        };
+
+        self.view_frequency_band.start = self
+            .view_frequency_band
+            .start
+            .saturating_add_signed(direction * step_size);
+        self.view_frequency_band.end = self.view_frequency_band.start + bandwidth;
+    }
 }
 
 impl Widget for &mut Ui {
-    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
+    fn render(self, area: Rect, buf: &mut Buffer)
     where
         Self: Sized,
     {
-        let [frequencies_area, waterfall_area] = self.layout.areas(area);
+        let [frequencies_area, bandplan_area, waterfall_area] = self.layout.areas(area);
 
         Frequencies {
             view_frequency_band: self.view_frequency_band,
         }
         .render(frequencies_area, buf);
 
+        BandplanWidget {
+            bandplan: &self.bandplan,
+            view_frequency_band: self.view_frequency_band,
+        }
+        .render(bandplan_area, buf);
+
         self.waterfall
-            .widget(self.mouse_position_inside_area(waterfall_area))
+            .widget(
+                self.view_frequency_band,
+                self.mouse_position_inside_area(waterfall_area),
+            )
             .render(waterfall_area, buf);
+
+        self.bandwidth_resolution = self.view_frequency_band.bandwidth() as f32 / area.width as f32;
     }
 }
 

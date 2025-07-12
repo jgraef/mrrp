@@ -1,3 +1,12 @@
+use std::{
+    ops::{
+        Bound,
+        Deref,
+        RangeBounds,
+    },
+    sync::Arc,
+};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FrequencyBand {
     pub start: u32,
@@ -13,6 +22,16 @@ impl FrequencyBand {
     #[inline(always)]
     pub fn bandwidth(&self) -> u32 {
         self.end - self.start
+    }
+}
+
+impl RangeBounds<u32> for FrequencyBand {
+    fn start_bound(&self) -> Bound<&u32> {
+        Bound::Included(&self.start)
+    }
+
+    fn end_bound(&self) -> Bound<&u32> {
+        Bound::Excluded(&self.end)
     }
 }
 
@@ -42,4 +61,33 @@ pub fn min_float(iter: impl IntoIterator<Item = f32>) -> Option<f32> {
 #[inline(always)]
 pub fn max_float(iter: impl IntoIterator<Item = f32>) -> Option<f32> {
     min_max_float(iter, |min, x| x > min)
+}
+
+#[derive(Clone, Debug)]
+pub enum StaticOrArc<T: 'static> {
+    Arc(Arc<T>),
+    Static(&'static T),
+}
+
+impl<T: 'static> Deref for StaticOrArc<T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            StaticOrArc::Arc(value) => &**value,
+            StaticOrArc::Static(value) => *value,
+        }
+    }
+}
+
+impl<T: 'static> From<Arc<T>> for StaticOrArc<T> {
+    fn from(value: Arc<T>) -> Self {
+        Self::Arc(value)
+    }
+}
+
+impl<T: 'static> From<&'static T> for StaticOrArc<T> {
+    fn from(value: &'static T) -> Self {
+        Self::Static(value)
+    }
 }

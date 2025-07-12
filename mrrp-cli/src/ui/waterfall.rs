@@ -28,7 +28,6 @@ pub struct Waterfall {
     sampled_frequency_band: FrequencyBand,
 
     // todo: move this into the widget?
-    _view_frequency_band: FrequencyBand,
     color_map: ColorMap,
     downsampling: Downsampling,
 }
@@ -41,7 +40,6 @@ impl Waterfall {
             history: 10,
             color_map: ColorMap::default(),
             sampled_frequency_band,
-            _view_frequency_band: sampled_frequency_band,
             downsampling: Downsampling::Average,
         }
     }
@@ -72,9 +70,14 @@ impl Waterfall {
         line.count += 1;
     }
 
-    pub fn widget(&mut self, mouse_position: Option<Position>) -> WaterfallWidget<'_> {
+    pub fn widget(
+        &mut self,
+        view_frequency_band: FrequencyBand,
+        mouse_position: Option<Position>,
+    ) -> WaterfallWidget<'_> {
         WaterfallWidget {
             waterfall: self,
+            _view_frequency_band: view_frequency_band,
             mouse_position,
         }
     }
@@ -87,6 +90,7 @@ impl Waterfall {
 #[derive(Debug)]
 pub struct WaterfallWidget<'a> {
     waterfall: &'a mut Waterfall,
+    _view_frequency_band: FrequencyBand,
     mouse_position: Option<Position>,
 }
 
