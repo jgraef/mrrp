@@ -79,20 +79,6 @@ impl Waterfall {
         }
     }
 
-    fn min_max(&self) -> Option<(f32, f32)> {
-        let mut total_min_max: Option<(f32, f32)> = None;
-        for line_min_max in self.lines.iter().flat_map(|line| &line.min_max).copied() {
-            if let Some(total_min_max) = &mut total_min_max {
-                total_min_max.0 = total_min_max.0.min(line_min_max.0);
-                total_min_max.1 = total_min_max.1.max(line_min_max.1);
-            }
-            else {
-                total_min_max = Some(line_min_max);
-            }
-        }
-        total_min_max
-    }
-
     fn get_line(&self, i: usize) -> Option<&Line> {
         self.lines.len().checked_sub(i + 1).map(|i| &self.lines[i])
     }
@@ -111,11 +97,11 @@ impl<'a> Widget for WaterfallWidget<'a> {
     {
         self.waterfall.history = area.height.saturating_sub(1).max(10).into();
 
-        let total_min_max = self.waterfall.min_max();
+        /*let total_min_max = self.waterfall.min_max();
         if let Some((min, max)) = total_min_max {
             self.waterfall.color_map.min_z = min;
             self.waterfall.color_map.max_z = max;
-        }
+        }*/
 
         // render first line showing base frequency, center frequency and end frequency
         for x in 0..area.width {
@@ -152,6 +138,7 @@ impl<'a> Widget for WaterfallWidget<'a> {
         }
 
         let mut mouse_over = None;
+        let mut total_min_max = None;
 
         // render spectral density history
         for y in 1..area.height {
@@ -180,6 +167,24 @@ impl<'a> Widget for WaterfallWidget<'a> {
                         let x = u16::try_from(i).unwrap();
                         buf[(area.x + x, area.y + y)].bg = self.waterfall.color_map.map(z);
 
+                        // track min max
+                        if let Some((min, max)) = &mut total_min_max {
+                            assert!(
+                                z.is_finite(),
+                                "so z can be infinite. interesting. i mean of course it can. it comes out of a log"
+                            );
+                            if z < *min {
+                                *min = z;
+                            }
+                            if z > *max {
+                                *max = z;
+                            }
+                        }
+                        else {
+                            total_min_max = Some((z, z));
+                        }
+
+                        // get mouse over info if the mouse is over this cell
                         if self.mouse_position.map_or(false, |mouse_position| {
                             mouse_position.x == x && mouse_position.y == y
                         }) {
@@ -209,6 +214,13 @@ impl<'a> Widget for WaterfallWidget<'a> {
                     buf[(x + area.x, y + area.y)].reset();
                 }
             }
+        }
+
+        // update colormap min/max values for next frame
+        // todo: this should be behind some flag
+        if let Some((min, max)) = total_min_max {
+            self.waterfall.color_map.min_z = min;
+            self.waterfall.color_map.max_z = max;
         }
 
         // render mouse cursor
@@ -267,26 +279,15 @@ impl NewLine {
         if self.count > 0 {
             // z is the energy for that frequency over line.count * sample_rate / len(line).
             // convert to power in dBFS.
+            // todo: this needs some serious verification lol.
             let normalize = 1.0 / (self.count as f32 * self.bin_width);
-            //let normalize = 1.0 / (self.count as f32);
-            let mut min_max: Option<(f32, f32)> = None;
 
             for z in &mut self.samples {
                 *z = 10.0 * (*z * normalize).log10();
-                if z.is_finite() {
-                    if let Some(min_max) = &mut min_max {
-                        min_max.0 = min_max.0.min(*z);
-                        min_max.1 = min_max.1.max(*z);
-                    }
-                    else {
-                        min_max = Some((*z, *z));
-                    }
-                }
             }
 
             Some(Line {
                 samples: self.samples,
-                min_max,
                 frequency_band: self.frequency_band,
                 bin_width: self.bin_width,
             })
@@ -300,7 +301,6 @@ impl NewLine {
 #[derive(Debug)]
 struct Line {
     samples: Vec<f32>,
-    min_max: Option<(f32, f32)>,
     frequency_band: FrequencyBand,
     bin_width: f32,
 }
@@ -318,7 +318,11 @@ impl Default for ColorMap {
         // blue -> green -> red
         //Self::new(240.0, 0.0)
         // blue -> red -> green
-        Self::new(-120.0, 120.0)
+
+        // -120 blue
+        // 0 red
+        // 120 green
+        Self::new(-120.0, 0.0)
     }
 }
 
@@ -340,7 +344,11 @@ impl ColorMap {
     pub fn map(&self, z: f32) -> Color {
         let scaled = ((z - self.min_z) / (self.max_z - self.min_z)).clamp(0.0, 1.0);
         let hue = lerp(scaled, self.hue_low, self.hue_high);
-        Color::from_hsl(Hsl::new(hue, 1.0, 0.8 * scaled))
+        //let saturation = lerp(scaled, 0.5, 1.0);
+        let saturation = 1.0;
+        //let lightness = lerp(scaled, 0.0, 0.8);
+        let lightness = lerp(scaled.powi(2), 0.1, 0.8);
+        Color::from_hsl(Hsl::new(hue, saturation, lightness))
     }
 }
 
