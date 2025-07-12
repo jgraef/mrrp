@@ -25,23 +25,23 @@ pub struct Waterfall {
     new_line: Option<NewLine>,
     lines: VecDeque<Line>,
     history: usize,
-    input_frequency_band: FrequencyBand,
+    sampled_frequency_band: FrequencyBand,
 
     // todo: move this into the widget?
-    view_frequency_band: FrequencyBand,
+    _view_frequency_band: FrequencyBand,
     color_map: ColorMap,
     downsampling: Downsampling,
 }
 
 impl Waterfall {
-    pub fn new(input_frequency_band: FrequencyBand) -> Self {
+    pub fn new(sampled_frequency_band: FrequencyBand) -> Self {
         Self {
             new_line: None,
             lines: VecDeque::new(),
             history: 10,
             color_map: ColorMap::default(),
-            input_frequency_band,
-            view_frequency_band: input_frequency_band,
+            sampled_frequency_band,
+            _view_frequency_band: sampled_frequency_band,
             downsampling: Downsampling::Average,
         }
     }
@@ -62,7 +62,7 @@ impl Waterfall {
     pub fn push(&mut self, spectrum: &[Complex<f32>]) {
         let line = self
             .new_line
-            .get_or_insert_with(|| NewLine::new(spectrum.len(), self.input_frequency_band));
+            .get_or_insert_with(|| NewLine::new(spectrum.len(), self.sampled_frequency_band));
 
         assert_eq!(line.samples.len(), spectrum.len(), "fft size changed");
         for i in 0..line.samples.len() {
@@ -95,55 +95,16 @@ impl<'a> Widget for WaterfallWidget<'a> {
     where
         Self: Sized,
     {
-        self.waterfall.history = area.height.saturating_sub(1).max(10).into();
-
-        /*let total_min_max = self.waterfall.min_max();
-        if let Some((min, max)) = total_min_max {
-            self.waterfall.color_map.min_z = min;
-            self.waterfall.color_map.max_z = max;
-        }*/
-
-        // render first line showing base frequency, center frequency and end frequency
-        for x in 0..area.width {
-            buf[(x + area.x, area.y)].reset();
-        }
-
-        let frequency_start =
-            human_units::si::Frequency::from_si(self.waterfall.view_frequency_band.start.into())
-                .format_si()
-                .to_string();
-        let frequency_center = human_units::si::Frequency::from_si(
-            ((self.waterfall.view_frequency_band.start + self.waterfall.view_frequency_band.end)
-                / 2)
-            .into(),
-        )
-        .format_si()
-        .to_string();
-        let frequency_center_pos =
-            area.x + (area.width - u16::try_from(frequency_center.len()).unwrap()) / 2;
-        let frequency_end =
-            human_units::si::Frequency::from_si(self.waterfall.view_frequency_band.end.into())
-                .format_si()
-                .to_string();
-        let frequency_end_pos = area.x + (area.width - u16::try_from(frequency_end.len()).unwrap());
-
-        if usize::from(area.width) > frequency_center.len() {
-            buf.set_string(frequency_center_pos, 0, &frequency_center, Color::White);
-        }
-        if usize::from(area.width)
-            > frequency_center.len() + frequency_start.len() + frequency_end.len() + 10
-        {
-            buf.set_string(0, 0, &frequency_start, Color::White);
-            buf.set_string(frequency_end_pos, 0, &frequency_end, Color::White);
-        }
+        self.waterfall.history = area.height.max(10).into();
 
         let mut mouse_over = None;
         let mut total_min_max = None;
 
         // render spectral density history
-        for y in 1..area.height {
-            if let Some(line) = self.waterfall.get_line((y - 1).into()) {
+        for y in 0..area.height {
+            if let Some(line) = self.waterfall.get_line(y.into()) {
                 // offset and len of samples we take from line.samples
+                // todo: take into account view_frequency_band
                 let samples_start = 0;
                 let samples_len = line.samples.len();
 
@@ -238,16 +199,16 @@ impl<'a> Widget for WaterfallWidget<'a> {
                 && usize::from(mouse_position.x) > text_width
             {
                 buf.set_string(
-                    mouse_position.x - u16::try_from(text_width).unwrap(),
-                    mouse_position.y,
+                    area.x + mouse_position.x - u16::try_from(text_width).unwrap(),
+                    area.y + mouse_position.y,
                     &text[2..],
                     Color::White,
                 );
             }
             else {
                 buf.set_string(
-                    mouse_position.x,
-                    mouse_position.y,
+                    area.x + mouse_position.x,
+                    area.y + mouse_position.y,
                     &text[..text_width + 2],
                     Color::White,
                 );
@@ -292,7 +253,9 @@ impl NewLine {
 
             // dB power spectral density
             // dividing by bin width and num samples, cancles out the num samples from both
-            // terms let normalize = 1.0 / (self.count as f32 * self.bin_width *
+            // terms
+
+            // let normalize = 1.0 / (self.count as f32 * self.bin_width *
             // self.samples.len() as f32);
             let normalize = 1.0 / (self.count as f32 * self.frequency_band.bandwidth() as f32);
 
@@ -339,7 +302,8 @@ impl Default for ColorMap {
         // -120 blue
         // 0 red
         // 120 green
-        Self::new(-120.0, 0.0)
+
+        Self::new(-120.0, 120.0)
     }
 }
 
@@ -364,7 +328,7 @@ impl ColorMap {
         //let saturation = lerp(scaled, 0.5, 1.0);
         let saturation = 1.0;
         //let lightness = lerp(scaled, 0.0, 0.8);
-        let lightness = lerp(scaled.powi(2), 0.1, 0.8);
+        let lightness = lerp(scaled, 0.0, 0.5);
         Color::from_hsl(Hsl::new(hue, saturation, lightness))
     }
 }

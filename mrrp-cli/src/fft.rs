@@ -17,12 +17,17 @@ pub struct Fft {
     window: Vec<f32>,
     fft: Arc<dyn rustfft::Fft<f32>>,
     size: usize,
-    normalization: f32,
 }
 
 impl Fft {
     pub fn new(size: usize, window: Window) -> Self {
-        assert!(size > 0);
+        assert!(size > 0, "Number of samples must be greater than 0: {size}");
+        // todo: should we support this? the bin at the center would contain an
+        // amplitude for -samplerate/2 and +samplerate/2 frequencies.
+        assert!(
+            size & 1 == 0,
+            "Number of samples must be divisble by 2: {size}"
+        );
 
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft_forward(size);
@@ -33,7 +38,6 @@ impl Fft {
             window: window.to_vec(size),
             fft,
             size,
-            normalization: 1.0 / (size as f32).sqrt(),
         }
     }
 
@@ -52,26 +56,14 @@ impl Fft {
         self.fft
             .process_with_scratch(&mut self.buffer, &mut self.scratch);
 
-        // the fft output needs to be normalized with 1/sqrt(n)
-        // todo: i need clarification about what this does exactly. as far as I can see
-        // this is undone in later normalization anyway.
-
-        // https://stackoverflow.com/questions/20165193/fft-normalization
-        // we will normalize later
-        //for x in &mut self.buffer {
-        //    *x *= self.normalization;
-        //}
+        // we do no normalization here. it will be done later.
 
         // center frequency will be in bin 0. right of center upto n/2 - 1. rest is left
         // of center, so we need to swap halves.
-        // of course we could combine this with the earlier normalization loop, but for
-        // clarity we'll keep it separate for now.
-        let upper_half_offset = self.size.div_ceil(2);
-        for i in 0..(self.size / 2) {
-            let j = upper_half_offset + i;
-            let tmp = self.buffer[i];
-            self.buffer[i] = self.buffer[j];
-            self.buffer[j] = tmp;
+        // we could also do this in the visualization.
+        let (left, right) = self.buffer.split_at_mut(self.size / 2);
+        for (left, right) in left.iter_mut().zip(right.iter_mut()) {
+            std::mem::swap(left, right);
         }
 
         &self.buffer

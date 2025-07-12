@@ -1,7 +1,7 @@
 pub mod fft;
 pub mod reader;
+pub mod ui;
 pub mod util;
-pub mod waterfall;
 
 use std::{
     fmt::Debug,
@@ -14,24 +14,17 @@ use clap::Parser;
 use color_eyre::eyre::{
     Error,
     bail,
-    eyre,
 };
 use crossterm::{
     event::{
         DisableMouseCapture,
         EnableMouseCapture,
-        Event,
         EventStream,
-        KeyCode,
-        MouseEventKind,
     },
     execute,
 };
 use futures_util::TryStreamExt;
-use ratatui::{
-    DefaultTerminal,
-    layout::Position,
-};
+use ratatui::DefaultTerminal;
 use rtlsdr_async::{
     Backend,
     RtlSdr,
@@ -45,8 +38,11 @@ use crate::{
         Window,
     },
     reader::SampleReader,
+    ui::{
+        Event,
+        Ui,
+    },
     util::FrequencyBand,
-    waterfall::Waterfall,
 };
 
 #[tokio::main]
@@ -65,15 +61,36 @@ async fn main() -> Result<(), Error> {
     // we need to get this before creating the terminal window, as librtlsdr just
     // prints stuff (how rude!).
     let result = match (&args.device, &args.address) {
-        (device_opt, None) => run_app(&args, RtlSdr::open(device_opt.unwrap_or_default())?).await,
-        (None, Some(address)) => run_app(&args, RtlTcpClient::connect(address).await?).await,
+        (device_opt, None) => {
+            let rtl_sdr = RtlSdr::open(device_opt.unwrap_or_default())?;
+            run_app(args, rtl_sdr).await
+        }
+        (None, Some(address)) => {
+            let rtl_tcp = RtlTcpClient::connect(address).await?;
+            run_app(args, rtl_tcp).await
+        }
         (Some(_), Some(_)) => bail!("Only either --device or --address can be used at once"),
     };
 
-    async fn run_app<B: Backend>(args: &Args, rtl_sdr: B) -> Result<(), Error>
+    async fn run_app<B: Backend>(args: Args, rtl_sdr: B) -> Result<(), Error>
     where
         <B as Backend>::Error: std::error::Error + Send + Sync + 'static,
     {
+        if args.fft_size == 0 {
+            bail!("FFT size must be greater than 0");
+        }
+        if args.fft_size & 1 == 1 {
+            bail!("FFT size must be a multiple of 2")
+        }
+        if args.fft_overlap >= args.fft_size {
+            bail!("FFT overlap must be less than FFT size");
+        }
+        if args.sample_rate & 1 == 1 {
+            // todo: we currently can't calculate the start and end frequency of the signal
+            // correctly in this case.
+            bail!("Sample rate must be divisble by 2");
+        }
+
         let terminal = ratatui::init();
         execute!(std::io::stdout(), EnableMouseCapture)?;
 
@@ -138,20 +155,20 @@ struct Args {
 struct App<B> {
     terminal: DefaultTerminal,
     scroll_interval: Duration,
-    waterfall: Waterfall,
-    exit: bool,
+
     #[allow(unused)]
     rtl_sdr: B,
     sample_reader: SampleReader,
     fft: Fft,
-    mouse_position: Option<Position>,
+
+    ui: Ui,
 }
 
 impl<B: Backend> App<B>
 where
     <B as Backend>::Error: std::error::Error + Send + Sync + 'static,
 {
-    async fn new(args: &Args, terminal: DefaultTerminal, rtl_sdr: B) -> Result<Self, Error> {
+    async fn new(args: Args, terminal: DefaultTerminal, rtl_sdr: B) -> Result<Self, Error> {
         let half_bandwidth = args.sample_rate / 2;
         let center_frequency = args.frequency.max(half_bandwidth);
         let sampled_frequency_band = FrequencyBand {
@@ -166,17 +183,13 @@ where
         let sample_reader =
             SampleReader::new(rtl_sdr.samples().await?, args.fft_size, args.fft_overlap);
 
-        let waterfall = Waterfall::new(sampled_frequency_band);
-
         Ok(Self {
             terminal,
             scroll_interval: Duration::from_millis(args.scroll_interval),
-            waterfall,
-            exit: false,
             rtl_sdr,
             sample_reader,
             fft: Fft::new(args.fft_size, args.fft_window),
-            mouse_position: None,
+            ui: Ui::new(sampled_frequency_band),
         })
     }
 
@@ -184,18 +197,18 @@ where
         let mut events = EventStream::new();
         let mut scroll_interval = tokio::time::interval(self.scroll_interval);
 
-        while !self.exit {
+        while !self.ui.exit_requested() {
             tokio::select! {
                 result = events.try_next() => {
                     let Some(event) = result?
                     else {
                         break;
                     };
-                    self.handle_event(event).await?;
+                    self.ui.handle_event(Event::Terminal(event));
                 }
                 _ = scroll_interval.tick() => {
-                    self.waterfall.scroll();
-                    self.draw()?;
+                    self.ui.handle_event(Event::ScrollWaterfall);
+                    self.terminal.draw(|frame| frame.render_widget(&mut self.ui, frame.area()))?;
                 }
                 result = self.sample_reader.read() => {
                     let Some(samples) = result?
@@ -204,49 +217,10 @@ where
                         break;
                     };
 
-                    // here is possibly a good place to get the center frequency and bandwith and
-                    // attach it to the fft
-
-                    self.waterfall.push(self.fft.forward(samples));
+                    let spectrum = self.fft.forward(samples);
+                    self.ui.handle_event(Event::Spectrum { spectrum, });
                 }
             }
-        }
-
-        Ok(())
-    }
-
-    fn draw(&mut self) -> Result<(), Error> {
-        self.terminal.draw(|frame| {
-            frame.render_widget(self.waterfall.widget(self.mouse_position), frame.area())
-        })?;
-        Ok(())
-    }
-
-    async fn handle_event(&mut self, event: Event) -> Result<(), Error> {
-        match event {
-            Event::Key(key_event) => {
-                match key_event.code {
-                    KeyCode::Char('q') => {
-                        self.exit = true;
-                    }
-                    _ => {}
-                }
-            }
-            Event::Mouse(mouse_event) => {
-                match mouse_event.kind {
-                    MouseEventKind::Moved => {
-                        self.mouse_position = Some(Position {
-                            x: mouse_event.column,
-                            y: mouse_event.row,
-                        });
-                    }
-                    _ => {}
-                }
-            }
-            Event::FocusLost => {
-                self.mouse_position = None;
-            }
-            _ => {}
         }
 
         Ok(())
@@ -272,11 +246,9 @@ impl FromStr for Gain {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s == "auto" {
-            Ok(Self::Auto)
-        }
-        else {
-            Ok(Self::Value(s.parse()?))
+        match s {
+            "auto" => Ok(Self::Auto),
+            _ => Ok(Self::Value(s.parse()?)),
         }
     }
 }
