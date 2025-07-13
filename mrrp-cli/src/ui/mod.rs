@@ -19,6 +19,10 @@ use ratatui::{
     },
     widgets::Widget,
 };
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 use crate::{
     app::AppProxy,
@@ -30,13 +34,30 @@ use crate::{
         frequency_dial::FrequencyDial,
         frequency_marks::FrequencyMarks,
         keybinds::Keybinds,
-        waterfall::Waterfall,
+        waterfall::{
+            WaterfallState,
+            WaterfallWidget,
+        },
     },
-    util::{
-        FrequencyBand,
-        StaticOrArc,
-    },
+    util::FrequencyBand,
 };
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UiState {
+    view_frequency_band: FrequencyBand,
+    zoom_level: u32,
+    waterfall_state: WaterfallState,
+}
+
+impl UiState {
+    pub fn new(view_frequency_band: FrequencyBand) -> Self {
+        Self {
+            view_frequency_band,
+            zoom_level: 0,
+            waterfall_state: WaterfallState::default(),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct Ui {
@@ -46,17 +67,20 @@ pub struct Ui {
     exit_requested: bool,
 
     keybinds: Keybinds,
+    bandplan: Bandplan,
     sampled_frequency_band: FrequencyBand,
-    view_frequency_band: FrequencyBand,
-    zoom_level: u32,
     bandwidth_resolution: f32,
 
-    waterfall: Waterfall,
-    bandplan: StaticOrArc<Bandplan>,
+    state: UiState,
 }
 
 impl Ui {
-    pub fn new(sampled_frequency_band: FrequencyBand) -> Self {
+    pub fn new(
+        sampled_frequency_band: FrequencyBand,
+        keybinds: Keybinds,
+        bandplan: Bandplan,
+        ui_state: Option<UiState>,
+    ) -> Self {
         Self {
             layout: Layout::vertical([
                 Constraint::Length(3),
@@ -66,14 +90,16 @@ impl Ui {
             ]),
             mouse_position: None,
             exit_requested: false,
-            keybinds: Keybinds::default(),
+            keybinds,
             sampled_frequency_band,
-            view_frequency_band: sampled_frequency_band,
-            zoom_level: 0,
             bandwidth_resolution: 1.0,
-            waterfall: Waterfall::new(sampled_frequency_band),
-            bandplan: Bandplan::international().into(),
+            bandplan,
+            state: ui_state.unwrap_or_else(|| UiState::new(sampled_frequency_band)),
         }
+    }
+
+    pub fn state(&self) -> &UiState {
+        &self.state
     }
 
     fn mouse_position_inside_area(&self, area: Rect) -> Option<Position> {
@@ -95,14 +121,14 @@ impl Ui {
         match event {
             UiEvent::Terminal(event) => self.handle_terminal_event(event, app),
             UiEvent::ScrollWaterfall => {
-                self.waterfall.scroll();
+                self.state.waterfall_state.scroll();
             }
             UiEvent::Spectrum {
                 spectrum,
                 frequency_band,
             } => {
                 self.sampled_frequency_band = frequency_band;
-                self.waterfall.push(spectrum, frequency_band);
+                self.state.waterfall_state.push(spectrum, frequency_band);
             }
         }
     }
@@ -148,7 +174,7 @@ impl Ui {
     }
 
     fn zoom_view(&mut self, delta: i32) {
-        self.zoom_level = self.zoom_level.saturating_add_signed(delta).min(30);
+        self.state.zoom_level = self.state.zoom_level.saturating_add_signed(delta).min(30);
 
         // the sampled bandwidth corresponds to zoom 0
         let half = self.sampled_frequency_band.bandwidth() / 2;
@@ -157,16 +183,16 @@ impl Ui {
         //let half_visible = half / (1 + self.zoom_level);
 
         // exponential zoom
-        let half_visible = half / (1 << self.zoom_level);
+        let half_visible = half / (1 << self.state.zoom_level);
 
         // keep center, but adjust visible bandwidth
-        let center = self.view_frequency_band.center();
-        self.view_frequency_band.start = center - half_visible;
-        self.view_frequency_band.end = center + half_visible;
+        let center = self.state.view_frequency_band.center();
+        self.state.view_frequency_band.start = center - half_visible;
+        self.state.view_frequency_band.end = center + half_visible;
     }
 
     fn move_view(&mut self, direction: i32, big_step: bool) {
-        let bandwidth = self.view_frequency_band.bandwidth();
+        let bandwidth = self.state.view_frequency_band.bandwidth();
 
         let step_size = if big_step {
             // move half the bandwidth
@@ -178,16 +204,17 @@ impl Ui {
             bandwidth as i32 / 16
         };
 
-        self.view_frequency_band.start = self
+        self.state.view_frequency_band.start = self
+            .state
             .view_frequency_band
             .start
             .saturating_add_signed(direction * step_size);
-        self.view_frequency_band.end = self.view_frequency_band.start + bandwidth;
+        self.state.view_frequency_band.end = self.state.view_frequency_band.start + bandwidth;
     }
 
     fn center_view(&mut self) {
-        self.zoom_level = 0;
-        self.view_frequency_band = self.sampled_frequency_band;
+        self.state.zoom_level = 0;
+        self.state.view_frequency_band = self.sampled_frequency_band;
     }
 }
 
@@ -210,24 +237,26 @@ impl Widget for &mut Ui {
         .render(controls_area, buf);
 
         FrequencyMarks {
-            view_frequency_band: self.view_frequency_band,
+            view_frequency_band: self.state.view_frequency_band,
         }
         .render(frequencies_area, buf);
 
         BandplanWidget {
             bandplan: &self.bandplan,
-            view_frequency_band: self.view_frequency_band,
+            view_frequency_band: self.state.view_frequency_band,
         }
         .render(bandplan_area, buf);
 
-        self.waterfall
-            .widget(
-                self.view_frequency_band,
-                self.mouse_position_inside_area(waterfall_area),
-            )
-            .render(waterfall_area, buf);
+        let waterfall_mouse_position = self.mouse_position_inside_area(waterfall_area);
+        WaterfallWidget {
+            waterfall: &mut self.state.waterfall_state,
+            view_frequency_band: self.state.view_frequency_band,
+            mouse_position: waterfall_mouse_position,
+        }
+        .render(waterfall_area, buf);
 
-        self.bandwidth_resolution = self.view_frequency_band.bandwidth() as f32 / area.width as f32;
+        self.bandwidth_resolution =
+            self.state.view_frequency_band.bandwidth() as f32 / area.width as f32;
     }
 }
 

@@ -1,11 +1,16 @@
 use std::{
     borrow::Cow,
     convert::identity,
-    io::Read,
+    fs::File,
+    io::{
+        BufReader,
+        Read,
+    },
     ops::{
         Bound,
         RangeBounds,
     },
+    path::Path,
     sync::OnceLock,
 };
 
@@ -27,6 +32,8 @@ use serde::{
 
 use crate::util::FrequencyBand;
 
+pub(crate) const BANDPLAN_INTERNATIONAL_BYTES: &'static [u8] = include_bytes!("bandplan.csv");
+
 #[derive(Clone, Debug)]
 pub struct Bandplan {
     bands: Vec<Band>,
@@ -47,6 +54,11 @@ impl Bandplan {
             .filter_map(Result::ok)
             .filter(|band| !band.name.is_empty())
             .collect())
+    }
+
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
+        tracing::debug!(path = %path.as_ref().display(), "Loading bandplan from file");
+        Ok(Bandplan::from_reader(BufReader::new(File::open(path)?))?)
     }
 
     #[inline]
@@ -103,7 +115,7 @@ impl Bandplan {
     pub fn international() -> &'static Self {
         static INTERNATIONAL: OnceLock<Bandplan> = OnceLock::new();
         INTERNATIONAL.get_or_init(|| {
-            Self::from_reader(&include_bytes!("bandplan.csv")[..])
+            Self::from_reader(BANDPLAN_INTERNATIONAL_BYTES)
                 .expect("Failed to parse builtin international bandplan")
         })
     }

@@ -3,7 +3,11 @@ use std::{
     time::Duration,
 };
 
-use color_eyre::eyre::Error;
+use color_eyre::eyre::{
+    Error,
+    bail,
+};
+use crossterm::execute;
 use futures_util::TryStreamExt;
 use ratatui::DefaultTerminal;
 use rtlsdr_async::Backend;
@@ -13,18 +17,22 @@ use tokio::{
 };
 
 use crate::{
-    args::Args,
+    args::MainArgs,
     fft::Fft,
+    files::AppFiles,
     reader::SampleReader,
     ui::{
         Ui,
         UiEvent,
+        bandplan::Bandplan,
+        keybinds::Keybinds,
     },
     util::FrequencyBand,
 };
 
 #[derive(Debug)]
 pub struct App<B> {
+    app_files: AppFiles,
     app_events: mpsc::UnboundedReceiver<AppEvent>,
     proxy: AppProxy,
     scroll_interval: Interval,
@@ -44,7 +52,39 @@ where
     B: Backend + Send + Clone + 'static,
     <B as Backend>::Error: std::error::Error + Send + Sync + 'static,
 {
-    pub async fn new(args: Args, terminal: DefaultTerminal, rtl_sdr: B) -> Result<Self, Error> {
+    pub async fn new(args: MainArgs, app_files: AppFiles, rtl_sdr: B) -> Result<Self, Error> {
+        if args.fft_size == 0 {
+            bail!("FFT size must be greater than 0");
+        }
+        if args.fft_size & 1 == 1 {
+            bail!("FFT size must be a multiple of 2")
+        }
+        if args.fft_overlap >= args.fft_size {
+            bail!("FFT overlap must be less than FFT size");
+        }
+        if args.sample_rate & 1 == 1 {
+            // todo: we currently can't calculate the start and end frequency of the signal
+            // correctly in this case.
+            bail!("Sample rate must be divisble by 2");
+        }
+
+        let keybinds = if let Some(path) = &args.keybinds {
+            Keybinds::from_path(path)?
+        }
+        else {
+            app_files.keybinds()?
+        };
+
+        let bandplan = if let Some(path) = &args.bandplan {
+            Bandplan::from_path(path)?
+        }
+        else {
+            app_files.bandplan()?
+        };
+
+        let terminal = ratatui::init();
+        crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
+
         let sampled_frequency_band = sampled_frequency_band(args.frequency, args.sample_rate);
 
         rtl_sdr
@@ -60,7 +100,20 @@ where
 
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
+        let ui_state = (!args.reset_ui)
+            .then(|| {
+                app_files
+                    .load_ui_state()
+                    .inspect_err(|error| tracing::warn!(?error, "Failed to load UI state"))
+                    .ok()
+                    .map(|snapshot| snapshot.state)
+            })
+            .flatten();
+
+        let ui = Ui::new(sampled_frequency_band, keybinds, bandplan, ui_state);
+
         Ok(Self {
+            app_files,
             app_events: event_receiver,
             proxy: AppProxy { event_sender },
             scroll_interval: tokio::time::interval(Duration::from_millis(args.scroll_interval)),
@@ -70,7 +123,7 @@ where
             fft: Fft::new(args.fft_size, args.fft_window),
             terminal,
             terminal_events,
-            ui: Ui::new(sampled_frequency_band),
+            ui,
             exit_requested: false,
             redraw_interval: tokio::time::interval(Duration::from_millis(args.redraw_interval)),
         })
@@ -118,6 +171,11 @@ where
         Ok(())
     }
 
+    pub fn persist(self) -> Result<(), Error> {
+        self.app_files.save_ui_state(self.ui.state())?;
+        Ok(())
+    }
+
     fn handle_event(&mut self, event: AppEvent) -> Result<(), Error> {
         match event {
             AppEvent::Error { error } => return Err(error),
@@ -155,6 +213,13 @@ where
         }
 
         Ok(())
+    }
+}
+
+impl<B> Drop for App<B> {
+    fn drop(&mut self) {
+        let _ = execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
+        ratatui::restore();
     }
 }
 

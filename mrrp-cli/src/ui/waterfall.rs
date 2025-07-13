@@ -15,6 +15,10 @@ use ratatui::{
     style::Color,
     widgets::Widget,
 };
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 use crate::util::{
     FrequencyBand,
@@ -25,11 +29,13 @@ use crate::util::{
     unlerp,
 };
 
-#[derive(Debug)]
-pub struct Waterfall {
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WaterfallState {
     new_line: Option<NewLine>,
     lines: Lines,
-    sampled_frequency_band: FrequencyBand,
+
+    // todo: should this be in the state?
+    #[serde(skip, default = "default_cache")]
     cache: Option<Cache>,
 
     // todo: move this into the widget?
@@ -37,19 +43,23 @@ pub struct Waterfall {
     downsampling: Downsampling,
 }
 
-impl Waterfall {
-    pub fn new(sampled_frequency_band: FrequencyBand) -> Self {
+fn default_cache() -> Option<Cache> {
+    Some(Cache::default())
+}
+
+impl Default for WaterfallState {
+    fn default() -> Self {
         Self {
             new_line: None,
             lines: Lines::new(10),
             color_map: ColorMap::default(),
-            sampled_frequency_band,
-            cache: Some(Cache::default()),
-            //cache: None,
+            cache: default_cache(),
             downsampling: Downsampling::Average,
         }
     }
+}
 
+impl WaterfallState {
     pub fn scroll(&mut self) {
         if let Some(line) = self.new_line.take() {
             if let Some(line) = line.into_line() {
@@ -63,46 +73,34 @@ impl Waterfall {
     }
 
     pub fn push(&mut self, spectrum: &[Complex<f32>], sampled_frequency_band: FrequencyBand) {
-        if sampled_frequency_band != self.sampled_frequency_band {
-            self.scroll();
-            self.sampled_frequency_band = sampled_frequency_band;
-            panic!("not yet!");
+        if let Some(new_line) = &mut self.new_line {
+            if new_line.frequency_band != sampled_frequency_band {
+                self.scroll();
+            }
         }
 
-        let line = self
+        let new_line = self
             .new_line
-            .get_or_insert_with(|| NewLine::new(spectrum.len(), self.sampled_frequency_band));
+            .get_or_insert_with(|| NewLine::new(spectrum.len(), sampled_frequency_band));
 
-        assert_eq!(line.samples.len(), spectrum.len(), "fft size changed");
+        assert_eq!(new_line.samples.len(), spectrum.len(), "fft size changed");
         assert_eq!(
-            sampled_frequency_band, self.sampled_frequency_band,
+            sampled_frequency_band, new_line.frequency_band,
             "sampled frequency band mismatch"
         );
 
-        for i in 0..line.samples.len() {
-            line.samples[i] += spectrum[i].norm_sqr();
+        for i in 0..new_line.samples.len() {
+            new_line.samples[i] += spectrum[i].norm_sqr();
         }
-        line.count += 1;
-    }
-
-    pub fn widget<'a>(
-        &'a mut self,
-        view_frequency_band: FrequencyBand,
-        mouse_position: Option<Position>,
-    ) -> WaterfallWidget<'a> {
-        WaterfallWidget {
-            waterfall: self,
-            view_frequency_band,
-            mouse_position,
-        }
+        new_line.count += 1;
     }
 }
 
 #[derive(Debug)]
 pub struct WaterfallWidget<'a> {
-    waterfall: &'a mut Waterfall,
-    view_frequency_band: FrequencyBand,
-    mouse_position: Option<Position>,
+    pub waterfall: &'a mut WaterfallState,
+    pub view_frequency_band: FrequencyBand,
+    pub mouse_position: Option<Position>,
 }
 
 impl<'a> Widget for WaterfallWidget<'a> {
@@ -250,7 +248,7 @@ impl<'a> Widget for WaterfallWidget<'a> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct NewLine {
     samples: Vec<f32>,
     count: usize,
@@ -311,14 +309,14 @@ impl NewLine {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Line {
     samples: Vec<f32>,
     frequency_band: FrequencyBand,
     bin_width: f32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ColorMap {
     min_z: f32,
     max_z: f32,
@@ -369,7 +367,7 @@ impl ColorMap {
 // todo: this must be carefully choosen if we want conserved quantities.
 // basically if we're doing density this should be average, min or max.
 // otherwise sum.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Downsampling {
     Sum,
     Average,
@@ -395,7 +393,7 @@ fn clear_cell(cell: &mut Cell) {
     cell.bg = Srgb::<f32>::default().into();
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct Lines {
     lines: VecDeque<Line>,
     history: usize,

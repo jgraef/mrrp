@@ -1,14 +1,38 @@
-use std::str::FromStr;
+use std::{
+    path::PathBuf,
+    str::FromStr,
+};
 
-use clap::Parser;
+use clap::FromArgMatches;
 
 use crate::{
     Error,
     fft::Window,
 };
 
-#[derive(Debug, Parser)]
+#[derive(Debug, clap::Parser)]
 pub struct Args {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+#[derive(Debug, clap::Subcommand)]
+pub enum Command {
+    #[clap(name = "tui")]
+    Main(MainArgs),
+}
+
+impl Default for Command {
+    fn default() -> Self {
+        Self::Main(
+            MainArgs::from_arg_matches(&Default::default())
+                .expect("bug: MainArgs wasn't parsed from empty args"),
+        )
+    }
+}
+
+#[derive(Debug, clap::Args)]
+pub struct MainArgs {
     /// Device index to use. If neither this or --address is specified, the
     /// first device is used.
     #[clap(short, long)]
@@ -37,6 +61,17 @@ pub struct Args {
     #[clap(long, default_value = "100")]
     pub redraw_interval: u64,
 
+    /// Don't load the previous UI state from file.
+    #[clap(long)]
+    pub reset_ui: bool,
+
+    /// Use the specified file instead of the default bandplan
+    #[clap(long)]
+    pub bandplan: Option<PathBuf>,
+
+    /// Use the specified file instead of the default keybinds
+    pub keybinds: Option<PathBuf>,
+
     /// Size of segments that are FFT'd
     #[clap(long, default_value = "16384")]
     pub fft_size: usize,
@@ -45,7 +80,7 @@ pub struct Args {
     #[clap(long, default_value = "0")]
     pub fft_overlap: usize,
 
-    #[clap(long, default_value = "hann")]
+    #[clap(long, default_value = "boxcar")]
     pub fft_window: Window,
 }
 
