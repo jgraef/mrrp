@@ -23,6 +23,12 @@ impl FrequencyBand {
     pub fn bandwidth(&self) -> u32 {
         self.end - self.start
     }
+
+    pub fn intersection(&self, other: &Self) -> Option<Self> {
+        let start = self.start.max(other.start);
+        let end = self.end.min(other.end);
+        (start < end).then(|| Self { start, end })
+    }
 }
 
 impl RangeBounds<u32> for FrequencyBand {

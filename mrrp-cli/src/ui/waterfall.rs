@@ -77,7 +77,7 @@ impl Waterfall {
     ) -> WaterfallWidget<'_> {
         WaterfallWidget {
             waterfall: self,
-            _view_frequency_band: view_frequency_band,
+            view_frequency_band,
             mouse_position,
         }
     }
@@ -90,7 +90,7 @@ impl Waterfall {
 #[derive(Debug)]
 pub struct WaterfallWidget<'a> {
     waterfall: &'a mut Waterfall,
-    _view_frequency_band: FrequencyBand,
+    view_frequency_band: FrequencyBand,
     mouse_position: Option<Position>,
 }
 
@@ -103,33 +103,32 @@ impl<'a> Widget for WaterfallWidget<'a> {
 
         let mut mouse_over = None;
         let mut total_min_max = None;
+        let display_bin_width = self.view_frequency_band.bandwidth() as f32 / area.width as f32;
 
         // render spectral density history
         for y in 0..area.height {
             if let Some(line) = self.waterfall.get_line(y.into()) {
-                // offset and len of samples we take from line.samples
-                // todo: take into account view_frequency_band
-                let samples_start = 0;
-                let samples_len = line.samples.len();
+                for x in 0..area.width {
+                    let start_frequency =
+                        self.view_frequency_band.start as f32 + x as f32 * display_bin_width;
+                    let end_frequency =
+                        self.view_frequency_band.start as f32 + (x + 1) as f32 * display_bin_width;
 
-                // how many samples we render
-                let display_len = usize::from(area.width);
+                    let start_line_index = (((start_frequency - line.frequency_band.start as f32)
+                        / line.bin_width)
+                        .max(0.0) as usize)
+                        .min(line.samples.len());
 
-                if display_len < samples_len {
-                    for i in 0..display_len {
-                        // sum into one value
-                        // todo: what is the expected behavior here? sum or average?
-                        // okay, we average here now. otherwise the auto-scaling for the color-map
-                        // doesn't match.
-                        let j1 = i * samples_len / display_len + samples_start;
-                        let j2 = (i + 1) * samples_len / display_len + samples_start;
-                        assert!(j2 > j1);
+                    let end_line_index = (((end_frequency - line.frequency_band.start as f32)
+                        / line.bin_width)
+                        .max(0.0) as usize)
+                        .min(line.samples.len());
 
-                        let samples = &line.samples[j1..j2];
+                    if start_line_index < end_line_index {
+                        let samples = &line.samples[start_line_index..end_line_index];
                         let z = self.waterfall.downsampling.apply(samples);
 
                         // render to cell
-                        let x = u16::try_from(i).unwrap();
                         buf[(area.x + x, area.y + y)].bg = self.waterfall.color_map.map(z);
 
                         // track min max
@@ -156,25 +155,18 @@ impl<'a> Widget for WaterfallWidget<'a> {
                             mouse_over = Some((
                                 z,
                                 FrequencyBand {
-                                    start: (j1 as f32 * line.bin_width) as u32
-                                        + line.frequency_band.start,
-                                    end: (j2 as f32 * line.bin_width) as u32
-                                        + line.frequency_band.start,
+                                    start: start_frequency as u32,
+                                    end: end_frequency as u32,
                                 },
                             ));
                         }
                     }
-                }
-                else {
-                    // todo: basically do the opposite of the code above - filling multiple cells
-                    // from one sample
-                    tracing::debug!(line_samples = line.samples.len(), samples_len, "todo");
-                    todo!();
+                    else {
+                        buf[(x + area.x, y + area.y)].reset();
+                    }
                 }
             }
             else {
-                // we basically only need to do this once when we render first, but this also
-                // won't run once the screen is filled.
                 for x in 0..area.width {
                     buf[(x + area.x, y + area.y)].reset();
                 }
@@ -327,12 +319,12 @@ impl ColorMap {
     }
 
     pub fn map(&self, z: f32) -> Color {
-        let scaled = ((z - self.min_z) / (self.max_z - self.min_z)).clamp(0.0, 1.0);
-        let hue = lerp(scaled, self.hue_low, self.hue_high);
+        let normalized = ((z - self.min_z) / (self.max_z - self.min_z)).clamp(0.0, 1.0);
+        let hue = lerp(normalized, self.hue_low, self.hue_high);
         //let saturation = lerp(scaled, 0.5, 1.0);
         let saturation = 1.0;
         //let lightness = lerp(scaled, 0.0, 0.8);
-        let lightness = lerp(scaled, 0.0, 0.5);
+        let lightness = lerp(normalized.powf(1.5), 0.0, 0.5);
         Color::from_hsl(Hsl::new(hue, saturation, lightness))
     }
 }

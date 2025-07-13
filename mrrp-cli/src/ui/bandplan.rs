@@ -177,30 +177,29 @@ impl<'a> Widget for BandplanWidget<'a> {
     where
         Self: Sized,
     {
-        if area.height == 0 {
-            return;
-        }
+        if area.height > 0 {
+            let cells_per_hz = area.width as f32 / self.view_frequency_band.bandwidth() as f32;
 
-        let cells_per_hz = area.width as f32 / self.view_frequency_band.bandwidth() as f32;
+            for band in self.bandplan.range(self.view_frequency_band) {
+                let cell_start = ((band.start.saturating_sub(self.view_frequency_band.start))
+                    as f32
+                    * cells_per_hz) as u16;
+                let cell_end = ((band.end.min(self.view_frequency_band.end)
+                    - self.view_frequency_band.start) as f32
+                    * cells_per_hz) as u16;
 
-        for band in self.bandplan.range(self.view_frequency_band) {
-            let cell_start = ((band.start.saturating_sub(self.view_frequency_band.start)) as f32
-                * cells_per_hz) as u16;
-            let cell_end = ((band.end.min(self.view_frequency_band.end)
-                - self.view_frequency_band.start) as f32
-                * cells_per_hz) as u16;
+                for x in cell_start..cell_end {
+                    buf[(area.x + x, area.y)].bg = band.color.color.into();
+                }
 
-            for x in cell_start..cell_end {
-                buf[(area.x + x, area.y)].bg = band.color.color.into();
+                buf.set_stringn(
+                    area.x + cell_start,
+                    area.y,
+                    &band.name,
+                    (cell_end - cell_start).into(),
+                    Color::White,
+                );
             }
-
-            buf.set_stringn(
-                area.x + cell_start,
-                area.y,
-                &band.name,
-                (cell_end - cell_start).into(),
-                Color::White,
-            );
         }
     }
 }

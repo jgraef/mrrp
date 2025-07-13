@@ -116,6 +116,9 @@ impl Ui {
                     KeyCode::Right => {
                         self.shift(1, key_event.modifiers.contains(KeyModifiers::SHIFT));
                     }
+                    KeyCode::Char('r') => {
+                        self.reset();
+                    }
                     _ => {}
                 }
             }
@@ -164,7 +167,8 @@ impl Ui {
         }
         else {
             // move one cell worth of bandwidth
-            self.bandwidth_resolution.ceil() as i32
+            //self.bandwidth_resolution.ceil() as i32
+            bandwidth as i32 / 16
         };
 
         self.view_frequency_band.start = self
@@ -172,6 +176,11 @@ impl Ui {
             .start
             .saturating_add_signed(direction * step_size);
         self.view_frequency_band.end = self.view_frequency_band.start + bandwidth;
+    }
+
+    fn reset(&mut self) {
+        self.zoom_level = 0;
+        self.view_frequency_band = self.sampled_frequency_band;
     }
 }
 
