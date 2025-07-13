@@ -13,7 +13,10 @@ use std::{
 };
 
 use color_eyre::eyre::Error;
-use palette::Srgba;
+use palette::{
+    Srgba,
+    color_difference::Wcag21RelativeContrast,
+};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -49,6 +52,7 @@ impl Bandplan {
         Ok(reader
             .deserialize::<Band>()
             .filter_map(Result::ok)
+            .filter(|band| !band.name.is_empty())
             .collect())
     }
 
@@ -192,12 +196,19 @@ impl<'a> Widget for BandplanWidget<'a> {
                     buf[(area.x + x, area.y)].bg = band.color.color.into();
                 }
 
+                let text_color = if band.color.color.relative_luminance().luma > 0.5 {
+                    Color::Black
+                }
+                else {
+                    Color::White
+                };
+
                 buf.set_stringn(
                     area.x + cell_start,
                     area.y,
                     &band.name,
                     (cell_end - cell_start).into(),
-                    Color::White,
+                    text_color,
                 );
             }
         }
