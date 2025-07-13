@@ -21,6 +21,7 @@ use ratatui::{
 };
 
 use crate::{
+    app::AppProxy,
     ui::{
         bandplan::{
             Bandplan,
@@ -85,24 +86,28 @@ impl Ui {
         self.exit_requested
     }
 
-    pub fn handle_event(&mut self, event: Event) {
+    pub fn handle_event(&mut self, event: UiEvent, app: &AppProxy) {
         match event {
-            Event::Terminal(event) => self.handle_terminal_event(event),
-            Event::ScrollWaterfall => {
+            UiEvent::Terminal(event) => self.handle_terminal_event(event, app),
+            UiEvent::ScrollWaterfall => {
                 self.waterfall.scroll();
             }
-            Event::Spectrum { spectrum } => {
-                self.waterfall.push(spectrum);
+            UiEvent::Spectrum {
+                spectrum,
+                frequency_band,
+            } => {
+                self.sampled_frequency_band = frequency_band;
+                self.waterfall.push(spectrum, frequency_band);
             }
         }
     }
 
-    fn handle_terminal_event(&mut self, event: crossterm::event::Event) {
+    fn handle_terminal_event(&mut self, event: crossterm::event::Event, app: &AppProxy) {
         match event {
             TerminalEvent::Key(key_event) => {
                 match key_event.code {
                     KeyCode::Char('q') => {
-                        self.exit_requested = true;
+                        app.request_exit();
                     }
                     KeyCode::Char('+') => {
                         self.zoom(1);
@@ -129,6 +134,12 @@ impl Ui {
                             x: mouse_event.column,
                             y: mouse_event.row,
                         });
+                    }
+                    MouseEventKind::ScrollDown => {
+                        self.zoom(-1);
+                    }
+                    MouseEventKind::ScrollUp => {
+                        self.zoom(1);
                     }
                     _ => {}
                 }
@@ -214,8 +225,11 @@ impl Widget for &mut Ui {
 }
 
 #[derive(Debug)]
-pub enum Event<'a> {
+pub enum UiEvent<'a> {
     Terminal(TerminalEvent),
     ScrollWaterfall,
-    Spectrum { spectrum: &'a [Complex<f32>] },
+    Spectrum {
+        spectrum: &'a [Complex<f32>],
+        frequency_band: FrequencyBand,
+    },
 }

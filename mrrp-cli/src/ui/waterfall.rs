@@ -2,8 +2,12 @@ use std::collections::VecDeque;
 
 use human_units::si::FormatSi;
 use num_complex::Complex;
+use palette::Srgb;
 use ratatui::{
-    buffer::Buffer,
+    buffer::{
+        Buffer,
+        Cell,
+    },
     layout::{
         Position,
         Rect,
@@ -23,9 +27,9 @@ use crate::util::{
 #[derive(Debug)]
 pub struct Waterfall {
     new_line: Option<NewLine>,
-    lines: VecDeque<Line>,
-    history: usize,
+    lines: Lines,
     sampled_frequency_band: FrequencyBand,
+    cache: Option<Cache>,
 
     // todo: move this into the widget?
     color_map: ColorMap,
@@ -36,54 +40,60 @@ impl Waterfall {
     pub fn new(sampled_frequency_band: FrequencyBand) -> Self {
         Self {
             new_line: None,
-            lines: VecDeque::new(),
-            history: 10,
+            lines: Lines::new(10),
             color_map: ColorMap::default(),
             sampled_frequency_band,
+            cache: Some(Cache::new(sampled_frequency_band)),
+            //cache: None,
             downsampling: Downsampling::Average,
         }
     }
 
     pub fn scroll(&mut self) {
         if let Some(line) = self.new_line.take() {
-            while self.lines.len() >= self.history && !self.lines.is_empty() {
-                // todo: reuse those poor buffers :cryring:
-                self.lines.pop_front();
-            }
-
             if let Some(line) = line.into_line() {
-                self.lines.push_back(line);
+                self.lines.push(line);
+
+                if let Some(cache) = &mut self.cache {
+                    cache.scroll(self.lines.history);
+                }
             }
         }
     }
 
-    pub fn push(&mut self, spectrum: &[Complex<f32>]) {
+    pub fn push(&mut self, spectrum: &[Complex<f32>], sampled_frequency_band: FrequencyBand) {
+        if sampled_frequency_band != self.sampled_frequency_band {
+            self.scroll();
+            self.sampled_frequency_band = sampled_frequency_band;
+            panic!("not yet!");
+        }
+
         let line = self
             .new_line
             .get_or_insert_with(|| NewLine::new(spectrum.len(), self.sampled_frequency_band));
 
         assert_eq!(line.samples.len(), spectrum.len(), "fft size changed");
+        assert_eq!(
+            sampled_frequency_band, self.sampled_frequency_band,
+            "sampled frequency band mismatch"
+        );
+
         for i in 0..line.samples.len() {
             line.samples[i] += spectrum[i].norm_sqr();
         }
-
         line.count += 1;
     }
 
-    pub fn widget(
-        &mut self,
+    pub fn widget<'a>(
+        &'a mut self,
         view_frequency_band: FrequencyBand,
         mouse_position: Option<Position>,
-    ) -> WaterfallWidget<'_> {
+    ) -> WaterfallWidget<'a> {
         WaterfallWidget {
             waterfall: self,
             view_frequency_band,
             mouse_position,
         }
-    }
-
-    fn get_line(&self, i: usize) -> Option<&Line> {
-        self.lines.len().checked_sub(i + 1).map(|i| &self.lines[i])
     }
 }
 
@@ -99,76 +109,103 @@ impl<'a> Widget for WaterfallWidget<'a> {
     where
         Self: Sized,
     {
-        self.waterfall.history = area.height.max(10).into();
+        self.waterfall.lines.history = area.height.max(10).into();
 
         let mut mouse_over = None;
         let mut total_min_max = None;
         let display_bin_width = self.view_frequency_band.bandwidth() as f32 / area.width as f32;
 
+        let sample_spectrum = |x: u16, line: &Line| {
+            let start_frequency =
+                self.view_frequency_band.start as f32 + x as f32 * display_bin_width;
+            let end_frequency =
+                self.view_frequency_band.start as f32 + (x + 1) as f32 * display_bin_width;
+
+            let start_line_index = (((start_frequency - line.frequency_band.start as f32)
+                / line.bin_width)
+                .max(0.0) as usize)
+                .min(line.samples.len());
+
+            let end_line_index = (((end_frequency - line.frequency_band.start as f32)
+                / line.bin_width)
+                .ceil()
+                .max(0.0) as usize)
+                .min(line.samples.len());
+
+            (start_line_index < end_line_index).then(|| {
+                let samples = &line.samples[start_line_index..end_line_index];
+                self.waterfall.downsampling.apply(samples)
+            })
+        };
+
+        let mut render_cell = |x, y, z, buf: &mut Buffer| {
+            if let Some(z) = z {
+                // render to cell
+                buf[(area.x + x, area.y + y)].bg = self.waterfall.color_map.map(z);
+
+                // track min max
+                if let Some((min, max)) = &mut total_min_max {
+                    assert!(
+                        z.is_finite(),
+                        "so z can be infinite. interesting. i mean of course it can. it comes out of a log"
+                    );
+                    if z < *min {
+                        *min = z;
+                    }
+                    if z > *max {
+                        *max = z;
+                    }
+                }
+                else {
+                    total_min_max = Some((z, z));
+                }
+
+                // get mouse over info if the mouse is over this cell
+                if self.mouse_position.map_or(false, |mouse_position| {
+                    mouse_position.x == x && mouse_position.y == y
+                }) {
+                    let start_frequency = (self.view_frequency_band.start as f32
+                        + x as f32 * display_bin_width)
+                        as u32;
+                    let end_frequency = (self.view_frequency_band.start as f32
+                        + (x + 1) as f32 * display_bin_width)
+                        as u32;
+
+                    mouse_over = Some((
+                        z,
+                        FrequencyBand {
+                            start: start_frequency,
+                            end: end_frequency,
+                        },
+                    ));
+                }
+            }
+            else {
+                clear_cell(&mut buf[(x + area.x, y + area.y)]);
+            }
+        };
+
         // render spectral density history
         for y in 0..area.height {
-            if let Some(line) = self.waterfall.get_line(y.into()) {
-                for x in 0..area.width {
-                    let start_frequency =
-                        self.view_frequency_band.start as f32 + x as f32 * display_bin_width;
-                    let end_frequency =
-                        self.view_frequency_band.start as f32 + (x + 1) as f32 * display_bin_width;
+            if let Some(line) = self.waterfall.lines.get_line(y.into()) {
+                if let Some(cache) = &mut self.waterfall.cache {
+                    let cache_line = cache.get_line(y, area.width, self.view_frequency_band, |x| {
+                        sample_spectrum(x, line)
+                    });
 
-                    let start_line_index = (((start_frequency - line.frequency_band.start as f32)
-                        / line.bin_width)
-                        .max(0.0) as usize)
-                        .min(line.samples.len());
-
-                    let end_line_index = (((end_frequency - line.frequency_band.start as f32)
-                        / line.bin_width)
-                        .max(0.0) as usize)
-                        .min(line.samples.len());
-
-                    if start_line_index < end_line_index {
-                        let samples = &line.samples[start_line_index..end_line_index];
-                        let z = self.waterfall.downsampling.apply(samples);
-
-                        // render to cell
-                        buf[(area.x + x, area.y + y)].bg = self.waterfall.color_map.map(z);
-
-                        // track min max
-                        if let Some((min, max)) = &mut total_min_max {
-                            assert!(
-                                z.is_finite(),
-                                "so z can be infinite. interesting. i mean of course it can. it comes out of a log"
-                            );
-                            if z < *min {
-                                *min = z;
-                            }
-                            if z > *max {
-                                *max = z;
-                            }
-                        }
-                        else {
-                            total_min_max = Some((z, z));
-                        }
-
-                        // get mouse over info if the mouse is over this cell
-                        if self.mouse_position.map_or(false, |mouse_position| {
-                            mouse_position.x == x && mouse_position.y == y
-                        }) {
-                            mouse_over = Some((
-                                z,
-                                FrequencyBand {
-                                    start: start_frequency as u32,
-                                    end: end_frequency as u32,
-                                },
-                            ));
-                        }
+                    for x in 0..area.width {
+                        render_cell(x, y, cache_line[usize::from(x)], buf);
                     }
-                    else {
-                        buf[(x + area.x, y + area.y)].reset();
+                }
+                else {
+                    for x in 0..area.width {
+                        render_cell(x, y, sample_spectrum(x, line), buf);
                     }
                 }
             }
             else {
                 for x in 0..area.width {
-                    buf[(x + area.x, y + area.y)].reset();
+                    clear_cell(&mut buf[(x + area.x, y + area.y)]);
                 }
             }
         }
@@ -299,7 +336,7 @@ impl Default for ColorMap {
         // 0 red
         // 120 green
 
-        Self::new(-120.0, 120.0)
+        Self::new(-120.0, 0.0)
     }
 }
 
@@ -324,7 +361,7 @@ impl ColorMap {
         //let saturation = lerp(scaled, 0.5, 1.0);
         let saturation = 1.0;
         //let lightness = lerp(scaled, 0.0, 0.8);
-        let lightness = lerp(normalized.powf(1.5), 0.0, 0.5);
+        let lightness = lerp(normalized.sqrt(), 0.0, 0.5);
         Color::from_hsl(Hsl::new(hue, saturation, lightness))
     }
 }
@@ -350,5 +387,94 @@ impl Downsampling {
             Downsampling::Min => min_float(samples.iter().copied()).unwrap(),
             Downsampling::Max => max_float(samples.iter().copied()).unwrap(),
         }
+    }
+}
+
+fn clear_cell(cell: &mut Cell) {
+    cell.reset();
+    cell.bg = Srgb::<f32>::default().into();
+}
+
+#[derive(Debug)]
+struct Lines {
+    lines: VecDeque<Line>,
+    history: usize,
+}
+
+impl Lines {
+    pub fn new(history: usize) -> Self {
+        Self {
+            lines: VecDeque::with_capacity(history),
+            history,
+        }
+    }
+
+    pub fn push(&mut self, line: Line) {
+        while self.lines.len() >= self.history && !self.lines.is_empty() {
+            // todo: reuse those poor buffers :cryring:
+            self.lines.pop_front();
+        }
+
+        self.lines.push_back(line);
+    }
+
+    pub fn get_line(&self, i: usize) -> Option<&Line> {
+        self.lines.len().checked_sub(i + 1).map(|i| &self.lines[i])
+    }
+}
+
+#[derive(Debug)]
+struct Cache {
+    lines: VecDeque<Vec<Option<f32>>>,
+    view_frequency_band: FrequencyBand,
+}
+
+impl Cache {
+    pub fn new(view_frequency_band: FrequencyBand) -> Self {
+        Self {
+            lines: VecDeque::new(),
+            view_frequency_band,
+        }
+    }
+
+    pub fn scroll(&mut self, history: usize) {
+        self.lines.push_front(vec![]);
+        while self.lines.len() > history {
+            self.lines.pop_back();
+        }
+    }
+
+    pub fn get_line(
+        &mut self,
+        y: u16,
+        width: u16,
+        view_frequency_band: FrequencyBand,
+        mut sample_spectrum: impl FnMut(u16) -> Option<f32>,
+    ) -> &Vec<Option<f32>> {
+        let line_index = usize::from(y);
+        let line_size = usize::from(width);
+
+        if self.view_frequency_band != view_frequency_band {
+            self.lines.clear();
+            self.view_frequency_band = view_frequency_band;
+        }
+
+        // this just makes sure that if we happen to render an older line that somehow
+        // (impossible!) doesn't exist yet, we make space for it.
+        //
+        // haha, I had the comparision the wrong way it it quickly filled all memory :D
+        while line_index >= self.lines.len() {
+            self.lines.push_back(vec![]);
+        }
+
+        let line = &mut self.lines[line_index];
+        if line.is_empty() {
+            line.reserve(line_size);
+            for x in 0..width {
+                line.push(sample_spectrum(x));
+            }
+        }
+
+        &*line
     }
 }
