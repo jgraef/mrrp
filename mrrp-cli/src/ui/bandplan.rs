@@ -1,9 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{
-        BTreeMap,
-        btree_map,
-    },
+    convert::identity,
     io::Read,
     ops::{
         Bound,
@@ -30,14 +27,10 @@ use serde::{
 
 use crate::util::FrequencyBand;
 
-// todo: if we don't want to modify the bandplans (which we don't), then we can
-// replace the BTreeMaps with sorted Vecs and do binary search. this would also
-// allow for a easier implementation of a DoubleEndedIterator
 #[derive(Clone, Debug)]
 pub struct Bandplan {
-    by_start: BTreeMap<u32, usize>,
-    by_end: BTreeMap<u32, usize>,
     bands: Vec<Band>,
+    by_end: Vec<(u32, usize)>,
 }
 
 impl Bandplan {
@@ -56,50 +49,54 @@ impl Bandplan {
             .collect())
     }
 
-    pub fn push(&mut self, band: Band) {
-        let index = self.bands.len();
-        self.by_start.insert(band.start, index);
-        self.by_end.insert(band.end, index);
-        self.bands.push(band);
-    }
-
-    pub fn clear(&mut self) {
-        self.by_start.clear();
-        self.by_end.clear();
-        self.bands.clear();
-    }
-
+    #[inline]
     pub fn get(&self, frequency: u32) -> Option<&Band> {
-        let (_end, index) = self
-            .by_end
-            .range((Bound::Excluded(frequency), Bound::Unbounded))
-            .next()?;
-        let band = &self.bands[*index];
-        (frequency >= band.start).then(|| band)
+        let index = self.start_index(frequency);
+        self.bands.get(index)
+    }
+
+    #[inline]
+    pub fn get_many(&self, frequency: u32) -> BandplanIter<'_> {
+        // if we want a reversible iterator we need to call the full range method
+        self.range(frequency..=frequency)
     }
 
     pub fn range(&self, range: impl RangeBounds<u32>) -> BandplanIter<'_> {
-        fn excluded_bound(bound: Bound<u32>) -> Bound<u32> {
-            match bound {
-                Bound::Included(start) | Bound::Excluded(start) => Bound::Excluded(start),
-                Bound::Unbounded => Bound::Unbounded,
-            }
-        }
+        // we search for both start and end indices, so we can construct a double ended
+        // iterator. i think if we don't need this we could just seach for start index
+        // and iterate until band.start > end_frequency
 
-        let iter = self.by_end.range((
-            excluded_bound(range.start_bound().cloned()),
-            Bound::Unbounded,
-        ));
-        let end = self
-            .by_start
-            .range((excluded_bound(range.end_bound().cloned()), Bound::Unbounded))
-            .next()
-            .map(|(_start, index)| *index);
+        let start_frequency = match range.start_bound() {
+            Bound::Included(frequency) => Some(*frequency),
+            Bound::Excluded(frequency) => Some(*frequency + 1),
+            Bound::Unbounded => None,
+        };
+
+        let end_frequency = match range.end_bound() {
+            Bound::Included(frequency) => Some(*frequency + 1),
+            Bound::Excluded(frequency) => Some(*frequency),
+            Bound::Unbounded => None,
+        };
+
+        let start_index = start_frequency
+            .map(|start_frequency| self.start_index(start_frequency))
+            .unwrap_or_default();
+
+        let end_index = end_frequency
+            .map(|end_frequency| self.end_index(end_frequency))
+            .unwrap_or(self.bands.len());
+
+        let bands = if start_index < end_index {
+            &self.bands[start_index..end_index]
+        }
+        else {
+            &[]
+        };
 
         BandplanIter {
-            iter,
-            bands: &self.bands,
-            end,
+            bands: bands.iter(),
+            start_frequency,
+            end_frequency,
         }
     }
 
@@ -110,47 +107,119 @@ impl Bandplan {
                 .expect("Failed to parse builtin international bandplan")
         })
     }
+
+    fn start_index(&self, start_frequency: u32) -> usize {
+        // we're actually looking for the start index for bands that end just one after
+        // the start frequency. this excludes any bands that end on the start frequency
+        // (the band end frequency is always exclusive)
+        let start_frequency = start_frequency + 1;
+
+        let mut start_index = self
+            .by_end
+            .binary_search_by_key(&start_frequency, |(band_end, _band_index)| *band_end)
+            .unwrap_or_else(identity);
+
+        // if there are multiple bands with this end frequency the binary search will
+        // return an arbitrary one, so we just scan back until we find one with
+        // a different start frequency.
+        // self.by_end is sorted secondarily by index, so the actual band index can only
+        // become smaller while doing this. so all bands that end in our frequency range
+        // will be included.
+        while start_index > 0 && self.by_end[start_index - 1].0 == start_frequency {
+            start_index -= 1;
+        }
+
+        let start_index = self
+            .by_end
+            .get(start_index)
+            .map(|(_band_end, band_index)| *band_index)
+            .unwrap_or(self.bands.len());
+
+        start_index
+    }
+
+    fn end_index(&self, end_frequency: u32) -> usize {
+        let mut end_index = self
+            .bands
+            .binary_search_by_key(&end_frequency, |band| band.start)
+            .unwrap_or_else(identity);
+
+        // same things as for the start index
+        while end_index + 1 < self.bands.len() && self.bands[end_index + 1].end == end_frequency {
+            end_index += 1;
+        }
+
+        end_index
+    }
 }
 
 impl FromIterator<Band> for Bandplan {
     fn from_iter<T: IntoIterator<Item = Band>>(iter: T) -> Self {
-        let mut by_start = BTreeMap::new();
-        let mut by_end = BTreeMap::new();
+        let iter = iter.into_iter();
+        let (n1, n2) = iter.size_hint();
+        let n = n2.unwrap_or(n1);
 
-        let mut i = 0;
-        let bands = iter
-            .into_iter()
-            .inspect(|band| {
-                by_start.insert(band.start, i);
-                by_end.insert(band.end, i);
-                i += 1;
-            })
-            .collect();
+        let mut bands = Vec::with_capacity(n);
+        let mut by_end = Vec::with_capacity(n);
 
-        Self {
-            by_start,
-            by_end,
-            bands,
+        for (i, band) in iter.enumerate() {
+            by_end.push((band.end, i));
+            bands.push(band);
         }
+
+        // sort by start frequency
+        bands.sort_by_key(|band| band.start);
+
+        // sort by end frequency, then index
+        by_end.sort();
+
+        Self { bands, by_end }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct BandplanIter<'a> {
-    iter: btree_map::Range<'a, u32, usize>,
-    bands: &'a [Band],
-    end: Option<usize>,
+    bands: std::slice::Iter<'a, Band>,
+    start_frequency: Option<u32>,
+    end_frequency: Option<u32>,
 }
 
 impl<'a> Iterator for BandplanIter<'a> {
     type Item = &'a Band;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (_end, index) = self.iter.next()?;
-        self.end
-            .map_or(true, |end| end != *index)
-            .then(|| &self.bands[*index])
+        filter_band_iter(
+            self.bands.next()?,
+            &self.start_frequency,
+            &self.end_frequency,
+        )
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (_, n) = self.bands.size_hint();
+        (0, n)
+    }
+}
+
+impl<'a> DoubleEndedIterator for BandplanIter<'a> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        filter_band_iter(
+            self.bands.next_back()?,
+            &self.start_frequency,
+            &self.end_frequency,
+        )
+    }
+}
+
+#[inline(always)]
+fn filter_band_iter<'a>(
+    band: &'a Band,
+    start_frequency: &Option<u32>,
+    end_frequency: &Option<u32>,
+) -> Option<&'a Band> {
+    (start_frequency.map_or(true, |start_frequency| band.end >= start_frequency)
+        && end_frequency.map_or(true, |end_frequency| band.start < end_frequency))
+    .then_some(band)
 }
 
 #[derive(Clone, Debug, Deserialize)]

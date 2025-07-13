@@ -22,6 +22,7 @@ use crate::util::{
     lerp,
     max_float,
     min_float,
+    unlerp,
 };
 
 #[derive(Debug)]
@@ -356,12 +357,12 @@ impl ColorMap {
     }
 
     pub fn map(&self, z: f32) -> Color {
-        let normalized = ((z - self.min_z) / (self.max_z - self.min_z)).clamp(0.0, 1.0);
+        let normalized = unlerp(z, self.min_z, self.max_z).clamp(0.0, 1.0);
+
         let hue = lerp(normalized, self.hue_low, self.hue_high);
-        //let saturation = lerp(scaled, 0.5, 1.0);
         let saturation = 1.0;
-        //let lightness = lerp(scaled, 0.0, 0.8);
         let lightness = lerp(normalized.sqrt(), 0.0, 0.5);
+
         Color::from_hsl(Hsl::new(hue, saturation, lightness))
     }
 }
