@@ -1,6 +1,5 @@
 use std::collections::VecDeque;
 
-use human_units::si::FormatSi;
 use num_complex::Complex;
 use palette::Srgb;
 use ratatui::{
@@ -19,6 +18,7 @@ use ratatui::{
 
 use crate::util::{
     FrequencyBand,
+    format_frequency,
     lerp,
     max_float,
     min_float,
@@ -222,9 +222,8 @@ impl<'a> Widget for WaterfallWidget<'a> {
         if let Some((mouse_position, (z, frequency_band))) = self.mouse_position.zip(mouse_over) {
             let text = format!(
                 "x-[{} ± {}: {:.1} dBFS]-x",
-                human_units::si::Frequency::from_si(frequency_band.center().into()).format_si(),
-                human_units::si::Frequency::from_si((frequency_band.bandwidth() / 2).into())
-                    .format_si(),
+                format_frequency(frequency_band.center()).with_band(self.view_frequency_band),
+                format_frequency(frequency_band.bandwidth() / 2),
                 z,
             );
             let text_width = text.len() - 4;
@@ -361,7 +360,7 @@ impl ColorMap {
 
         let hue = lerp(normalized, self.hue_low, self.hue_high);
         let saturation = 1.0;
-        let lightness = lerp(normalized.sqrt(), 0.0, 0.5);
+        let lightness = lerp(normalized.powi(2), 0.0, 0.5);
 
         Color::from_hsl(Hsl::new(hue, saturation, lightness))
     }

@@ -1,5 +1,6 @@
 pub mod bandplan;
-pub mod frequencies;
+pub mod frequency_dial;
+pub mod frequency_marks;
 pub mod keybinds;
 pub mod waterfall;
 
@@ -26,7 +27,8 @@ use crate::{
             Bandplan,
             BandplanWidget,
         },
-        frequencies::Frequencies,
+        frequency_dial::FrequencyDial,
+        frequency_marks::FrequencyMarks,
         keybinds::Keybinds,
         waterfall::Waterfall,
     },
@@ -57,6 +59,7 @@ impl Ui {
     pub fn new(sampled_frequency_band: FrequencyBand) -> Self {
         Self {
             layout: Layout::vertical([
+                Constraint::Length(3),
                 Constraint::Length(1),
                 Constraint::Length(1),
                 Constraint::Fill(100),
@@ -193,9 +196,20 @@ impl Widget for &mut Ui {
     where
         Self: Sized,
     {
-        let [frequencies_area, bandplan_area, waterfall_area] = self.layout.areas(area);
+        let [
+            controls_area,
+            frequencies_area,
+            bandplan_area,
+            waterfall_area,
+        ] = self.layout.areas(area);
 
-        Frequencies {
+        FrequencyDial {
+            frequency: self.sampled_frequency_band.center(),
+            title: "Tuner",
+        }
+        .render(controls_area, buf);
+
+        FrequencyMarks {
             view_frequency_band: self.view_frequency_band,
         }
         .render(frequencies_area, buf);

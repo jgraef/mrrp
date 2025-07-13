@@ -1,4 +1,5 @@
 use std::{
+    fmt::Display,
     ops::{
         Bound,
         Deref,
@@ -101,4 +102,64 @@ impl<T: 'static> From<&'static T> for StaticOrArc<T> {
     fn from(value: &'static T) -> Self {
         Self::Static(value)
     }
+}
+
+pub fn format_frequency(frequency: u32) -> FormatFrequency {
+    FormatFrequency {
+        frequency,
+        band: None,
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct FormatFrequency {
+    frequency: u32,
+    band: Option<FrequencyBand>,
+}
+
+impl FormatFrequency {
+    pub fn with_band(mut self, band: FrequencyBand) -> Self {
+        self.band = Some(band);
+        self
+    }
+}
+
+impl Display for FormatFrequency {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (divisor, prefix) = si_prefix(self.frequency);
+
+        let precision = self
+            .band
+            .map(|band| {
+                // todo: we probably need to give this more thought and test it...
+                let mut x = divisor / band.bandwidth();
+                let mut p = 2;
+                while x > 1 {
+                    x /= 10;
+                    p += 1;
+                }
+                p
+            })
+            .or_else(|| f.precision())
+            .unwrap_or(2);
+
+        // todo: you could certainly do this without floats
+        write!(
+            f,
+            "{:.precision$} {prefix}Hz",
+            self.frequency as f32 / divisor as f32
+        )
+    }
+}
+
+const SI_PREFIXES: &'static [(u32, &'static str)] =
+    &[(1_000, "k"), (1_000_000, "M"), (1_000_000_000, "G")];
+
+pub fn si_prefix(x: u32) -> (u32, &'static str) {
+    SI_PREFIXES
+        .iter()
+        .rev()
+        .copied()
+        .find(|(n, _)| x > *n)
+        .unwrap_or((1, ""))
 }
