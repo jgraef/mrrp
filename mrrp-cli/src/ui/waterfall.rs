@@ -43,7 +43,7 @@ impl Waterfall {
             lines: Lines::new(10),
             color_map: ColorMap::default(),
             sampled_frequency_band,
-            cache: Some(Cache::new(sampled_frequency_band)),
+            cache: Some(Cache::default()),
             //cache: None,
             downsampling: Downsampling::Average,
         }
@@ -423,20 +423,13 @@ impl Lines {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Cache {
     lines: VecDeque<Vec<Option<f32>>>,
-    view_frequency_band: FrequencyBand,
+    view_frequency_band: Option<FrequencyBand>,
 }
 
 impl Cache {
-    pub fn new(view_frequency_band: FrequencyBand) -> Self {
-        Self {
-            lines: VecDeque::new(),
-            view_frequency_band,
-        }
-    }
-
     pub fn scroll(&mut self, history: usize) {
         self.lines.push_front(vec![]);
         while self.lines.len() > history {
@@ -454,9 +447,12 @@ impl Cache {
         let line_index = usize::from(y);
         let line_size = usize::from(width);
 
-        if self.view_frequency_band != view_frequency_band {
+        if self
+            .view_frequency_band
+            .map_or(true, |band| band != view_frequency_band)
+        {
             self.lines.clear();
-            self.view_frequency_band = view_frequency_band;
+            self.view_frequency_band = Some(view_frequency_band);
         }
 
         // this just makes sure that if we happen to render an older line that somehow

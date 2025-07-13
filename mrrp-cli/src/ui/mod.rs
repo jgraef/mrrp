@@ -1,11 +1,10 @@
 pub mod bandplan;
 pub mod frequencies;
+pub mod keybinds;
 pub mod waterfall;
 
 use crossterm::event::{
     Event as TerminalEvent,
-    KeyCode,
-    KeyModifiers,
     MouseEventKind,
 };
 use num_complex::Complex;
@@ -28,6 +27,7 @@ use crate::{
             BandplanWidget,
         },
         frequencies::Frequencies,
+        keybinds::Keybinds,
         waterfall::Waterfall,
     },
     util::{
@@ -43,6 +43,7 @@ pub struct Ui {
     mouse_position: Option<Position>,
     exit_requested: bool,
 
+    keybinds: Keybinds,
     sampled_frequency_band: FrequencyBand,
     view_frequency_band: FrequencyBand,
     zoom_level: u32,
@@ -62,6 +63,7 @@ impl Ui {
             ]),
             mouse_position: None,
             exit_requested: false,
+            keybinds: Keybinds::default(),
             sampled_frequency_band,
             view_frequency_band: sampled_frequency_band,
             zoom_level: 0,
@@ -105,26 +107,17 @@ impl Ui {
     fn handle_terminal_event(&mut self, event: crossterm::event::Event, app: &AppProxy) {
         match event {
             TerminalEvent::Key(key_event) => {
-                match key_event.code {
-                    KeyCode::Char('q') => {
-                        app.request_exit();
+                if let Some(action) = self.keybinds.get(key_event) {
+                    match action {
+                        keybinds::Action::Quit => app.request_exit(),
+                        keybinds::Action::ZoomIn => self.zoom_view(1),
+                        keybinds::Action::ZoomOut => self.zoom_view(-1),
+                        keybinds::Action::MoveLeft => self.move_view(-1, false),
+                        keybinds::Action::MoveLeftBig => self.move_view(-1, true),
+                        keybinds::Action::MoveRight => self.move_view(1, false),
+                        keybinds::Action::MoveRightBig => self.move_view(1, true),
+                        keybinds::Action::CenterView => self.center_view(),
                     }
-                    KeyCode::Char('+') => {
-                        self.zoom(1);
-                    }
-                    KeyCode::Char('-') => {
-                        self.zoom(-1);
-                    }
-                    KeyCode::Left => {
-                        self.shift(-1, key_event.modifiers.contains(KeyModifiers::SHIFT));
-                    }
-                    KeyCode::Right => {
-                        self.shift(1, key_event.modifiers.contains(KeyModifiers::SHIFT));
-                    }
-                    KeyCode::Char('r') => {
-                        self.reset();
-                    }
-                    _ => {}
                 }
             }
             TerminalEvent::Mouse(mouse_event) => {
@@ -136,10 +129,10 @@ impl Ui {
                         });
                     }
                     MouseEventKind::ScrollDown => {
-                        self.zoom(-1);
+                        self.zoom_view(-1);
                     }
                     MouseEventKind::ScrollUp => {
-                        self.zoom(1);
+                        self.zoom_view(1);
                     }
                     _ => {}
                 }
@@ -151,7 +144,7 @@ impl Ui {
         }
     }
 
-    fn zoom(&mut self, delta: i32) {
+    fn zoom_view(&mut self, delta: i32) {
         self.zoom_level = self.zoom_level.saturating_add_signed(delta).min(30);
 
         // the sampled bandwidth corresponds to zoom 0
@@ -169,7 +162,7 @@ impl Ui {
         self.view_frequency_band.end = center + half_visible;
     }
 
-    fn shift(&mut self, direction: i32, big_step: bool) {
+    fn move_view(&mut self, direction: i32, big_step: bool) {
         let bandwidth = self.view_frequency_band.bandwidth();
 
         let step_size = if big_step {
@@ -189,7 +182,7 @@ impl Ui {
         self.view_frequency_band.end = self.view_frequency_band.start + bandwidth;
     }
 
-    fn reset(&mut self) {
+    fn center_view(&mut self) {
         self.zoom_level = 0;
         self.view_frequency_band = self.sampled_frequency_band;
     }
