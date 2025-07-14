@@ -1,4 +1,7 @@
-use std::collections::VecDeque;
+use std::{
+    collections::VecDeque,
+    ops::Index,
+};
 
 use num_complex::Complex;
 use palette::Srgb;
@@ -22,6 +25,7 @@ use serde::{
 
 use crate::util::{
     FrequencyBand,
+    debug_limited,
     format_frequency,
     lerp,
     max_float,
@@ -244,8 +248,9 @@ impl<'a> Widget for WaterfallWidget<'a> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(derive_more::Debug, Serialize, Deserialize)]
 struct NewLine {
+    #[debug("{:?}", debug_limited(samples))]
     samples: Vec<f32>,
     count: usize,
     frequency_band: FrequencyBand,
@@ -305,8 +310,9 @@ impl NewLine {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(derive_more::Debug, Serialize, Deserialize)]
 struct Line {
+    #[debug("{:?}", debug_limited(samples))]
     samples: Vec<f32>,
     frequency_band: FrequencyBand,
     bin_width: f32,
@@ -419,13 +425,13 @@ impl Lines {
 
 #[derive(Debug, Default)]
 struct Cache {
-    lines: VecDeque<Vec<Option<f32>>>,
+    lines: VecDeque<CacheLine>,
     view_frequency_band: Option<FrequencyBand>,
 }
 
 impl Cache {
     pub fn scroll(&mut self, history: usize) {
-        self.lines.push_front(vec![]);
+        self.lines.push_front(Default::default());
         while self.lines.len() > history {
             self.lines.pop_back();
         }
@@ -436,10 +442,9 @@ impl Cache {
         y: u16,
         width: u16,
         view_frequency_band: FrequencyBand,
-        mut sample_spectrum: impl FnMut(u16) -> Option<f32>,
-    ) -> &Vec<Option<f32>> {
+        sample_spectrum: impl FnMut(u16) -> Option<f32>,
+    ) -> &CacheLine {
         let line_index = usize::from(y);
-        let line_size = usize::from(width);
 
         if self
             .view_frequency_band
@@ -454,17 +459,44 @@ impl Cache {
         //
         // haha, I had the comparision the wrong way it it quickly filled all memory :D
         while line_index >= self.lines.len() {
-            self.lines.push_back(vec![]);
+            self.lines.push_back(Default::default());
         }
 
         let line = &mut self.lines[line_index];
-        if line.is_empty() {
-            line.reserve(line_size);
-            for x in 0..width {
-                line.push(sample_spectrum(x));
-            }
-        }
+        line.fill(width, sample_spectrum);
 
         &*line
+    }
+}
+
+#[derive(derive_more::Debug, Default)]
+struct CacheLine {
+    #[debug("{:?}", debug_limited(samples))]
+    samples: Vec<Option<f32>>,
+}
+
+impl CacheLine {
+    pub fn fill(&mut self, width: u16, mut sample_spectrum: impl FnMut(u16) -> Option<f32>) {
+        if self.samples.is_empty() {
+            self.samples = (0..width).map(|x| sample_spectrum(x)).collect();
+        }
+    }
+}
+
+impl Index<usize> for CacheLine {
+    type Output = Option<f32>;
+
+    #[inline(always)]
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.samples[index]
+    }
+}
+
+impl Index<u16> for CacheLine {
+    type Output = Option<f32>;
+
+    #[inline(always)]
+    fn index(&self, index: u16) -> &Self::Output {
+        &self[usize::from(index)]
     }
 }

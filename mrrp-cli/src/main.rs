@@ -6,7 +6,13 @@ pub mod reader;
 pub mod ui;
 pub mod util;
 
-use std::fs::OpenOptions;
+use std::{
+    fs::{
+        File,
+        OpenOptions,
+    },
+    io::BufReader,
+};
 
 use clap::Parser;
 use color_eyre::eyre::{
@@ -75,6 +81,17 @@ async fn main() -> Result<(), Error> {
                     bail!("Only either --device or --address can be used at once")
                 }
             }
+        }
+        Command::DumpState { path } => {
+            let app_state = if let Some(path) = path {
+                ciborium::from_reader(BufReader::new(File::open(path)?))?
+            }
+            else {
+                app_files.load_app_state()?
+            };
+
+            println!("{app_state:#?}");
+            Ok(())
         }
     };
 

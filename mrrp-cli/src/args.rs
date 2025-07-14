@@ -18,8 +18,14 @@ pub struct Args {
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
+    /// Run the main terminal user interface.
+    ///
+    /// If no command is provided, this is the default. But if you want to
+    /// provide arguments to the main TUI, you need to invoke this command.
     #[clap(name = "tui")]
     Main(MainArgs),
+    #[clap(hide = true)]
+    DumpState { path: Option<PathBuf> },
 }
 
 impl Default for Command {

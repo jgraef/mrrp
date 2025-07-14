@@ -1,5 +1,8 @@
 use std::{
-    fmt::Display,
+    fmt::{
+        Debug,
+        Display,
+    },
     ops::{
         Bound,
         Deref,
@@ -165,4 +168,45 @@ pub fn si_prefix(x: u32) -> (u32, &'static str) {
         .copied()
         .find(|(n, _)| x > *n)
         .unwrap_or((1, ""))
+}
+
+pub fn debug_limited<I>(iter: I) -> DebugLimited<I>
+where
+    I: IntoIterator + Clone,
+    I::Item: Debug,
+{
+    DebugLimited { iter, limit: 10 }
+}
+
+pub struct DebugLimited<I> {
+    iter: I,
+    limit: usize,
+}
+
+impl<I> DebugLimited<I> {
+    pub fn with_limit(mut self, limit: usize) -> Self {
+        self.limit = limit;
+        self
+    }
+}
+
+impl<I> Debug for DebugLimited<I>
+where
+    I: IntoIterator + Clone,
+    I::Item: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut list = f.debug_list();
+
+        let mut iter = self.iter.clone().into_iter();
+
+        list.entries((&mut iter).take(self.limit));
+
+        if iter.next().is_some() {
+            list.finish_non_exhaustive()
+        }
+        else {
+            list.finish()
+        }
+    }
 }

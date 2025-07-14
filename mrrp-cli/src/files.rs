@@ -88,13 +88,13 @@ impl AppFiles {
     pub fn load_app_state(&self) -> Result<AppSnapshot<AppState>, Error> {
         let path = self.app_state_path();
         tracing::debug!(path = %path.display(), "Loading app state");
-        Ok(serde_cbor::from_reader(BufReader::new(File::open(path)?))?)
+        Ok(ciborium::from_reader(BufReader::new(File::open(path)?))?)
     }
 
     pub fn save_app_state(&self, snapshot: AppSnapshot<&AppState>) -> Result<(), Error> {
         let path = self.app_state_path();
         tracing::debug!(path = %path.display(), "Saving app state");
-        serde_cbor::to_writer(BufWriter::new(File::create(path)?), &snapshot)?;
+        ciborium::into_writer(&snapshot, BufWriter::new(File::create(path)?))?;
         Ok(())
     }
 }
