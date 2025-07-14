@@ -294,13 +294,13 @@ impl AppProxy {
         let _ = self.event_sender.send(AppEvent::RequestExit);
     }
 
-    pub fn set_scroll_interval(&mut self, interval: Duration) {
+    pub fn set_scroll_interval(&self, interval: Duration) {
         let _ = self
             .event_sender
             .send(AppEvent::SetScrollInterval { interval });
     }
 
-    pub fn set_center_frequency(&mut self, frequency: u32) {
+    pub fn set_center_frequency(&self, frequency: u32) {
         let _ = self
             .event_sender
             .send(AppEvent::SetCenterFrequency { frequency });

@@ -4,6 +4,7 @@ use std::{
 };
 
 use num_complex::Complex;
+use palette::LinSrgb;
 use ratatui::{
     buffer::Buffer,
     layout::{
@@ -39,17 +40,26 @@ pub struct WaterfallState {
     color_map: ColorMap,
     downsampling: Downsampling,
     draw_mode: DrawMode,
+    min_z: f32,
+    max_z: f32,
 }
 
 impl Default for WaterfallState {
     fn default() -> Self {
+        // in dBFS, pulled these out of my ass. they will get updated anyway. just don't
+        // divide by 0, mkay.
+        let min_z = -80.0;
+        let max_z = -70.0;
+
         Self {
             new_line: None,
             lines: Lines::new(10),
             color_map: ColorMap::default(),
             cache: Default::default(),
-            downsampling: Downsampling::Average,
+            downsampling: Downsampling::Max,
             draw_mode: DrawMode::HalfBlockHorizontal,
+            min_z,
+            max_z,
         }
     }
 }
@@ -245,7 +255,9 @@ impl<'a> Widget for WaterfallWidget<'a> {
         let mut render_cell = |x, y, z, canvas: &mut Canvas| {
             if let Some(z) = z {
                 // render to cell
-                canvas.draw((x, y), self.waterfall.color_map.map(z));
+                let normalized =
+                    unlerp(z, self.waterfall.min_z, self.waterfall.max_z).clamp(0.0, 1.0);
+                canvas.draw((x, y), self.waterfall.color_map.map(normalized));
 
                 // track min max
                 if let Some((min, max)) = &mut total_min_max {
@@ -291,8 +303,8 @@ impl<'a> Widget for WaterfallWidget<'a> {
         // update colormap min/max values for next frame
         // todo: this should be behind some flag
         if let Some((min, max)) = total_min_max {
-            self.waterfall.color_map.min_z = min;
-            self.waterfall.color_map.max_z = max;
+            self.waterfall.min_z = min;
+            self.waterfall.max_z = max;
         }
 
         // render mouse cursor
@@ -403,50 +415,64 @@ struct Line {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-struct ColorMap {
-    min_z: f32,
-    max_z: f32,
-    hue_low: f32,
-    hue_high: f32,
+enum ColorMap {
+    HueLightness {
+        hue_low: f32,
+        hue_high: f32,
+        lightness_low: f32,
+        lightness_high: f32,
+    },
+    LinearSteps {
+        colors: Vec<LinSrgb>,
+    },
 }
 
 impl Default for ColorMap {
     fn default() -> Self {
-        // blue -> green -> red
-        //Self::new(240.0, 0.0)
-        // blue -> red -> green
-
-        // -120 blue
-        // 0 red
-        // 120 green
-
-        Self::new(-120.0, 0.0)
+        Self::HueLightness {
+            hue_low: -120.0,
+            hue_high: 0.0,
+            lightness_low: 0.1,
+            lightness_high: 0.8,
+        }
     }
 }
 
 impl ColorMap {
-    pub fn new(hue_low: f32, hue_high: f32) -> Self {
-        // in dBFS, pulled these out of my ass. they will get updated anyway. just don't
-        // divide by 0, mkay.
-        let min_z = -80.0;
-        let max_z = -70.0;
-
-        Self {
-            min_z,
-            max_z,
-            hue_low,
-            hue_high,
+    pub fn map(&self, normalized: f32) -> Color {
+        match self {
+            ColorMap::HueLightness {
+                hue_low,
+                hue_high,
+                lightness_low,
+                lightness_high,
+            } => {
+                Color::from_hsl(Hsl::new(
+                    lerp(normalized, *hue_low, *hue_high),
+                    1.0,
+                    lerp(normalized.powi(2), *lightness_low, *lightness_high),
+                ))
+            }
+            ColorMap::LinearSteps { colors } => {
+                let i = normalized * (colors.len() - 1) as f32;
+                let i_low = i.floor();
+                let i_high = i.ceil();
+                let color_low = colors[i_low as usize];
+                if i_low == i_high {
+                    color_low.into()
+                }
+                else {
+                    let t = i - i_low;
+                    let color_high = colors[i_high as usize];
+                    LinSrgb::new(
+                        lerp(t, color_low.red, color_high.red),
+                        lerp(t, color_low.green, color_high.green),
+                        lerp(t, color_low.blue, color_high.blue),
+                    )
+                    .into()
+                }
+            }
         }
-    }
-
-    pub fn map(&self, z: f32) -> Color {
-        let normalized = unlerp(z, self.min_z, self.max_z).clamp(0.0, 1.0);
-
-        let hue = lerp(normalized, self.hue_low, self.hue_high);
-        let saturation = 1.0;
-        let lightness = lerp(normalized.powi(2), 0.0, 0.5);
-
-        Color::from_hsl(Hsl::new(hue, saturation, lightness))
     }
 }
 
@@ -518,6 +544,7 @@ impl Cache {
         }
     }
 
+    #[allow(unused)]
     pub fn clear(&mut self) {
         self.lines.clear();
         self.view_frequency_band = None;

@@ -189,6 +189,9 @@ impl Ui {
                         Action::MoveRight => state.move_view(1, false),
                         Action::MoveRightBig => state.move_view(1, true),
                         Action::CenterView => state.center_view(self.sampled_frequency_band),
+                        Action::TuneToView => {
+                            app.set_center_frequency(state.view_frequency_band.center());
+                        }
                         Action::Test => {}
                     }
                 }

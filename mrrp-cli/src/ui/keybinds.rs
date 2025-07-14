@@ -23,6 +23,7 @@ pub enum Action {
     MoveRight,
     MoveRightBig,
     CenterView,
+    TuneToView,
     Test,
 }
 
@@ -60,6 +61,7 @@ impl Default for Keybinds {
                 (KeyCode::Right.into(), Action::MoveRight),
                 (Keybind::from(KeyCode::Right).with_modifiers(KeyModifiers::SHIFT), Action::MoveRightBig),
                 ('c'.into(), Action::CenterView),
+                ('t'.into(), Action::TuneToView),
                 (KeyCode::F(5).into(), Action::Test),
             ]
                 .into_iter()
