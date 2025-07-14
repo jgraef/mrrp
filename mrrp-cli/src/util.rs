@@ -8,10 +8,6 @@ use std::{
     sync::Arc,
 };
 
-use chrono::{
-    DateTime,
-    Local,
-};
 use serde::{
     Deserialize,
     Serialize,
@@ -24,6 +20,12 @@ pub struct FrequencyBand {
 }
 
 impl FrequencyBand {
+    pub fn from_center_and_bandwidth(center_frequency: u32, bandwidth: u32) -> Self {
+        let start = center_frequency.saturating_sub(bandwidth / 2);
+        let end = start + bandwidth;
+        Self { start, end }
+    }
+
     #[inline(always)]
     pub fn center(&self) -> u32 {
         (self.start + self.end) / 2
@@ -163,10 +165,4 @@ pub fn si_prefix(x: u32) -> (u32, &'static str) {
         .copied()
         .find(|(n, _)| x > *n)
         .unwrap_or((1, ""))
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Snapshot<T> {
-    pub state: T,
-    pub timestamp: DateTime<Local>,
 }

@@ -3,6 +3,10 @@ use std::{
     time::Duration,
 };
 
+use chrono::{
+    DateTime,
+    Local,
+};
 use color_eyre::eyre::{
     Error,
     bail,
@@ -11,6 +15,10 @@ use crossterm::execute;
 use futures_util::TryStreamExt;
 use ratatui::DefaultTerminal;
 use rtlsdr_async::Backend;
+use serde::{
+    Deserialize,
+    Serialize,
+};
 use tokio::{
     sync::mpsc,
     time::Interval,
@@ -24,21 +32,32 @@ use crate::{
     ui::{
         Ui,
         UiEvent,
+        UiState,
+        UiWidget,
         bandplan::Bandplan,
         keybinds::Keybinds,
     },
     util::FrequencyBand,
 };
 
+const DEFAULT_CENTER_FREQUENCY: u32 = 7_000_000;
+const DEFAULT_SAMPLE_RATE: u32 = 2_400_000;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppState {
+    ui_state: UiState,
+    sampled_frequency_band: FrequencyBand,
+}
+
 #[derive(Debug)]
 pub struct App<B> {
-    app_files: AppFiles,
+    state: AppState,
+    files: AppFiles,
     app_events: mpsc::UnboundedReceiver<AppEvent>,
     proxy: AppProxy,
     scroll_interval: Interval,
     rtl_sdr: B,
     sample_reader: SampleReader,
-    sampled_frequency_band: FrequencyBand,
     fft: Fft,
     terminal: DefaultTerminal,
     terminal_events: crossterm::event::EventStream,
@@ -62,11 +81,8 @@ where
         if args.fft_overlap >= args.fft_size {
             bail!("FFT overlap must be less than FFT size");
         }
-        if args.sample_rate & 1 == 1 {
-            // todo: we currently can't calculate the start and end frequency of the signal
-            // correctly in this case.
-            bail!("Sample rate must be divisble by 2");
-        }
+
+        // todo: load config here
 
         let keybinds = if let Some(path) = &args.keybinds {
             Keybinds::from_path(path)?
@@ -82,44 +98,83 @@ where
             app_files.bandplan()?
         };
 
-        let terminal = ratatui::init();
-        crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
+        let mut state = (!args.reset)
+            .then(|| {
+                app_files
+                    .load_app_state()
+                    .inspect_err(|error| {
+                        tracing::warn!(?error, "Failed to load previous app state")
+                    })
+                    .ok()
+                    .map(|snapshot| {
+                        // currently we only care about the actual state, but we intend to store
+                        // more metadata in the snapshot, like timestamp, version number, etc.
+                        snapshot.app_state
+                    })
+            })
+            .flatten()
+            .unwrap_or_else(|| {
+                let sampled_frequency_band = FrequencyBand::from_center_and_bandwidth(
+                    args.frequency.unwrap_or(DEFAULT_CENTER_FREQUENCY),
+                    args.sample_rate.unwrap_or(DEFAULT_SAMPLE_RATE),
+                );
+                AppState {
+                    ui_state: UiState::new(sampled_frequency_band),
+                    sampled_frequency_band,
+                }
+            });
 
-        let sampled_frequency_band = sampled_frequency_band(args.frequency, args.sample_rate);
+        if let Some(center_frequency) = args.frequency {
+            if state.sampled_frequency_band.center() != center_frequency {
+                state.sampled_frequency_band = FrequencyBand::from_center_and_bandwidth(
+                    center_frequency,
+                    state.sampled_frequency_band.bandwidth(),
+                )
+            }
+        }
+        if let Some(sample_rate) = args.sample_rate {
+            if sample_rate & 1 == 1 {
+                // todo: we currently can't calculate the start and end frequency of the signal
+                // correctly in this case.
+                bail!("Sample rate must be divisble by 2");
+            }
+
+            if state.sampled_frequency_band.bandwidth() != sample_rate {
+                state.sampled_frequency_band = FrequencyBand::from_center_and_bandwidth(
+                    state.sampled_frequency_band.center(),
+                    sample_rate,
+                );
+            }
+        }
 
         rtl_sdr
-            .set_center_frequency(sampled_frequency_band.center())
+            .set_center_frequency(state.sampled_frequency_band.center())
             .await?;
-        rtl_sdr.set_sample_rate(args.sample_rate).await?;
+        rtl_sdr
+            .set_sample_rate(state.sampled_frequency_band.bandwidth())
+            .await?;
         rtl_sdr.set_tuner_gain(args.gain.into()).await?;
 
         let sample_reader =
             SampleReader::new(rtl_sdr.samples().await?, args.fft_size, args.fft_overlap);
 
+        let terminal = ratatui::init();
+        crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
+
         let terminal_events = crossterm::event::EventStream::new();
 
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
-        let ui_state = (!args.reset_ui)
-            .then(|| {
-                app_files
-                    .load_ui_state()
-                    .inspect_err(|error| tracing::warn!(?error, "Failed to load UI state"))
-                    .ok()
-                    .map(|snapshot| snapshot.state)
-            })
-            .flatten();
-
-        let ui = Ui::new(sampled_frequency_band, keybinds, bandplan, ui_state);
+        let ui = Ui::new(state.sampled_frequency_band, keybinds, bandplan);
 
         Ok(Self {
-            app_files,
+            state,
+            files: app_files,
             app_events: event_receiver,
             proxy: AppProxy { event_sender },
             scroll_interval: tokio::time::interval(Duration::from_millis(args.scroll_interval)),
             rtl_sdr,
             sample_reader,
-            sampled_frequency_band,
             fft: Fft::new(args.fft_size, args.fft_window),
             terminal,
             terminal_events,
@@ -147,13 +202,13 @@ where
                     else {
                         break;
                     };
-                    self.ui.handle_event(UiEvent::Terminal(event), &mut self.proxy);
+                    self.ui.handle_event(UiEvent::Terminal(event), &mut self.proxy, &mut self.state.ui_state);
                 }
                 _ = self.redraw_interval.tick() => {
-                    self.terminal.draw(|frame| frame.render_widget(&mut self.ui, frame.area()))?;
+                    self.terminal.draw(|frame| frame.render_widget(UiWidget { ui: &mut self.ui, state: &mut self.state.ui_state}, frame.area()))?;
                 }
                 _ = self.scroll_interval.tick() => {
-                    self.ui.handle_event(UiEvent::ScrollWaterfall, &mut self.proxy);
+                    self.ui.handle_event(UiEvent::ScrollWaterfall, &mut self.proxy, &mut self.state.ui_state);
                 }
                 result = self.sample_reader.read() => {
                     let Some(samples) = result?
@@ -163,7 +218,7 @@ where
                     };
 
                     let spectrum = self.fft.forward(samples);
-                    self.ui.handle_event(UiEvent::Spectrum { spectrum, frequency_band: self.sampled_frequency_band }, &mut self.proxy);
+                    self.ui.handle_event(UiEvent::Spectrum { spectrum, frequency_band: self.state.sampled_frequency_band }, &mut self.proxy, &mut self.state.ui_state);
                 }
             }
         }
@@ -172,7 +227,10 @@ where
     }
 
     pub fn persist(self) -> Result<(), Error> {
-        self.app_files.save_ui_state(self.ui.state())?;
+        self.files.save_app_state(AppSnapshot {
+            app_state: &self.state,
+            timestamp: Local::now(),
+        })?;
         Ok(())
     }
 
@@ -189,8 +247,10 @@ where
                 let rtl_sdr = self.rtl_sdr.clone();
                 let event_sender = self.proxy.event_sender.clone();
 
-                let sampled_frequency_band =
-                    sampled_frequency_band(frequency, self.sampled_frequency_band.bandwidth());
+                let sampled_frequency_band = FrequencyBand::from_center_and_bandwidth(
+                    frequency,
+                    self.state.sampled_frequency_band.bandwidth(),
+                );
 
                 tokio::spawn(async move {
                     if let Err(error) = rtl_sdr.set_center_frequency(frequency).await {
@@ -208,7 +268,7 @@ where
             AppEvent::SampledFrequencyBandChanged {
                 sampled_frequency_band,
             } => {
-                self.sampled_frequency_band = sampled_frequency_band;
+                self.state.sampled_frequency_band = sampled_frequency_band;
             }
         }
 
@@ -263,10 +323,8 @@ enum AppEvent {
     },
 }
 
-fn sampled_frequency_band(center_frequency: u32, sample_rate: u32) -> FrequencyBand {
-    let half_bandwidth = sample_rate / 2;
-    let start = center_frequency.saturating_sub(half_bandwidth);
-    let end = start + sample_rate;
-
-    FrequencyBand { start, end }
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AppSnapshot<A> {
+    pub app_state: A,
+    pub timestamp: DateTime<Local>,
 }

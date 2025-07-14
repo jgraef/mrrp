@@ -33,12 +33,8 @@ use crate::util::{
 pub struct WaterfallState {
     new_line: Option<NewLine>,
     lines: Lines,
-
-    // todo: should this be in the state?
     #[serde(skip, default = "default_cache")]
     cache: Option<Cache>,
-
-    // todo: move this into the widget?
     color_map: ColorMap,
     downsampling: Downsampling,
 }

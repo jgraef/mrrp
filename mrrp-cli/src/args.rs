@@ -42,12 +42,12 @@ pub struct MainArgs {
     pub address: Option<String>,
 
     /// Sample rate. This determines the bandwidth of the spectrum.
-    #[clap(short, long = "samplerate", default_value = "2400000")]
-    pub sample_rate: u32,
+    #[clap(short, long = "samplerate")]
+    pub sample_rate: Option<u32>,
 
     /// Center frequency
-    #[clap(short, long, default_value = "7000000")]
-    pub frequency: u32,
+    #[clap(short, long)]
+    pub frequency: Option<u32>,
 
     /// Gain
     #[clap(short, long, default_value = "auto")]
@@ -61,9 +61,9 @@ pub struct MainArgs {
     #[clap(long, default_value = "100")]
     pub redraw_interval: u64,
 
-    /// Don't load the previous UI state from file.
+    /// Don't load the previous program state from file.
     #[clap(long)]
-    pub reset_ui: bool,
+    pub reset: bool,
 
     /// Use the specified file instead of the default bandplan
     #[clap(long)]

@@ -10,21 +10,22 @@ use std::{
     },
 };
 
-use chrono::Local;
 use color_eyre::eyre::eyre;
 use directories::ProjectDirs;
 
 use crate::{
     Error,
+    app::{
+        AppSnapshot,
+        AppState,
+    },
     ui::{
-        UiState,
         bandplan::{
             BANDPLAN_INTERNATIONAL_BYTES,
             Bandplan,
         },
         keybinds::Keybinds,
     },
-    util::Snapshot,
 };
 
 #[derive(Debug)]
@@ -80,26 +81,20 @@ impl AppFiles {
         }
     }
 
-    fn ui_state_path(&self) -> PathBuf {
-        self.state_dir().join("ui_state.cbor")
+    fn app_state_path(&self) -> PathBuf {
+        self.state_dir().join("app_state.cbor")
     }
 
-    pub fn load_ui_state(&self) -> Result<Snapshot<UiState>, Error> {
-        let path = self.ui_state_path();
-        tracing::debug!(path = %path.display(), "Loading UI state");
+    pub fn load_app_state(&self) -> Result<AppSnapshot<AppState>, Error> {
+        let path = self.app_state_path();
+        tracing::debug!(path = %path.display(), "Loading app state");
         Ok(serde_cbor::from_reader(BufReader::new(File::open(path)?))?)
     }
 
-    pub fn save_ui_state(&self, ui_state: &UiState) -> Result<(), Error> {
-        let path = self.ui_state_path();
-        tracing::debug!(path = %path.display(), "Saving UI state");
-        serde_cbor::to_writer(
-            BufWriter::new(File::create(path)?),
-            &Snapshot {
-                state: ui_state,
-                timestamp: Local::now(),
-            },
-        )?;
+    pub fn save_app_state(&self, snapshot: AppSnapshot<&AppState>) -> Result<(), Error> {
+        let path = self.app_state_path();
+        tracing::debug!(path = %path.display(), "Saving app state");
+        serde_cbor::to_writer(BufWriter::new(File::create(path)?), &snapshot)?;
         Ok(())
     }
 }
