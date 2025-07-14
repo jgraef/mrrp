@@ -4,15 +4,12 @@ use std::{
 };
 
 use num_complex::Complex;
-use palette::Srgb;
 use ratatui::{
-    buffer::{
-        Buffer,
-        Cell,
-    },
+    buffer::Buffer,
     layout::{
         Position,
         Rect,
+        Size,
     },
     palette::Hsl,
     style::Color,
@@ -37,14 +34,11 @@ use crate::util::{
 pub struct WaterfallState {
     new_line: Option<NewLine>,
     lines: Lines,
-    #[serde(skip, default = "default_cache")]
-    cache: Option<Cache>,
+    #[serde(skip, default)]
+    cache: Cache,
     color_map: ColorMap,
     downsampling: Downsampling,
-}
-
-fn default_cache() -> Option<Cache> {
-    Some(Cache::default())
+    draw_mode: DrawMode,
 }
 
 impl Default for WaterfallState {
@@ -53,8 +47,9 @@ impl Default for WaterfallState {
             new_line: None,
             lines: Lines::new(10),
             color_map: ColorMap::default(),
-            cache: default_cache(),
+            cache: Default::default(),
             downsampling: Downsampling::Average,
+            draw_mode: DrawMode::HalfBlockHorizontal,
         }
     }
 }
@@ -65,9 +60,7 @@ impl WaterfallState {
             if let Some(line) = line.into_line() {
                 self.lines.push(line);
 
-                if let Some(cache) = &mut self.cache {
-                    cache.scroll(self.lines.history);
-                }
+                self.cache.scroll(self.lines.history);
             }
         }
     }
@@ -96,6 +89,111 @@ impl WaterfallState {
     }
 }
 
+const HALF_BLOCK_LEFT: char = '\u{258c}';
+const HALF_BLOCK_TOP: char = '\u{2580}';
+const COLOR_BLACK: Color = Color::Rgb(0, 0, 0);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum DrawMode {
+    #[default]
+    FullBlock,
+    HalfBlockHorizontal,
+    HalfBlockVertical,
+}
+
+#[derive(Debug)]
+pub struct Canvas<'a> {
+    pub area: Rect,
+    pub buf: &'a mut Buffer,
+    pub mode: DrawMode,
+    pub size: Size,
+}
+
+impl<'a> Canvas<'a> {
+    pub fn new(area: Rect, buf: &'a mut Buffer, mode: DrawMode) -> Self {
+        let size = match mode {
+            DrawMode::FullBlock => {
+                Size {
+                    width: area.width,
+                    height: area.height,
+                }
+            }
+            DrawMode::HalfBlockHorizontal => {
+                Size {
+                    width: area.width * 2,
+                    height: area.height,
+                }
+            }
+            DrawMode::HalfBlockVertical => {
+                Size {
+                    width: area.width,
+                    height: area.height * 2,
+                }
+            }
+        };
+
+        Self {
+            area,
+            buf,
+            mode,
+            size,
+        }
+    }
+
+    #[inline(always)]
+    pub fn draw(&mut self, position: impl Into<Position>, color: impl Into<Color>) {
+        self.draw_impl(position.into(), color.into());
+    }
+
+    fn draw_impl(&mut self, position: Position, color: Color) {
+        match self.mode {
+            DrawMode::FullBlock => {
+                self.buf[(self.area.x + position.x, self.area.y + position.y)].bg = color;
+            }
+            DrawMode::HalfBlockHorizontal => {
+                let cell =
+                    &mut self.buf[(self.area.x + (position.x / 2), self.area.y + position.y)];
+                if position.x % 2 == 0 {
+                    cell.fg = color;
+                    cell.set_char(HALF_BLOCK_LEFT);
+                }
+                else {
+                    cell.bg = color;
+                }
+            }
+            DrawMode::HalfBlockVertical => {
+                let cell =
+                    &mut self.buf[(self.area.x + position.x, self.area.y + (position.y / 2))];
+                if position.y % 2 == 0 {
+                    cell.fg = color;
+                    cell.set_char(HALF_BLOCK_TOP);
+                }
+                else {
+                    cell.bg = color;
+                }
+            }
+        }
+    }
+
+    pub fn clear(&mut self, position: impl Into<Position>) {
+        self.draw_impl(position.into(), COLOR_BLACK);
+    }
+
+    pub fn clear_line(&mut self, y: u16) {
+        let y = match self.mode {
+            DrawMode::FullBlock => y,
+            DrawMode::HalfBlockHorizontal => y,
+            DrawMode::HalfBlockVertical => y / 2,
+        };
+
+        for x in 0..self.area.width {
+            let cell = &mut self.buf[(self.area.x + x, self.area.y + y)];
+            cell.reset();
+            cell.bg = COLOR_BLACK;
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct WaterfallWidget<'a> {
     pub waterfall: &'a mut WaterfallState,
@@ -108,39 +206,46 @@ impl<'a> Widget for WaterfallWidget<'a> {
     where
         Self: Sized,
     {
-        self.waterfall.lines.history = area.height.max(10).into();
+        let mut canvas = Canvas::new(area, buf, self.waterfall.draw_mode);
+        self.waterfall.lines.history = canvas.size.height.max(10).into();
 
-        let mut mouse_over = None;
         let mut total_min_max = None;
-        let display_bin_width = self.view_frequency_band.bandwidth() as f32 / area.width as f32;
+        let display_bin_width =
+            self.view_frequency_band.bandwidth() as f32 / canvas.size.width as f32;
 
         let sample_spectrum = |x: u16, line: &Line| {
+            let line_start = line.frequency_band.start as f32;
+
             let start_frequency =
                 self.view_frequency_band.start as f32 + x as f32 * display_bin_width;
             let end_frequency =
                 self.view_frequency_band.start as f32 + (x + 1) as f32 * display_bin_width;
 
-            let start_line_index = (((start_frequency - line.frequency_band.start as f32)
-                / line.bin_width)
-                .max(0.0) as usize)
+            let start_line_index = (((start_frequency - line_start) / line.bin_width).max(0.0)
+                as usize)
                 .min(line.samples.len());
 
-            let end_line_index = (((end_frequency - line.frequency_band.start as f32)
-                / line.bin_width)
-                .ceil()
+            let end_line_index = (((end_frequency - line_start) / line.bin_width)
+                //.ceil()
                 .max(0.0) as usize)
                 .min(line.samples.len());
 
             (start_line_index < end_line_index).then(|| {
                 let samples = &line.samples[start_line_index..end_line_index];
-                self.waterfall.downsampling.apply(samples)
+                (
+                    self.waterfall.downsampling.apply(samples),
+                    FrequencyBand {
+                        start: start_frequency as u32,
+                        end: end_frequency as u32,
+                    },
+                )
             })
         };
 
-        let mut render_cell = |x, y, z, buf: &mut Buffer| {
+        let mut render_cell = |x, y, z, canvas: &mut Canvas| {
             if let Some(z) = z {
                 // render to cell
-                buf[(area.x + x, area.y + y)].bg = self.waterfall.color_map.map(z);
+                canvas.draw((x, y), self.waterfall.color_map.map(z));
 
                 // track min max
                 if let Some((min, max)) = &mut total_min_max {
@@ -158,54 +263,28 @@ impl<'a> Widget for WaterfallWidget<'a> {
                 else {
                     total_min_max = Some((z, z));
                 }
-
-                // get mouse over info if the mouse is over this cell
-                if self.mouse_position.map_or(false, |mouse_position| {
-                    mouse_position.x == x && mouse_position.y == y
-                }) {
-                    let start_frequency = (self.view_frequency_band.start as f32
-                        + x as f32 * display_bin_width)
-                        as u32;
-                    let end_frequency = (self.view_frequency_band.start as f32
-                        + (x + 1) as f32 * display_bin_width)
-                        as u32;
-
-                    mouse_over = Some((
-                        z,
-                        FrequencyBand {
-                            start: start_frequency,
-                            end: end_frequency,
-                        },
-                    ));
-                }
             }
             else {
-                clear_cell(&mut buf[(x + area.x, y + area.y)]);
+                canvas.clear((x, y));
             }
         };
 
         // render spectral density history
-        for y in 0..area.height {
+        for y in 0..canvas.size.height {
             if let Some(line) = self.waterfall.lines.get_line(y.into()) {
-                if let Some(cache) = &mut self.waterfall.cache {
-                    let cache_line = cache.get_line(y, area.width, self.view_frequency_band, |x| {
-                        sample_spectrum(x, line)
-                    });
+                let cache_line = self.waterfall.cache.get_line_or_sample(
+                    y,
+                    canvas.size.width,
+                    self.view_frequency_band,
+                    |x| sample_spectrum(x, line).map(|(z, _)| z),
+                );
 
-                    for x in 0..area.width {
-                        render_cell(x, y, cache_line[usize::from(x)], buf);
-                    }
-                }
-                else {
-                    for x in 0..area.width {
-                        render_cell(x, y, sample_spectrum(x, line), buf);
-                    }
+                for x in 0..canvas.size.width {
+                    render_cell(x, y, cache_line[usize::from(x)], &mut canvas);
                 }
             }
             else {
-                for x in 0..area.width {
-                    clear_cell(&mut buf[(x + area.x, y + area.y)]);
-                }
+                canvas.clear_line(y);
             }
         }
 
@@ -217,32 +296,37 @@ impl<'a> Widget for WaterfallWidget<'a> {
         }
 
         // render mouse cursor
-        if let Some((mouse_position, (z, frequency_band))) = self.mouse_position.zip(mouse_over) {
-            let text = format!(
-                "x-[{} ± {}: {:.1} dBFS]-x",
-                format_frequency(frequency_band.center()).with_band(self.view_frequency_band),
-                format_frequency(frequency_band.bandwidth() / 2),
-                z,
-            );
-            let text_width = text.len() - 4;
+        if let Some(mouse_position) = self.mouse_position {
+            if let Some(line) = self.waterfall.lines.get_line(mouse_position.y.into()) {
+                if let Some((z, mouse_frequency_band)) = sample_spectrum(mouse_position.x, line) {
+                    let text = format!(
+                        "x-[{} ± {}: {:.1} dBFS]-x",
+                        format_frequency(mouse_frequency_band.center())
+                            .with_band(self.view_frequency_band),
+                        format_frequency(mouse_frequency_band.bandwidth() / 2),
+                        z,
+                    );
+                    let text_width = text.len() - 4;
 
-            if usize::from(mouse_position.x) + text_width > area.width.into()
-                && usize::from(mouse_position.x) > text_width
-            {
-                buf.set_string(
-                    area.x + mouse_position.x - u16::try_from(text_width).unwrap(),
-                    area.y + mouse_position.y,
-                    &text[2..],
-                    Color::White,
-                );
-            }
-            else {
-                buf.set_string(
-                    area.x + mouse_position.x,
-                    area.y + mouse_position.y,
-                    &text[..text_width + 2],
-                    Color::White,
-                );
+                    if usize::from(mouse_position.x) + text_width > area.width.into()
+                        && usize::from(mouse_position.x) > text_width
+                    {
+                        buf.set_string(
+                            area.x + mouse_position.x - u16::try_from(text_width).unwrap(),
+                            area.y + mouse_position.y,
+                            &text[2..],
+                            Color::White,
+                        );
+                    }
+                    else {
+                        buf.set_string(
+                            area.x + mouse_position.x,
+                            area.y + mouse_position.y,
+                            &text[..text_width + 2],
+                            Color::White,
+                        );
+                    }
+                }
             }
         }
     }
@@ -372,10 +456,11 @@ impl ColorMap {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Downsampling {
     Sum,
+    #[default]
     Average,
     Min,
-    #[default]
     Max,
+    First,
 }
 
 impl Downsampling {
@@ -386,13 +471,9 @@ impl Downsampling {
             Downsampling::Average => samples.iter().sum::<f32>() / samples.len() as f32,
             Downsampling::Min => min_float(samples.iter().copied()).unwrap(),
             Downsampling::Max => max_float(samples.iter().copied()).unwrap(),
+            Downsampling::First => samples[0],
         }
     }
-}
-
-fn clear_cell(cell: &mut Cell) {
-    cell.reset();
-    cell.bg = Srgb::<f32>::default().into();
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -437,7 +518,12 @@ impl Cache {
         }
     }
 
-    pub fn get_line(
+    pub fn clear(&mut self) {
+        self.lines.clear();
+        self.view_frequency_band = None;
+    }
+
+    pub fn get_line_or_sample(
         &mut self,
         y: u16,
         width: u16,
@@ -477,7 +563,7 @@ struct CacheLine {
 
 impl CacheLine {
     pub fn fill(&mut self, width: u16, mut sample_spectrum: impl FnMut(u16) -> Option<f32>) {
-        if self.samples.is_empty() {
+        if self.samples.is_empty() || self.samples.len() != width.into() {
             self.samples = (0..width).map(|x| sample_spectrum(x)).collect();
         }
     }

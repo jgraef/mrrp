@@ -33,7 +33,10 @@ use crate::{
         },
         frequency_dial::FrequencyDial,
         frequency_marks::FrequencyMarks,
-        keybinds::Keybinds,
+        keybinds::{
+            Action,
+            Keybinds,
+        },
         waterfall::{
             WaterfallState,
             WaterfallWidget,
@@ -178,18 +181,15 @@ impl Ui {
             TerminalEvent::Key(key_event) => {
                 if let Some(action) = self.keybinds.get(key_event) {
                     match action {
-                        keybinds::Action::Quit => app.request_exit(),
-                        keybinds::Action::ZoomIn => state.zoom_view(1, self.sampled_frequency_band),
-                        keybinds::Action::ZoomOut => {
-                            state.zoom_view(-1, self.sampled_frequency_band)
-                        }
-                        keybinds::Action::MoveLeft => state.move_view(-1, false),
-                        keybinds::Action::MoveLeftBig => state.move_view(-1, true),
-                        keybinds::Action::MoveRight => state.move_view(1, false),
-                        keybinds::Action::MoveRightBig => state.move_view(1, true),
-                        keybinds::Action::CenterView => {
-                            state.center_view(self.sampled_frequency_band)
-                        }
+                        Action::Quit => app.request_exit(),
+                        Action::ZoomIn => state.zoom_view(1, self.sampled_frequency_band),
+                        Action::ZoomOut => state.zoom_view(-1, self.sampled_frequency_band),
+                        Action::MoveLeft => state.move_view(-1, false),
+                        Action::MoveLeftBig => state.move_view(-1, true),
+                        Action::MoveRight => state.move_view(1, false),
+                        Action::MoveRightBig => state.move_view(1, true),
+                        Action::CenterView => state.center_view(self.sampled_frequency_band),
+                        Action::Test => {}
                     }
                 }
             }
@@ -212,6 +212,9 @@ impl Ui {
             }
             TerminalEvent::FocusLost => {
                 self.mouse_position = None;
+            }
+            TerminalEvent::Resize(width, height) => {
+                tracing::debug!(?width, ?height, "terminal resize");
             }
             _ => {}
         }

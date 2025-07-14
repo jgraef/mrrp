@@ -2,5 +2,10 @@
 resolver = "3"
 members = ["mrrp", "mrrp-cli"]
 
-[profile.dev.package."*"]
+[profile.dev]
 opt-level = 3
+overflow-checks = false
+
+[profile.release]
+debug = "full"
+strip = "none"

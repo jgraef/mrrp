@@ -75,7 +75,7 @@ where
         if args.fft_size == 0 {
             bail!("FFT size must be greater than 0");
         }
-        if args.fft_size & 1 == 1 {
+        if args.fft_size % 2 == 1 {
             bail!("FFT size must be a multiple of 2")
         }
         if args.fft_overlap >= args.fft_size {
@@ -133,7 +133,7 @@ where
             }
         }
         if let Some(sample_rate) = args.sample_rate {
-            if sample_rate & 1 == 1 {
+            if sample_rate % 2 == 1 {
                 // todo: we currently can't calculate the start and end frequency of the signal
                 // correctly in this case.
                 bail!("Sample rate must be divisble by 2");
@@ -159,6 +159,7 @@ where
             SampleReader::new(rtl_sdr.samples().await?, args.fft_size, args.fft_overlap);
 
         let terminal = ratatui::init();
+        tracing::debug!(terminal_size = ?terminal.size()?);
         crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
 
         let terminal_events = crossterm::event::EventStream::new();
