@@ -25,6 +25,7 @@ use crate::{
             Bandplan,
         },
         keybinds::Keybinds,
+        waterfall::ColorMap,
     },
 };
 
@@ -77,7 +78,22 @@ impl AppFiles {
             Keybinds::from_path(path)
         }
         else {
-            Ok(Keybinds::default())
+            let keybinds = Keybinds::default();
+            keybinds.to_path(path)?;
+            Ok(keybinds)
+        }
+    }
+
+    pub fn color_map(&self) -> Result<ColorMap, Error> {
+        let path = self.config_dir().join("colormap.toml");
+
+        if path.exists() {
+            ColorMap::from_path(path)
+        }
+        else {
+            let color_map = ColorMap::default();
+            color_map.to_path(path)?;
+            Ok(color_map)
         }
     }
 

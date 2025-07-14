@@ -1,5 +1,10 @@
 use std::{
     collections::HashMap,
+    fs::File,
+    io::{
+        BufReader,
+        BufWriter,
+    },
     path::Path,
 };
 
@@ -8,11 +13,14 @@ use crossterm::event::{
     KeyEvent,
     KeyModifiers,
 };
-use serde::Deserialize;
+use serde::{
+    Deserialize,
+    Serialize,
+};
 
 use crate::Error;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Action {
     Quit,
@@ -27,8 +35,9 @@ pub enum Action {
     Test,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Keybinds {
+    #[serde(with = "serde_keybinds")]
     keybinds: HashMap<Keybind, Action>,
 }
 
@@ -44,7 +53,13 @@ impl Keybinds {
 
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
         tracing::debug!(path = %path.as_ref().display(), "Loading keybinds from file");
-        Ok(toml::from_slice(&std::fs::read(path)?)?)
+        Ok(serde_json::from_reader(BufReader::new(File::open(path)?))?)
+    }
+
+    pub fn to_path(&self, path: impl AsRef<Path>) -> Result<(), Error> {
+        tracing::debug!(path = %path.as_ref().display(), "Writing keybinds to file");
+        serde_json::to_writer_pretty(BufWriter::new(File::create(path)?), self)?;
+        Ok(())
     }
 }
 
@@ -70,9 +85,14 @@ impl Default for Keybinds {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 struct Keybind {
+    #[serde(rename = "key")]
     code: KeyCode,
+    #[serde(
+        skip_serializing_if = "KeyModifiers::is_empty",
+        default = "KeyModifiers::empty"
+    )]
     modifiers: KeyModifiers,
 }
 
@@ -98,60 +118,66 @@ impl From<char> for Keybind {
     }
 }
 
-mod deserialize {
-    use std::{
-        collections::HashMap,
-        fmt,
-    };
+mod serde_keybinds {
+    use std::fmt;
 
     use serde::{
-        Deserialize,
         Deserializer,
-        de::{
-            MapAccess,
-            Visitor,
-        },
+        Serializer,
+        de::Visitor,
+        ser::SerializeSeq,
     };
 
-    use crate::ui::keybinds::{
-        Action,
-        Keybind,
-        Keybinds,
-    };
+    use super::*;
+
+    #[derive(Serialize, Deserialize)]
+    struct Pair<K, A> {
+        #[serde(flatten)]
+        keybind: K,
+        action: A,
+    }
+
+    pub fn serialize<S>(
+        keybinds: &HashMap<Keybind, Action>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(keybinds.len()))?;
+        for (keybind, action) in keybinds {
+            seq.serialize_element(&Pair { keybind, action })?;
+        }
+        seq.end()
+    }
 
     struct KeybindsVisitor;
 
     impl<'de> Visitor<'de> for KeybindsVisitor {
-        type Value = Keybinds;
+        type Value = HashMap<Keybind, Action>;
 
         fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a map, mapping actions to list of actions")
+            formatter.write_str("a list of keybinds")
         }
 
-        fn visit_map<M>(self, mut access: M) -> Result<Self::Value, M::Error>
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
         where
-            M: MapAccess<'de>,
+            A: serde::de::SeqAccess<'de>,
         {
-            let mut keybinds = Keybinds {
-                keybinds: HashMap::with_capacity(access.size_hint().unwrap_or_default()),
-            };
+            let mut keybinds = HashMap::with_capacity(seq.size_hint().unwrap_or_default());
 
-            while let Some((action, keybind)) = access.next_entry::<Action, Vec<Keybind>>()? {
-                for keybind in keybind {
-                    keybinds.keybinds.insert(keybind, action);
-                }
+            while let Some(pair) = seq.next_element::<Pair<Keybind, Action>>()? {
+                keybinds.insert(pair.keybind, pair.action);
             }
 
             Ok(keybinds)
         }
     }
 
-    impl<'de> Deserialize<'de> for Keybinds {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: Deserializer<'de>,
-        {
-            deserializer.deserialize_map(KeybindsVisitor)
-        }
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<HashMap<Keybind, Action>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_seq(KeybindsVisitor)
     }
 }

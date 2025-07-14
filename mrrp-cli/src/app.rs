@@ -36,6 +36,7 @@ use crate::{
         UiWidget,
         bandplan::Bandplan,
         keybinds::Keybinds,
+        waterfall::ColorMap,
     },
     util::FrequencyBand,
 };
@@ -96,6 +97,13 @@ where
         }
         else {
             app_files.bandplan()?
+        };
+
+        let colormap = if let Some(path) = &args.colormap {
+            ColorMap::from_path(path)?
+        }
+        else {
+            app_files.color_map()?
         };
 
         let mut state = (!args.reset)
@@ -166,7 +174,7 @@ where
 
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
-        let ui = Ui::new(state.sampled_frequency_band, keybinds, bandplan);
+        let ui = Ui::new(state.sampled_frequency_band, keybinds, bandplan, colormap);
 
         Ok(Self {
             state,

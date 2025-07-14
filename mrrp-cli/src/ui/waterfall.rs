@@ -1,6 +1,12 @@
 use std::{
     collections::VecDeque,
+    fs::File,
+    io::{
+        BufReader,
+        BufWriter,
+    },
     ops::Index,
+    path::Path,
 };
 
 use num_complex::Complex;
@@ -21,14 +27,17 @@ use serde::{
     Serialize,
 };
 
-use crate::util::{
-    FrequencyBand,
-    debug_limited,
-    format_frequency,
-    lerp,
-    max_float,
-    min_float,
-    unlerp,
+use crate::{
+    Error,
+    util::{
+        FrequencyBand,
+        debug_limited,
+        format_frequency,
+        lerp,
+        max_float,
+        min_float,
+        unlerp,
+    },
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,7 +46,6 @@ pub struct WaterfallState {
     lines: Lines,
     #[serde(skip, default)]
     cache: Cache,
-    color_map: ColorMap,
     downsampling: Downsampling,
     draw_mode: DrawMode,
     min_z: f32,
@@ -54,7 +62,6 @@ impl Default for WaterfallState {
         Self {
             new_line: None,
             lines: Lines::new(10),
-            color_map: ColorMap::default(),
             cache: Default::default(),
             downsampling: Downsampling::Max,
             draw_mode: DrawMode::HalfBlockHorizontal,
@@ -209,6 +216,7 @@ pub struct WaterfallWidget<'a> {
     pub waterfall: &'a mut WaterfallState,
     pub view_frequency_band: FrequencyBand,
     pub mouse_position: Option<Position>,
+    pub color_map: &'a ColorMap,
 }
 
 impl<'a> Widget for WaterfallWidget<'a> {
@@ -257,7 +265,7 @@ impl<'a> Widget for WaterfallWidget<'a> {
                 // render to cell
                 let normalized =
                     unlerp(z, self.waterfall.min_z, self.waterfall.max_z).clamp(0.0, 1.0);
-                canvas.draw((x, y), self.waterfall.color_map.map(normalized));
+                canvas.draw((x, y), self.color_map.map(normalized));
 
                 // track min max
                 if let Some((min, max)) = &mut total_min_max {
@@ -415,15 +423,19 @@ struct Line {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-enum ColorMap {
+#[serde(rename_all = "kebab-case")]
+pub enum ColorMap {
     HueLightness {
         hue_low: f32,
         hue_high: f32,
         lightness_low: f32,
         lightness_high: f32,
     },
-    LinearSteps {
+    LinearRgb {
         colors: Vec<LinSrgb>,
+    },
+    Closest {
+        colors: Vec<Color>,
     },
 }
 
@@ -439,9 +451,20 @@ impl Default for ColorMap {
 }
 
 impl ColorMap {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
+        tracing::debug!(path = %path.as_ref().display(), "Loading colormap from file");
+        Ok(serde_json::from_reader(BufReader::new(File::open(path)?))?)
+    }
+
+    pub fn to_path(&self, path: impl AsRef<Path>) -> Result<(), Error> {
+        tracing::debug!(path = %path.as_ref().display(), "Wrriting colormap to file");
+        serde_json::to_writer_pretty(BufWriter::new(File::create(path)?), self)?;
+        Ok(())
+    }
+
     pub fn map(&self, normalized: f32) -> Color {
         match self {
-            ColorMap::HueLightness {
+            Self::HueLightness {
                 hue_low,
                 hue_high,
                 lightness_low,
@@ -453,7 +476,7 @@ impl ColorMap {
                     lerp(normalized.powi(2), *lightness_low, *lightness_high),
                 ))
             }
-            ColorMap::LinearSteps { colors } => {
+            Self::LinearRgb { colors } => {
                 let i = normalized * (colors.len() - 1) as f32;
                 let i_low = i.floor();
                 let i_high = i.ceil();
@@ -471,6 +494,10 @@ impl ColorMap {
                     )
                     .into()
                 }
+            }
+            Self::Closest { colors } => {
+                let i = (normalized * (colors.len() - 1) as f32).round() as usize;
+                colors[i]
             }
         }
     }
@@ -590,7 +617,7 @@ struct CacheLine {
 
 impl CacheLine {
     pub fn fill(&mut self, width: u16, mut sample_spectrum: impl FnMut(u16) -> Option<f32>) {
-        if self.samples.is_empty() || self.samples.len() != width.into() {
+        if self.samples.is_empty() || self.samples.len() != usize::from(width) {
             self.samples = (0..width).map(|x| sample_spectrum(x)).collect();
         }
     }

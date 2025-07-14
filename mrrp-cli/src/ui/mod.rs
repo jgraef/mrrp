@@ -38,6 +38,7 @@ use crate::{
             Keybinds,
         },
         waterfall::{
+            ColorMap,
             WaterfallState,
             WaterfallWidget,
         },
@@ -114,6 +115,7 @@ pub struct Ui {
 
     keybinds: Keybinds,
     bandplan: Bandplan,
+    color_map: ColorMap,
 
     // todo: remove this - how?
     sampled_frequency_band: FrequencyBand,
@@ -124,6 +126,7 @@ impl Ui {
         sampled_frequency_band: FrequencyBand,
         keybinds: Keybinds,
         bandplan: Bandplan,
+        color_map: ColorMap,
     ) -> Self {
         Self {
             layout: Layout::vertical([
@@ -137,6 +140,7 @@ impl Ui {
             keybinds,
             sampled_frequency_band,
             bandplan,
+            color_map,
         }
     }
 
@@ -263,6 +267,7 @@ impl<'a> Widget for UiWidget<'a> {
             waterfall: &mut self.state.waterfall_state,
             view_frequency_band: self.state.view_frequency_band,
             mouse_position: self.ui.mouse_position_inside_area(waterfall_area),
+            color_map: &self.ui.color_map,
         }
         .render(waterfall_area, buf);
     }

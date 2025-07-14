@@ -75,8 +75,11 @@ pub struct MainArgs {
     #[clap(long)]
     pub bandplan: Option<PathBuf>,
 
-    /// Use the specified file instead of the default keybinds
+    /// Use the specified TOML file instead of the default keybinds
     pub keybinds: Option<PathBuf>,
+
+    /// Use the specified JSON file as color map.
+    pub colormap: Option<PathBuf>,
 
     /// Size of segments that are FFT'd
     #[clap(long, default_value = "16384")]
