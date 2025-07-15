@@ -244,7 +244,7 @@ impl<'a> Widget for WaterfallWidget<'a> {
                 .min(line.samples.len());
 
             let end_line_index = (((end_frequency - line_start) / line.bin_width)
-                //.ceil()
+                .ceil()
                 .max(0.0) as usize)
                 .min(line.samples.len());
 
@@ -561,6 +561,7 @@ impl Lines {
 struct Cache {
     lines: VecDeque<CacheLine>,
     view_frequency_band: Option<FrequencyBand>,
+    canvas_width: Option<u16>,
 }
 
 impl Cache {
@@ -586,12 +587,22 @@ impl Cache {
     ) -> &CacheLine {
         let line_index = usize::from(y);
 
+        // clear cache if view frequency band changed
         if self
             .view_frequency_band
             .map_or(true, |band| band != view_frequency_band)
         {
             self.lines.clear();
             self.view_frequency_band = Some(view_frequency_band);
+        }
+
+        // clear cache if canvas width changed
+        if self
+            .canvas_width
+            .map_or(true, |canvas_width| canvas_width != width)
+        {
+            self.lines.clear();
+            self.canvas_width = Some(width);
         }
 
         // this just makes sure that if we happen to render an older line that somehow
