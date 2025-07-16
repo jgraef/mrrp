@@ -318,6 +318,7 @@ impl<'a> Widget for WaterfallWidget<'a> {
         // render mouse cursor
         if let Some(mouse_position) = self.mouse_position {
             if let Some(line) = self.waterfall.lines.get_line(mouse_position.y.into()) {
+                // fixme: this is still broken with half-width blocks
                 if let Some((z, mouse_frequency_band)) = sample_spectrum(mouse_position.x, line) {
                     let text = format!(
                         "x-[{} ± {}: {:.1} dBFS]-x",

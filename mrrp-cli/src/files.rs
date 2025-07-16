@@ -24,6 +24,7 @@ use crate::{
             BANDPLAN_INTERNATIONAL_BYTES,
             Bandplan,
         },
+        bookmarks::Bookmarks,
         keybinds::Keybinds,
         waterfall::ColorMap,
     },
@@ -97,6 +98,12 @@ impl AppFiles {
         }
     }
 
+    pub fn bookmarks(&self) -> Result<Bookmarks, Error> {
+        let path = self.config_dir().join("bookmarks");
+        std::fs::create_dir_all(&path)?;
+        Bookmarks::open(path)
+    }
+
     fn app_state_path(&self) -> PathBuf {
         self.state_dir().join("app_state.cbor")
     }
@@ -112,5 +119,9 @@ impl AppFiles {
         tracing::debug!(path = %path.display(), "Saving app state");
         ciborium::into_writer(&snapshot, BufWriter::new(File::create(path)?))?;
         Ok(())
+    }
+
+    pub fn log_file(&self) -> PathBuf {
+        self.project_dirs.data_local_dir().join("mrrp-cli.log")
     }
 }

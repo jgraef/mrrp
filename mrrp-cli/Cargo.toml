@@ -7,6 +7,7 @@ edition = "2024"
 path = "../mrrp"
 
 [dependencies]
+biquad = "0.5.0"
 chrono = { version = "0.4.41", features = ["clock", "serde"], default-features = false }
 ciborium = "0.2.2"
 clap = { version = "4.5.41", features = ["derive"] }
@@ -17,9 +18,11 @@ derive_more = "2.0.1"
 directories = "6.0.0"
 dotenvy = "0.15.7"
 futures-util = "0.3.31"
-num-complex = { version = "0.4.6", features = ["bytemuck"] }
+num-complex = { version = "0.4.6", features = ["bytemuck", "serde"] }
 palette = { version = "0.7.6", features = ["serde", "serializing"] }
+parking_lot = "0.12.4"
 ratatui = { version = "0.29.0", features = ["palette", "serde"] }
+rodio = { version = "0.21.1", default-features = false, features = ["playback"] }
 rtlsdr-async = { git = "https://github.com/jgraef/rtlsdr-async.git", version = "0.1.0" }
 rustfft = "6.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
@@ -28,3 +31,4 @@ tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "time"] }
 toml = "0.9.2"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+walkdir = "2.5.0"

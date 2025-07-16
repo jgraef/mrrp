@@ -14,6 +14,10 @@ use color_eyre::eyre::{
 use crossterm::execute;
 use futures_util::TryStreamExt;
 use ratatui::DefaultTerminal;
+use rodio::{
+    OutputStreamBuilder,
+    Source,
+};
 use rtlsdr_async::Backend;
 use serde::{
     Deserialize,
@@ -26,6 +30,7 @@ use tokio::{
 
 use crate::{
     args::MainArgs,
+    demodulator::Demodulator,
     fft::Fft,
     files::AppFiles,
     reader::SampleReader,
@@ -105,6 +110,8 @@ where
         else {
             app_files.color_map()?
         };
+
+        let _bookmarks = app_files.bookmarks()?;
 
         let mut state = (!args.reset)
             .then(|| {
@@ -196,6 +203,17 @@ where
     pub async fn run(&mut self) -> Result<(), Error> {
         self.exit_requested = false;
 
+        let mut am_demod = Demodulator::new(
+            FrequencyBand::from_center_and_bandwidth(6_020_000, 10000),
+            self.state.sampled_frequency_band,
+        );
+        let audio_output = OutputStreamBuilder::open_default_stream()?;
+        audio_output.mixer().add(
+            am_demod
+                .audio_source()
+                .automatic_gain_control(0.25, 4.0, 0.0, 5.0),
+        );
+
         while !self.exit_requested {
             tokio::select! {
                 option = self.app_events.recv() => {
@@ -228,6 +246,8 @@ where
 
                     let spectrum = self.fft.forward(samples);
                     self.ui.handle_event(UiEvent::Spectrum { spectrum, frequency_band: self.state.sampled_frequency_band }, &mut self.proxy, &mut self.state.ui_state);
+
+                    am_demod.push(samples);
                 }
             }
         }

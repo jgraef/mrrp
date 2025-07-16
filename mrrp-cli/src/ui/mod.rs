@@ -1,4 +1,5 @@
 pub mod bandplan;
+pub mod bookmarks;
 pub mod frequency_dial;
 pub mod frequency_marks;
 pub mod keybinds;

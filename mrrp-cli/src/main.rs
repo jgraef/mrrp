@@ -1,5 +1,6 @@
 pub mod app;
 pub mod args;
+pub mod demodulator;
 pub mod fft;
 pub mod files;
 pub mod reader;
@@ -34,22 +35,26 @@ use crate::{
         MainArgs,
     },
     files::AppFiles,
+    ui::bookmarks::import_sdrpp_bookmarks,
 };
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
+
+    // fixme: this messes with the ratatui panic hook?
     //color_eyre::install()?;
+
+    let app_files = AppFiles::new()?;
+
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(OpenOptions::new().append(true).open("mrrp-cli.log")?)
+        .with_writer(OpenOptions::new().append(true).open(app_files.log_file())?)
         .init();
 
     tracing::info!("Starting mrrp-cli");
     let args = Args::parse();
     tracing::debug!(?args);
-
-    let app_files = AppFiles::new()?;
 
     let result = match args.command.unwrap_or_default() {
         Command::Main(args) => {
@@ -91,6 +96,13 @@ async fn main() -> Result<(), Error> {
             };
 
             println!("{app_state:#?}");
+            Ok(())
+        }
+        Command::ImportSdrppBookmarks(args) => {
+            let mut bookmarks = app_files.bookmarks()?;
+            for bookmark in import_sdrpp_bookmarks(&args.path)? {
+                bookmarks.add_and_save_bookmark(bookmark)?;
+            }
             Ok(())
         }
     };

@@ -24,8 +24,11 @@ pub enum Command {
     /// provide arguments to the main TUI, you need to invoke this command.
     #[clap(name = "tui")]
     Main(MainArgs),
+    ImportSdrppBookmarks(ImportSdrppBookmarksArgs),
     #[clap(hide = true)]
-    DumpState { path: Option<PathBuf> },
+    DumpState {
+        path: Option<PathBuf>,
+    },
 }
 
 impl Default for Command {
@@ -91,6 +94,11 @@ pub struct MainArgs {
 
     #[clap(long, default_value = "boxcar")]
     pub fft_window: Window,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ImportSdrppBookmarksArgs {
+    pub path: PathBuf,
 }
 
 #[derive(Clone, Copy, Debug)]
