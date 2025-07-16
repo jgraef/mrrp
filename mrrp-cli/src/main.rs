@@ -41,15 +41,18 @@ use crate::{
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
-
-    // fixme: this messes with the ratatui panic hook?
-    //color_eyre::install()?;
+    color_eyre::install()?;
 
     let app_files = AppFiles::new()?;
 
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(OpenOptions::new().append(true).open(app_files.log_file())?)
+        .with_writer(
+            OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(app_files.log_file())?,
+        )
         .init();
 
     tracing::info!("Starting mrrp-cli");

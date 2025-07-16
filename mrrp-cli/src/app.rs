@@ -1,5 +1,6 @@
 use std::{
     fmt::Debug,
+    io::stdout,
     time::Duration,
 };
 
@@ -13,7 +14,11 @@ use color_eyre::eyre::{
 };
 use crossterm::execute;
 use futures_util::TryStreamExt;
-use ratatui::DefaultTerminal;
+use ratatui::{
+    DefaultTerminal,
+    Terminal,
+    prelude::CrosstermBackend,
+};
 use rodio::{
     OutputStreamBuilder,
     Source,
@@ -173,9 +178,14 @@ where
         let sample_reader =
             SampleReader::new(rtl_sdr.samples().await?, args.fft_size, args.fft_overlap);
 
-        let terminal = ratatui::init();
+        // initialize the terminal. don't use `ratatui::init` as we don't want their
+        // panic hook
+        crossterm::terminal::enable_raw_mode()?;
+        execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
+        execute!(stdout(), crossterm::event::EnableMouseCapture)?;
+
+        let terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
         tracing::debug!(terminal_size = ?terminal.size()?);
-        crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture)?;
 
         let terminal_events = crossterm::event::EventStream::new();
 

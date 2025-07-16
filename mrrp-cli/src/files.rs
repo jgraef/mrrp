@@ -43,6 +43,7 @@ impl AppFiles {
 
         std::fs::create_dir_all(this.config_dir())?;
         std::fs::create_dir_all(this.state_dir())?;
+        std::fs::create_dir_all(this.project_dirs.data_local_dir())?;
 
         Ok(this)
     }
