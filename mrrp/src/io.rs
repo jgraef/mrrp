@@ -46,6 +46,17 @@ where
 
 /// Extension trait for [`AsyncReadSamples`] with some useful methods.
 pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
+    /// Read a single sample
+    fn read_sample(&mut self) -> ReadSample<'_, S, Self>
+    where
+        Self: Unpin,
+    {
+        ReadSample {
+            inner: self,
+            _phantom: PhantomData,
+        }
+    }
+
     /// Read IQ samples into a buffer.
     ///
     /// This will call
@@ -129,22 +140,60 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     }
 }
 
-impl<S, T> AsyncReadSamplesExt<S> for T where T: AsyncReadSamples<S> {}
+impl<S, R> AsyncReadSamplesExt<S> for R where R: AsyncReadSamples<S> + ?Sized {}
+
+#[derive(Debug)]
+pub struct ReadSample<'a, S, R>
+where
+    R: ?Sized,
+{
+    inner: &'a mut R,
+    _phantom: PhantomData<fn() -> S>,
+}
+
+impl<'a, S, R> Future for ReadSample<'a, S, R>
+where
+    R: AsyncReadSamples<S> + Unpin + ?Sized,
+    // todo: remove this bound
+    S: Default,
+{
+    type Output = Result<S, EofError<R::Error>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let mut buffer = [S::default(); 1];
+        match Pin::new(&mut *self.inner).poll_read_samples(cx, &mut buffer) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error.into())),
+            Poll::Ready(Ok(num_samples)) => {
+                if num_samples == 0 {
+                    Poll::Ready(Err(EofError::Eof {
+                        num_samples_read: 0,
+                    }))
+                }
+                else {
+                    let [sample] = buffer;
+                    Poll::Ready(Ok(sample))
+                }
+            }
+        }
+    }
+}
 
 /// Future that reads samples into a buffer.
-pub struct ReadSamples<'a, S, T>
+#[derive(Debug)]
+pub struct ReadSamples<'a, S, R>
 where
-    T: ?Sized,
+    R: ?Sized,
 {
-    inner: &'a mut T,
+    inner: &'a mut R,
     buffer: &'a mut [S],
 }
 
-impl<'a, 'b, S, T> Future for ReadSamples<'a, S, T>
+impl<'a, 'b, S, R> Future for ReadSamples<'a, S, R>
 where
-    T: AsyncReadSamples<S> + Unpin + ?Sized,
+    R: AsyncReadSamples<S> + Unpin + ?Sized,
 {
-    type Output = Result<usize, T::Error>;
+    type Output = Result<usize, R::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
@@ -154,11 +203,11 @@ where
 
 /// Future that tries to read an exact amount of samples.
 #[derive(Debug)]
-pub struct ReadSamplesExact<'a, S, T>
+pub struct ReadSamplesExact<'a, S, R>
 where
-    T: ?Sized,
+    R: ?Sized,
 {
-    inner: &'a mut T,
+    inner: &'a mut R,
     buffer: &'a mut [S],
     filled: usize,
 }
@@ -167,7 +216,7 @@ impl<'a, 'b, S, T> Future for ReadSamplesExact<'a, S, T>
 where
     T: AsyncReadSamples<S> + Unpin + ?Sized,
 {
-    type Output = Result<(), ReadSamplesExactError<T::Error>>;
+    type Output = Result<(), EofError<T::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         while self.filled < self.buffer.len() {
@@ -176,7 +225,7 @@ where
             {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(error)) => {
-                    return Poll::Ready(Err(ReadSamplesExactError::Other(error)));
+                    return Poll::Ready(Err(EofError::Other(error)));
                 }
                 Poll::Ready(Ok(num_samples_read)) => {
                     if num_samples_read == 0 {
@@ -193,7 +242,7 @@ where
             Poll::Ready(Ok(()))
         }
         else {
-            Poll::Ready(Err(ReadSamplesExactError::Eof {
+            Poll::Ready(Err(EofError::Eof {
                 num_samples_read: self.filled,
             }))
         }
@@ -203,7 +252,7 @@ where
 /// Error returned by
 /// [`read_samples_exact`][AsyncReadSamplesExt::read_samples_exact]
 #[derive(Clone, Copy, Debug, thiserror::Error)]
-pub enum ReadSamplesExactError<E> {
+pub enum EofError<E> {
     /// The stream ended before the buffer could be filled completely.
     #[error("EOF after {num_samples_read} samples")]
     Eof { num_samples_read: usize },
@@ -216,17 +265,17 @@ pub enum ReadSamplesExactError<E> {
 pin_project! {
     /// Stream wrapper that maps the error type.
     #[derive(Clone, Copy, Debug)]
-    pub struct MapErr<T, F> {
+    pub struct MapErr<R, F> {
         #[pin]
-        inner: T,
+        inner: R,
         map_err: F,
     }
 }
 
-impl<S, T, E, F> AsyncReadSamples<S> for MapErr<T, F>
+impl<S, R, E, F> AsyncReadSamples<S> for MapErr<R, F>
 where
-    T: AsyncReadSamples<S>,
-    F: FnMut(T::Error) -> E,
+    R: AsyncReadSamples<S>,
+    F: FnMut(R::Error) -> E,
 {
     type Error = E;
 
@@ -243,24 +292,24 @@ where
 }
 
 pin_project! {
-    /// Stream wrapper that maps the error type.
+    /// Stream wrapper that maps the samples using an intermediate buffer.
     #[derive(Clone, Debug)]
-    pub struct Map<T, S, F> {
+    pub struct Map<R, S, F> {
         #[pin]
-        inner: T,
+        inner: R,
         map: F,
         buffer: Vec<S>,
     }
 }
 
-impl<S, T, Q, F> AsyncReadSamples<Q> for Map<T, S, F>
+impl<S, R, Q, F> AsyncReadSamples<Q> for Map<R, S, F>
 where
     S: Pod,
     Q: Pod,
-    T: AsyncReadSamples<S>,
+    R: AsyncReadSamples<S>,
     F: FnMut(S) -> Q,
 {
-    type Error = T::Error;
+    type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
@@ -285,22 +334,22 @@ where
 pin_project! {
     /// Stream wrapper that maps the error type.
     #[derive(Clone, Copy, Debug)]
-    pub struct MapInPlace<T, S, F> {
+    pub struct MapInPlace<R, S, F> {
         #[pin]
-        inner: T,
+        inner: R,
         map: F,
         _phantom: PhantomData<fn(S)>,
     }
 }
 
-impl<S, T, Q, F> AsyncReadSamples<Q> for MapInPlace<T, S, F>
+impl<S, R, Q, F> AsyncReadSamples<Q> for MapInPlace<R, S, F>
 where
     S: Pod,
     Q: Pod,
-    T: AsyncReadSamples<S>,
+    R: AsyncReadSamples<S>,
     F: FnMut(S) -> Q,
 {
-    type Error = T::Error;
+    type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
