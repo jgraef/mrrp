@@ -10,7 +10,7 @@ use std::{
     },
 };
 
-use crate::buf::{
+pub use crate::buf::{
     samples::Samples,
     samples_mut::SamplesMut,
     uninit_slice::UninitSlice,
@@ -18,7 +18,7 @@ use crate::buf::{
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("Tried to read {requested} samples from a buffer with {available} samples remaining.")]
-pub struct TryReadError {
+pub struct TryGetError {
     pub requested: usize,
     pub available: usize,
 }
@@ -60,14 +60,14 @@ pub trait SampleBuf<S> {
     }
 
     #[inline]
-    fn try_read(&self) -> Result<S, TryReadError>
+    fn try_get_sample(&self) -> Result<S, TryGetError>
     where
         S: Clone,
     {
         self.chunk()
             .first()
             .ok_or_else(|| {
-                TryReadError {
+                TryGetError {
                     requested: 1,
                     available: self.remaining(),
                 }
@@ -76,11 +76,11 @@ pub trait SampleBuf<S> {
     }
 
     #[inline]
-    fn read(&self) -> S
+    fn get_sample(&self) -> S
     where
         S: Clone,
     {
-        self.try_read().unwrap()
+        self.try_get_sample().unwrap()
     }
 
     #[inline]
@@ -109,12 +109,12 @@ pub trait SampleBuf<S> {
         }
     }
 
-    fn try_copy_to_samples(&mut self, length: usize) -> Result<Samples<S>, TryReadError>
+    fn try_copy_to_samples(&mut self, length: usize) -> Result<Samples<S>, TryGetError>
     where
         S: Clone,
     {
         if self.remaining() < length {
-            Err(TryReadError {
+            Err(TryGetError {
                 requested: length,
                 available: self.remaining(),
             })
@@ -134,12 +134,12 @@ pub trait SampleBuf<S> {
         self.try_copy_to_samples(length).unwrap()
     }
 
-    fn try_copy_to_slice(&mut self, mut output: &mut [S]) -> Result<(), TryReadError>
+    fn try_copy_to_slice(&mut self, mut output: &mut [S]) -> Result<(), TryGetError>
     where
         S: Clone,
     {
         if self.remaining() < output.len() {
-            Err(TryReadError {
+            Err(TryGetError {
                 requested: output.len(),
                 available: self.remaining(),
             })
@@ -400,7 +400,7 @@ where
 
     #[inline]
     fn next(&mut self) -> Option<Self::Item> {
-        self.buf.try_read().ok()
+        self.buf.try_get_sample().ok()
     }
 }
 

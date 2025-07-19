@@ -3,8 +3,10 @@
 #![feature(maybe_uninit_write_slice)]
 #![feature(maybe_uninit_slice)]
 
+pub mod block;
 pub mod buf;
 pub mod chunk;
 pub mod demod;
 pub mod io;
 pub mod sample;
+pub mod sink;

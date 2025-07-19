@@ -47,6 +47,33 @@ impl<S> Samples<S> {
         }
     }
 
+    #[inline]
+    pub unsafe fn from_uninit(
+        buffer: Arc<UninitSlice<S>>,
+        initialized: usize,
+        start: usize,
+        length: usize,
+    ) -> Self {
+        Self {
+            buffer,
+            initialized,
+            start,
+            length,
+        }
+    }
+
+    #[inline]
+    pub fn from_init(buffer: Arc<[S]>, start: usize, length: usize) -> Self {
+        let initialized = buffer.len();
+        Self {
+            buffer: UninitSlice::arc_from_init(buffer),
+            initialized,
+            start,
+            length,
+        }
+    }
+
+    #[inline]
     pub fn clear(&mut self) {
         self.truncate(0);
     }
@@ -103,7 +130,7 @@ impl<S> Samples<S> {
     #[inline]
     fn full_slice(&self) -> &[S] {
         assert!(self.start + self.length <= self.initialized);
-        unsafe { self.buffer.assume_init_subslice(self.start, self.length) }
+        unsafe { self.buffer[self.start..][..self.length].assume_init() }
     }
 
     #[inline]
@@ -121,11 +148,8 @@ impl<S> Samples<S> {
 impl<S> Drop for Samples<S> {
     fn drop(&mut self) {
         if let Some(buffer) = Arc::get_mut(&mut self.buffer) {
-            let buffer = buffer.as_uninit_slice_mut();
-            for i in 0..self.initialized {
-                unsafe {
-                    buffer[i].assume_init_drop();
-                }
+            unsafe {
+                buffer[..self.initialized].assume_init_drop();
             }
         }
     }
@@ -168,12 +192,7 @@ impl<S> From<Arc<[S]>> for Samples<S> {
     #[inline]
     fn from(value: Arc<[S]>) -> Self {
         let length = value.len();
-        Self {
-            buffer: UninitSlice::arc_from_init(value),
-            start: 0,
-            length,
-            initialized: length,
-        }
+        Self::from_init(value, 0, length)
     }
 }
 

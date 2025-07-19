@@ -1,18 +1,18 @@
-use std::ops::{
-    Deref,
-    DerefMut,
+use std::{
+    ops::{
+        Deref,
+        DerefMut,
+    },
+    sync::Arc,
 };
 
-use crate::{
-    buf::{
-        IntoIter,
-        SampleBuf,
-        SampleBufMut,
-        TryAdvanceError,
-        samples::Samples,
-        uninit_slice::UninitSlice,
-    },
-    sample::Sample,
+use crate::buf::{
+    IntoIter,
+    SampleBuf,
+    SampleBufMut,
+    TryAdvanceError,
+    samples::Samples,
+    uninit_slice::UninitSlice,
 };
 
 // note: for now this can be a simple wrapper around Vec, but in future we might
@@ -35,20 +35,24 @@ impl<S> SamplesMut<S> {
     }
 
     #[inline]
-    pub fn equilibrium(length: usize) -> Self
-    where
-        S: Sample,
-    {
+    pub fn from_fn(length: usize, sample: impl FnMut() -> S) -> Self {
         let mut buffer = Vec::with_capacity(length);
-        buffer.resize_with(length, || S::EQUILIBRIUM);
+        buffer.resize_with(length, sample);
         buffer.into()
     }
 
     #[inline]
-    pub fn freeze(self) -> Samples<S> {
+    pub fn freeze(mut self) -> Samples<S> {
         // this could be done in O(1) if we used an Arc<UninitSlice> internally. We can
-        // just do get_mut_unchecked on it, since we are the only owner.
-        self.buffer.into()
+        // just do get_mut_unchecked on it, since we are the only owner. but we would
+        // also have to do the growing ourselves.
+        let length = self.len();
+        let mut buffer = UninitSlice::<S>::arc_new(length);
+        let buffer_mut = unsafe { Arc::get_mut_unchecked(&mut buffer) };
+        for (i, sample) in self.buffer.drain(self.start..).enumerate() {
+            buffer_mut.write_sample(i, sample);
+        }
+        unsafe { Samples::from_uninit(buffer, length, 0, length) }
     }
 
     #[inline]

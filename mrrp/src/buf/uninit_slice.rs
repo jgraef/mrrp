@@ -1,6 +1,11 @@
 use core::fmt;
 use std::{
     mem::MaybeUninit,
+    ops::{
+        Bound,
+        Index,
+        IndexMut,
+    },
     sync::Arc,
 };
 
@@ -26,6 +31,16 @@ impl<S> UninitSlice<S> {
     #[inline]
     pub fn pointer_mut_from_uninit(pointer: *mut [MaybeUninit<S>]) -> *mut UninitSlice<S> {
         pointer as _
+    }
+
+    #[inline]
+    pub fn slice_from_init(slice: &[S]) -> &UninitSlice<S> {
+        unsafe { &*Self::pointer_from_init(slice as *const [S]) }
+    }
+
+    #[inline]
+    pub fn slice_from_uninit(slice: &[MaybeUninit<S>]) -> &UninitSlice<S> {
+        unsafe { &*Self::pointer_from_uninit(slice as *const [MaybeUninit<S>]) }
     }
 
     #[inline]
@@ -91,23 +106,78 @@ impl<S> UninitSlice<S> {
     }
 
     #[inline]
-    pub fn as_uninit_slice_mut(&mut self) -> &mut [MaybeUninit<S>] {
-        &mut self.0
-    }
-
-    #[inline]
     pub fn len(&self) -> usize {
         self.0.len()
     }
 
     #[inline]
-    pub unsafe fn assume_init_subslice(&self, start: usize, length: usize) -> &[S] {
-        unsafe { self.0[start..][..length].assume_init_ref() }
+    pub unsafe fn assume_init(&self) -> &[S] {
+        unsafe { self.0.assume_init_ref() }
+    }
+
+    #[inline]
+    pub unsafe fn assume_init_mut(&mut self) -> &mut [S] {
+        unsafe { self.0.assume_init_mut() }
+    }
+
+    pub fn fill_with(&mut self, mut fill: impl FnMut() -> S) {
+        self.0.iter_mut().for_each(|sample| {
+            sample.write(fill());
+        });
+    }
+
+    pub unsafe fn assume_init_drop(&mut self) {
+        self.0.iter_mut().for_each(|sample| unsafe {
+            sample.assume_init_drop();
+        });
     }
 }
 
 impl<S> fmt::Debug for UninitSlice<S> {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("UninitSlice[...]").finish()
+    }
+}
+
+macro_rules! impl_index_range {
+    {$(
+        $index:ty,
+    )*} => {
+        $(
+            impl<S> Index<$index> for UninitSlice<S> {
+                type Output = UninitSlice<S>;
+
+                #[inline]
+                fn index(&self, index: $index) -> &Self::Output {
+                    UninitSlice::slice_from_uninit(&self.0[index])
+                }
+            }
+
+            impl<S> IndexMut<$index> for UninitSlice<S> {
+                #[inline]
+                fn index_mut(&mut self, index: $index) -> &mut Self::Output {
+                    UninitSlice::slice_mut_from_uninit(&mut self.0[index])
+                }
+            }
+        )*
+    };
+}
+
+impl_index_range! {
+    (Bound<usize>, Bound<usize>),
+    std::ops::Range<usize>,
+    std::ops::RangeFrom<usize>,
+    std::ops::RangeFull,
+    std::ops::RangeInclusive<usize>,
+    std::ops::RangeTo<usize>,
+    std::ops::RangeToInclusive<usize>,
+}
+
+impl<S> Index<usize> for UninitSlice<S> {
+    type Output = MaybeUninit<S>;
+
+    #[inline]
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
     }
 }

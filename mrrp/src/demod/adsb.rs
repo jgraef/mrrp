@@ -21,6 +21,7 @@ use crate::io::{
     AsyncReadSamplesExt,
     Cursor,
     MapInPlace,
+    ReadBuf,
 };
 
 /// Preamble: 8 µs / 16 samples
@@ -312,7 +313,7 @@ impl<T: AsyncReadSamples<Complex<f32>>> Stream for DemodulateStream<T> {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
-            let mut this = self.as_mut().project();
+            let this = self.as_mut().project();
 
             /*tracing::debug!(
                 read_pos = *this.read_pos,
@@ -339,15 +340,16 @@ impl<T: AsyncReadSamples<Complex<f32>>> Stream for DemodulateStream<T> {
                 }
             }
             else {
-                match this.stream.poll_read_samples(cx, &mut this.buffer) {
+                let mut read_buf = ReadBuf::new(&mut this.buffer[*this.write_pos..]);
+                match this.stream.poll_read_samples(cx, &mut read_buf) {
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(Err(error)) => return Poll::Ready(Some(Err(error))),
-                    Poll::Ready(Ok(num_samples)) => {
-                        if num_samples == 0 {
+                    Poll::Ready(Ok(())) => {
+                        if read_buf.filled().is_empty() {
                             return Poll::Ready(None);
                         }
 
-                        *this.num_samples = *this.write_pos + num_samples;
+                        *this.num_samples = *this.write_pos + read_buf.filled().len();
                         *this.read_pos = 0;
                         *this.write_pos = 0;
                     }
