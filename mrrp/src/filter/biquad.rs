@@ -1,4 +1,5 @@
 use std::{
+    marker::PhantomData,
     pin::Pin,
     task::{
         Context,
@@ -27,21 +28,23 @@ use crate::{
 
 pin_project! {
     #[derive(Clone, Debug)]
-    pub struct BiquadDf2t<R> {
+    pub struct BiquadDf2t<R, S> {
         #[pin]
         input: ScanInPlaceWith<R, BiquadScanner>,
+        _phantom: PhantomData<fn(S)>,
     }
 }
 
-impl<R> BiquadDf2t<R>
+impl<R, S> BiquadDf2t<R, S>
 where
-    R: AsyncReadSamples<f32>,
+    R: AsyncReadSamples<S>,
 {
     pub fn new(input: R, coefficients: Coefficients<f32>) -> Self {
         Self {
             input: input.scan_in_place_with(BiquadScanner {
                 biquad: biquad::DirectForm2Transposed::new(coefficients),
             }),
+            _phantom: PhantomData,
         }
     }
 
@@ -60,12 +63,13 @@ where
     }
 }
 
-impl<R> AsyncReadSamples<f32> for BiquadDf2t<R>
+impl<R> AsyncReadSamples<f32> for BiquadDf2t<R, f32>
 where
     R: AsyncReadSamples<f32> + Unpin,
 {
     type Error = R::Error;
 
+    #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -75,18 +79,29 @@ where
     }
 }
 
-impl<R> AsyncReadSamples<Complex<f32>> for BiquadDf2t<R>
+impl<R> AsyncReadSamples<Complex<f32>> for BiquadDf2t<R, Complex<f32>>
 where
     R: AsyncReadSamples<Complex<f32>> + Unpin,
 {
     type Error = R::Error;
 
+    #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buffer: &mut ReadBuf<Complex<f32>>,
     ) -> Poll<Result<(), Self::Error>> {
         self.project().input.poll_read_samples(cx, buffer)
+    }
+}
+
+impl<R, S> GetSampleRate for BiquadDf2t<R, S>
+where
+    R: GetSampleRate,
+{
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.input.sample_rate()
     }
 }
 
@@ -98,6 +113,7 @@ struct BiquadScanner {
 impl Scanner<f32> for BiquadScanner {
     type Output = f32;
 
+    #[inline]
     fn scan(&mut self, sample: f32) -> Self::Output {
         self.biquad.run(sample)
     }
@@ -106,6 +122,7 @@ impl Scanner<f32> for BiquadScanner {
 impl Scanner<Complex<f32>> for BiquadScanner {
     type Output = Complex<f32>;
 
+    #[inline]
     fn scan(&mut self, sample: Complex<f32>) -> Self::Output {
         Complex {
             re: self.biquad.run(sample.re),

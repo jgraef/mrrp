@@ -12,11 +12,9 @@ use std::{
 use clap::Parser;
 use color_eyre::eyre::Error;
 use mrrp::{
+    GetSampleRate,
     audio::play_audio,
-    filter::{
-        AverageDecimate,
-        biquad::BiquadDf2t,
-    },
+    filter::AverageDecimate,
     io::AsyncReadSamplesExt,
     source::rtlsdr::RtlSdrSource,
 };
@@ -31,46 +29,46 @@ async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
 
-    // AM radio usually has a bandwidth of 10 kHz, so our sample rate should be
-    // twice that.
-    const AUDIO_SAMPLE_RATE: f32 = 20_000.0;
+    // The desired audio sample rate.
+    const AUDIO_SAMPLE_RATE: f32 = 44_100.0;
 
-    // We can't sample the RTL-SDR at the desired audio sampling rate. Refer to
-    // `rtlsdr_async::RtlSdr::set_sample_rate` for valid sample rates.
-    // So we'll need to sample higher and then reduce the sample rate later. This is
-    // best done if we sample at a multiple of the desired sampling rate.
-    const DECIMATION: usize = 64;
-    const RTLSDR_SAMPLE_RATE: f32 = AUDIO_SAMPLE_RATE * DECIMATION as f32; // 1.28 MHz
+    // We use the default sampling rate of the RTL-SDR.
+    // Note that we can't sample the RTL-SDR at our desired audio sampling rate.
+    const RTLSDR_SAMPLE_RATE: f32 = 2_400_000.0; // 2.4 MHz
+
+    // We will need to downsample from 2.4 MHz to 44.1 kHz.
+    // We choose an integer downsampling factor for this. Note that we'll still
+    // sample the RTL-SDR at 2.4 MHz, but after downsampling with this rounded
+    // factor our resulting audio sampling rate might be a bit off. It doesn't
+    // matter though as mrrp keeps track of the sampling rate through the whole
+    // pipeline for us.
+    const DECIMATION: usize = (RTLSDR_SAMPLE_RATE / AUDIO_SAMPLE_RATE) as usize;
 
     // Open the RTL-SDR and get a complex IQ stream
     let radio_source = RtlSdrSource::open(args.device, args.frequency, RTLSDR_SAMPLE_RATE).await?;
 
     // This will just keep track of how many samples we have processed
     let num_samples = Arc::new(AtomicUsize::new(0));
-    let radio_source = radio_source.inspect({
-        let num_samples = num_samples.clone();
-        move |samples| {
-            num_samples.fetch_add(samples.len(), Ordering::Relaxed);
-        }
+    let num_samples2 = num_samples.clone();
+    let radio_source = radio_source.inspect(move |samples| {
+        num_samples2.fetch_add(samples.len(), Ordering::Relaxed);
     });
 
-    // Next we'll downsample the signal, but to avoid aliasing we first need
-    // to pass it through a lowpass filter that only allows the desired frequencies
-    // through.
+    // Downsample the signal, but to avoid aliasing we first need to pass it through
+    // a lowpass filter that only allows the desired frequencies through.
     //
-    // To downsample we'll just discard 63 out of 64 samples to go from a sample
-    // rate of 1.28 MHz to 20 kHz. Since computing the low-pass filter is
-    // somewhat expensive and we would be throwing away most of it anyway, this
-    // step is combined in one filter.
+    // To downsample we just discard all but one sample every `DECIMATION` samples.
+    //
+    // Since computing the low-pass filter is somewhat expensive and we would be
+    // throwing away most of it anyway, this step is combined in one filter.
     //
     // The low-pass filter used is just taking the average. While it's a very simple
     // filter, it's frequency response is actually not that good.
-    //let lowpass_filtered = AverageDecimate::new(radio_source, DECIMATION);
-    let lowpass_filtered = BiquadDf2t::lowpass(radio_source, 5000.0);
+    let lowpass_filtered = AverageDecimate::new(radio_source, DECIMATION);
 
-    // Next we'll map the complex signal to a real amplitude by taking the norm of
-    // the samples.
+    // Map the complex signal to a real amplitude by taking the norm of the samples.
     let audio = lowpass_filtered.map(|complex_sample| complex_sample.norm());
+    println!("audio_sample_rate: {}", audio.sample_rate());
 
     // Now we can just play it!
     //

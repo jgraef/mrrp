@@ -260,6 +260,16 @@ pin_project! {
     }
 }
 
+impl<R> Decimate<R> {
+    pub fn new(input: R, decimate: usize) -> Self {
+        Self {
+            input,
+            decimate,
+            counter: 0,
+        }
+    }
+}
+
 impl<R, S> AsyncReadSamples<S> for Decimate<R>
 where
     R: AsyncReadSamples<S>,
@@ -272,17 +282,53 @@ where
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
-        match this.input.poll_read_samples(cx, buffer) {
+
+        let mut read_buf = ReadBuf::uninit(buffer.unfilled_mut());
+
+        match this.input.poll_read_samples(cx, &mut read_buf) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
             Poll::Ready(Ok(())) => {
                 let mut read_pos = 0;
                 let mut write_pos = 0;
 
-                let mut num_samples = buffer.filled().len();
-                //let filled_uninit = buffer.inner_mut()[..num_samples];
-                todo!();
+                let num_samples = read_buf.filled().len();
+                let buffer_uninit = read_buf.inner_mut();
+
+                while read_pos < num_samples {
+                    // note: we drop all the samples that are not written back
+
+                    let sample = unsafe { buffer_uninit[read_pos].assume_init_read() };
+                    read_pos += 1;
+
+                    if *this.counter == 0 {
+                        buffer_uninit.write_sample(write_pos, sample);
+                        write_pos += 1;
+                    }
+
+                    *this.counter += 1;
+                    if this.counter == this.decimate {
+                        *this.counter = 0;
+                    }
+                }
+
+                unsafe {
+                    buffer.assume_init(write_pos);
+                }
+                buffer.set_filled(buffer.filled().len() + write_pos);
+
+                Poll::Ready(Ok(()))
             }
         }
+    }
+}
+
+impl<R> GetSampleRate for Decimate<R>
+where
+    R: GetSampleRate,
+{
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.input.sample_rate() / self.decimate as f32
     }
 }
