@@ -2,7 +2,10 @@ use std::f32::consts::TAU;
 
 use num_complex::Complex;
 
-use crate::block::SignalGenerator;
+use crate::{
+    GetSampleRate,
+    source::SignalGenerator,
+};
 
 #[inline]
 fn step_from_frequency_and_sample_rate(frequency: f32, sample_rate: f32) -> f32 {
@@ -18,13 +21,18 @@ pub struct SineWave {
 }
 
 impl SineWave {
-    pub fn new(frequency: f32, sample_rate: f32, phase: f32) -> Self {
+    pub fn new(frequency: f32, sample_rate: f32) -> Self {
         Self {
             frequency,
             sample_rate,
-            phase,
+            phase: 0.0,
             step: step_from_frequency_and_sample_rate(frequency, sample_rate),
         }
+    }
+
+    pub fn with_phase(mut self, phase: f32) -> Self {
+        self.phase = phase;
+        self
     }
 
     pub fn set_frequency(&mut self, frequency: f32) {
@@ -49,6 +57,13 @@ impl SignalGenerator for SineWave {
     }
 }
 
+impl GetSampleRate for SineWave {
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.sample_rate
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct ComplexSineWave {
     frequency: f32,
@@ -58,13 +73,18 @@ pub struct ComplexSineWave {
 }
 
 impl ComplexSineWave {
-    pub fn new(frequency: f32, sample_rate: f32, phase: f32) -> Self {
+    pub fn new(frequency: f32, sample_rate: f32) -> Self {
         Self {
             frequency,
             sample_rate,
-            phase,
+            phase: 0.0,
             step: step_from_frequency_and_sample_rate(frequency, sample_rate),
         }
+    }
+
+    pub fn with_phase(mut self, phase: f32) -> Self {
+        self.phase = phase;
+        self
     }
 
     pub fn set_frequency(&mut self, frequency: f32) {
@@ -90,5 +110,12 @@ impl SignalGenerator for ComplexSineWave {
             self.phase -= TAU;
         }
         output
+    }
+}
+
+impl GetSampleRate for ComplexSineWave {
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.sample_rate
     }
 }

@@ -17,6 +17,7 @@ pub use self::types::{
 pub trait Sample: Sized {
     type Signed: FromSample<Self>;
     type Float: FromSample<Self>;
+    type Scalar;
 
     const EQUILIBRIUM: Self;
 
@@ -36,6 +37,7 @@ pub trait FromSample<S> {
 }
 
 impl<T> FromSample<T> for T {
+    #[inline]
     fn from_sample(sample: T) -> Self {
         sample
     }
@@ -66,12 +68,14 @@ macro_rules! impl_sample {
             impl Sample for $T {
                 type Signed = $Addition;
                 type Float = $Modulation;
+                type Scalar = $T;
                 const EQUILIBRIUM: Self = $EQUILIBRIUM;
             }
 
             impl Sample for Complex<$T> {
                 type Signed = Complex<$Addition>;
                 type Float = Complex<$Modulation>;
+                type Scalar = $T;
                 const EQUILIBRIUM: Self = Complex { re: $EQUILIBRIUM, im: $EQUILIBRIUM };
             }
         )*

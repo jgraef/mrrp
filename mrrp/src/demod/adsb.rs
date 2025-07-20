@@ -2,6 +2,7 @@
 //!
 //! <https://www.radartutorial.eu/13.ssr/sr24.en.html>
 //! <https://www.idc-online.com/technical_references/pdfs/electronic_engineering/Mode_S_Reply_Encoding.pdf>
+#![allow(dead_code)]
 
 use std::{
     fmt::Debug,
@@ -19,7 +20,6 @@ use pin_project_lite::pin_project;
 use crate::io::{
     AsyncReadSamples,
     AsyncReadSamplesExt,
-    Cursor,
     MapInPlace,
     ReadBuf,
 };
@@ -359,6 +359,26 @@ impl<T: AsyncReadSamples<Complex<f32>>> Stream for DemodulateStream<T> {
     }
 }
 
+// todo: use SampleBuf instead, buf we need examine past samples sometimes.
+
+#[derive(Clone, Copy, Debug)]
+pub struct Cursor<'a, S> {
+    pub samples: &'a [S],
+    pub position: usize,
+}
+
+impl<'a, S> Cursor<'a, S> {
+    #[inline(always)]
+    pub fn advance(&mut self, amount: usize) {
+        self.position += amount;
+    }
+
+    #[inline(always)]
+    pub fn remaining(&self) -> &[S] {
+        &self.samples[self.position..]
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -366,7 +386,7 @@ mod tests {
         Frame,
         Quality,
     };
-    use crate::io::Cursor;
+    use crate::demod::adsb::Cursor;
 
     fn modulate(data: &[u8], mut sample: impl FnMut(bool) -> f32) -> Vec<f32> {
         let mut samples = vec![];

@@ -101,6 +101,16 @@ impl<S> UninitSlice<S> {
     }
 
     #[inline]
+    pub fn copy_from_uninit(&mut self, source: &UninitSlice<S>) {
+        assert_eq!(source.len(), self.len());
+        for i in 0..source.len() {
+            unsafe {
+                self.0[i].write(source.0[i].assume_init_read());
+            }
+        }
+    }
+
+    #[inline]
     pub fn as_mut_ptr(&mut self) -> *mut S {
         self.0.as_mut_ptr() as *mut S
     }

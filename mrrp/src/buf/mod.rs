@@ -15,6 +15,7 @@ pub use crate::buf::{
     samples_mut::SamplesMut,
     uninit_slice::UninitSlice,
 };
+use crate::io::ReadBuf;
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("Tried to read {requested} samples from a buffer with {available} samples remaining.")]
@@ -60,23 +61,26 @@ pub trait SampleBuf<S> {
     }
 
     #[inline]
-    fn try_get_sample(&self) -> Result<S, TryGetError>
+    fn try_get_sample(&mut self) -> Result<S, TryGetError>
     where
         S: Clone,
     {
-        self.chunk()
+        let sample = self
+            .chunk()
             .first()
             .ok_or_else(|| {
                 TryGetError {
                     requested: 1,
                     available: self.remaining(),
                 }
-            })
-            .map(Clone::clone)
+            })?
+            .clone();
+        self.advance(1);
+        Ok(sample)
     }
 
     #[inline]
-    fn get_sample(&self) -> S
+    fn get_sample(&mut self) -> S
     where
         S: Clone,
     {
@@ -292,6 +296,11 @@ pub trait SampleBufMut<S> {
     fn remaining_mut(&self) -> usize;
     fn chunk_mut(&mut self) -> &mut UninitSlice<S>;
 
+    #[inline]
+    fn has_remaining_mut(&self) -> bool {
+        self.remaining_mut() > 0
+    }
+
     fn try_put_sample(&mut self, sample: S) -> Result<(), TryPutError> {
         if self.remaining_mut() == 0 {
             Err(TryPutError {
@@ -346,6 +355,20 @@ pub trait SampleBufMut<S> {
         S: Clone,
     {
         self.try_put(source).unwrap();
+    }
+
+    #[inline]
+    fn with_read_buf<F, R>(&mut self, f: F) -> R
+    where
+        F: FnOnce(&mut ReadBuf<S>) -> R,
+    {
+        let mut read_buf = ReadBuf::uninit(self.chunk_mut());
+        let output = f(&mut read_buf);
+        let num_samples_read = read_buf.filled().len();
+        unsafe {
+            self.advance_mut(num_samples_read);
+        }
+        output
     }
 }
 

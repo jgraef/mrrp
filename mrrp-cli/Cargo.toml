@@ -23,7 +23,7 @@ palette = { version = "0.7.6", features = ["serde", "serializing"] }
 parking_lot = "0.12.4"
 ratatui = { version = "0.29.0", features = ["palette", "serde"] }
 rodio = { version = "0.21.1", default-features = false, features = ["playback"] }
-rtlsdr-async = { git = "https://github.com/jgraef/rtlsdr-async.git", version = "0.1.0" }
+rtlsdr-async = { workspace = true }
 rustfft = "6.4.0"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"

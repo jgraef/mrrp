@@ -1,3 +1,5 @@
+#[cfg(feature = "rtlsdr")]
+pub mod rtlsdr;
 mod sine;
 
 use std::{
@@ -16,6 +18,7 @@ pub use sine::{
 };
 
 use crate::{
+    GetSampleRate,
     buf::SamplesMut,
     io::{
         AsyncReadSamples,
@@ -23,7 +26,7 @@ use crate::{
     },
 };
 
-pub trait SignalGenerator {
+pub trait SignalGenerator: GetSampleRate {
     type Sample;
 
     fn set_sample_rate(&mut self, sample_rate: f32);
@@ -51,7 +54,10 @@ pub trait SignalGenerator {
     }
 }
 
-impl<G: SignalGenerator> SignalGenerator for &mut G {
+impl<G> SignalGenerator for &mut G
+where
+    G: SignalGenerator + GetSampleRate,
+{
     type Sample = G::Sample;
 
     fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -64,9 +70,19 @@ impl<G: SignalGenerator> SignalGenerator for &mut G {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct SignalGeneratorChunkStream<G> {
     pub signal_generator: G,
     pub chunk_size: usize,
+}
+
+impl<G> SignalGeneratorChunkStream<G> {
+    pub fn new(signal_generator: G, chunk_size: usize) -> Self {
+        Self {
+            signal_generator,
+            chunk_size,
+        }
+    }
 }
 
 impl<G> Stream for SignalGeneratorChunkStream<G>
@@ -81,9 +97,26 @@ where
     }
 }
 
+impl<G> GetSampleRate for SignalGeneratorChunkStream<G>
+where
+    G: SignalGenerator,
+{
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.signal_generator.sample_rate()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct SignalGeneratorReadSamples<G> {
     pub signal_generator: G,
+}
+
+impl<G> SignalGeneratorReadSamples<G> {
+    pub fn new(signal_generator: G) -> Self {
+        Self { signal_generator }
+    }
 }
 
 impl<G> AsyncReadSamples<G::Sample> for SignalGeneratorReadSamples<G>
@@ -99,5 +132,15 @@ where
     ) -> Poll<Result<(), Self::Error>> {
         buffer.fill_with(|| self.signal_generator.next());
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<G> GetSampleRate for SignalGeneratorReadSamples<G>
+where
+    G: SignalGenerator,
+{
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.signal_generator.sample_rate()
     }
 }

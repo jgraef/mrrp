@@ -5,14 +5,28 @@ edition = "2024"
 
 [dependencies]
 bytemuck = { version = "1.23.1", features = ["derive"] }
-futures-util = "0.3.31"
+futures-util = { version = "0.3.31", features = ["sink"] }
 num-complex = { version = "0.4.6", features = ["bytemuck"] }
+num-traits = "0.2.19"
+parking_lot = "0.12.4"
 pin-project-lite = "0.2.16"
-rtlsdr-async = { git = "https://github.com/jgraef/rtlsdr-async.git", version = "0.1.0", optional = true }
+rodio = { version = "0.21.1", default-features = false, optional = true }
+rtlsdr-async = { workspace = true, optional = true }
 rustfft = "6.4.0"
 thiserror = "2.0.12"
+tracing = "0.1.41"
+
+[dev-dependencies]
+clap = { version = "4.5.41", features = ["derive"] }
+color-eyre = "0.6.5"
+dotenvy = "0.15.7"
+rodio = { version = "0.21.1", default-features = false, features = ["playback"] }
+tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "signal", "time"] }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
 
 [features]
-default = ["rtlsdr", "adsb"]
+default = ["rtlsdr", "adsb", "audio"]
 adsb = []
 rtlsdr = ["dep:rtlsdr-async"]
+audio = ["dep:rodio"]
