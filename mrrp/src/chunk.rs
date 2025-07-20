@@ -22,7 +22,6 @@ use crate::{
     },
     io::{
         AsyncReadSamples,
-        AsyncReadSamplesExt,
         AsyncWriteSamples,
         AsyncWriteSamplesExt,
         ReadBuf,
@@ -144,7 +143,7 @@ where
 
         let this = &mut *self;
 
-        match this.read_samples.poll_read_samples_unpin(cx, &mut read_buf) {
+        match Pin::new(&mut this.read_samples).poll_read_samples(cx, &mut read_buf) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(error)) => Poll::Ready(Some(Err(error))),
             Poll::Ready(Ok(())) => {

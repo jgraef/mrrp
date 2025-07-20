@@ -18,7 +18,6 @@ use futures_util::{
 
 use crate::io::{
     AsyncReadSamples,
-    AsyncReadSamplesExt,
     ReadBuf,
 };
 
@@ -94,7 +93,7 @@ where
         cx: &mut Context<'_>,
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_read_samples_unpin(cx, buffer)
+        Pin::new(&mut self.inner).poll_read_samples(cx, buffer)
     }
 }
 

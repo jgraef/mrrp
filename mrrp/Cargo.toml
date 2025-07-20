@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+biquad = "0.5.0"
 bytemuck = { version = "1.23.1", features = ["derive"] }
 futures-util = { version = "0.3.31", features = ["sink"] }
 num-complex = { version = "0.4.6", features = ["bytemuck"] }

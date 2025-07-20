@@ -13,7 +13,10 @@ use clap::Parser;
 use color_eyre::eyre::Error;
 use mrrp::{
     audio::play_audio,
-    filter::AverageDecimate,
+    filter::{
+        AverageDecimate,
+        biquad::BiquadDf2t,
+    },
     io::AsyncReadSamplesExt,
     source::rtlsdr::RtlSdrSource,
 };
@@ -62,7 +65,8 @@ async fn main() -> Result<(), Error> {
     //
     // The low-pass filter used is just taking the average. While it's a very simple
     // filter, it's frequency response is actually not that good.
-    let lowpass_filtered = AverageDecimate::new(radio_source, DECIMATION);
+    //let lowpass_filtered = AverageDecimate::new(radio_source, DECIMATION);
+    let lowpass_filtered = BiquadDf2t::lowpass(radio_source, 5000.0);
 
     // Next we'll map the complex signal to a real amplitude by taking the norm of
     // the samples.

@@ -20,7 +20,7 @@ use pin_project_lite::pin_project;
 use crate::io::{
     AsyncReadSamples,
     AsyncReadSamplesExt,
-    MapInPlace,
+    MapInPlacePod,
     ReadBuf,
 };
 
@@ -286,7 +286,7 @@ pin_project! {
     #[derive(Debug)]
     pub struct DemodulateStream<T> {
         #[pin]
-        stream: MapInPlace<T, Complex<f32>, fn(Complex<f32>) -> f32>,
+        stream: MapInPlacePod<T, Complex<f32>, fn(Complex<f32>) -> f32>,
         demodulator: Demodulator,
         buffer: Vec<f32>,
         read_pos: usize,
@@ -298,7 +298,7 @@ pin_project! {
 impl<T: AsyncReadSamples<Complex<f32>>> DemodulateStream<T> {
     pub fn new(stream: T, demodulator: Demodulator, buffer_size: usize) -> Self {
         Self {
-            stream: stream.map_in_place(|sample| sample.re * sample.re + sample.im * sample.im),
+            stream: stream.map_in_place_pod(|sample| sample.re * sample.re + sample.im * sample.im),
             demodulator,
             buffer: vec![0.0; buffer_size],
             read_pos: 0,
