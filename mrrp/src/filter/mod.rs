@@ -1,13 +1,8 @@
-//!
-//! # TODO
-//!
-//! CIC filter: <https://www.researchgate.net/publication/228648728_Understanding_cascaded_integrator-comb_filters>
-
 pub mod biquad;
 pub mod synthesis;
 
 use std::{
-    collections::VecDeque,
+    fmt::Debug,
     ops::{
         AddAssign,
         Div,
@@ -37,36 +32,77 @@ use crate::{
         ReadBuf,
     },
     sample::Sample,
+    util::dim::{
+        Const,
+        DequeLike,
+        Dim,
+        Dyn,
+    },
 };
 
 #[derive(Clone, Debug)]
-pub struct DelayLine<S> {
-    buffer: VecDeque<S>,
-    length: usize,
+pub struct DelayLine<D: Dim, S> {
+    buffer: D::BoundedDeque<S>,
 }
 
-impl<S> DelayLine<S> {
+impl<const DIM: usize, S> Default for DelayLine<Const<DIM>, S> {
     #[inline]
-    pub fn new(length: usize) -> Self {
-        assert!(length > 0);
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<const DIM: usize, S> DelayLine<Const<DIM>, S> {
+    #[inline]
+    pub fn new() -> Self {
+        Self::from_dim(Const::<DIM>)
+    }
+}
+
+impl<S> DelayLine<Dyn, S> {
+    #[inline]
+    pub fn new(dimension: usize) -> Self {
+        Self::from_dim(Dyn(dimension))
+    }
+}
+
+impl<D: Dim, S> DelayLine<D, S> {
+    #[inline]
+    pub fn from_dim(dim: D) -> Self {
         Self {
-            buffer: VecDeque::with_capacity(length),
-            length,
+            buffer: <D::BoundedDeque<S>>::new(dim),
         }
     }
 
     #[inline]
     pub fn push(&mut self, sample: S) -> Option<S> {
-        assert!(self.buffer.len() <= self.length);
-        let delayed = (self.buffer.len() == self.length).then(|| self.buffer.pop_front().unwrap());
-        self.buffer.push_back(sample);
-        delayed
+        self.buffer.push_back(sample)
     }
 
     #[inline]
     pub fn get(&mut self, age: usize) -> Option<&S> {
-        let index = self.length.checked_sub(age + 1)?;
+        let index = self.buffer.len().checked_sub(age + 1)?;
         self.buffer.get(index)
+    }
+}
+
+pub struct Coefficients<D: Dim, T>(pub <D as Dim>::Array<T>);
+
+impl<D: Dim, T> Clone for Coefficients<D, T>
+where
+    <D as Dim>::Array<T>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self(self.0.clone())
+    }
+}
+
+impl<D: Dim, T> Debug for Coefficients<D, T>
+where
+    <D as Dim>::Array<T>: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Coefficients").field(&self.0).finish()
     }
 }
 

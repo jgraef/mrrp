@@ -13,6 +13,7 @@ use biquad::{
     ToHertz,
 };
 use num_complex::Complex;
+use num_traits::Zero;
 use pin_project_lite::pin_project;
 
 use crate::{
@@ -115,7 +116,13 @@ impl Scanner<f32> for BiquadScanner {
 
     #[inline]
     fn scan(&mut self, sample: f32) -> Self::Output {
-        self.biquad.run(sample)
+        if sample.is_finite() {
+            // non-finite samples seem to mess with the feedback
+            self.biquad.run(sample)
+        }
+        else {
+            0.0
+        }
     }
 }
 
@@ -124,9 +131,15 @@ impl Scanner<Complex<f32>> for BiquadScanner {
 
     #[inline]
     fn scan(&mut self, sample: Complex<f32>) -> Self::Output {
-        Complex {
-            re: self.biquad.run(sample.re),
-            im: self.biquad.run(sample.im),
+        if sample.is_finite() {
+            // non-finite samples seem to mess with the feedback
+            Complex {
+                re: self.biquad.run(sample.re),
+                im: self.biquad.run(sample.im),
+            }
+        }
+        else {
+            Complex::zero()
         }
     }
 }

@@ -1,5 +1,6 @@
 use std::{
     convert::Infallible,
+    fmt::Debug,
     marker::PhantomData,
     mem::MaybeUninit,
     pin::Pin,
@@ -1237,6 +1238,46 @@ impl<S> Inspector<S> for LogSampleRateInspector {
         else {
             self.start_time = Some(Instant::now());
         }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LogSamplesInspector {
+    next_sample: usize,
+    interval: usize,
+    span: Option<Span>,
+}
+
+impl LogSamplesInspector {
+    #[inline]
+    pub fn new(interval: usize) -> Self {
+        Self {
+            next_sample: 0,
+            interval,
+            span: None,
+        }
+    }
+
+    #[inline]
+    pub fn with_span(mut self, span: Span) -> Self {
+        self.span = Some(span);
+        self
+    }
+}
+
+impl<S: Debug> Inspector<S> for LogSamplesInspector {
+    fn inspect(&mut self, mut samples: &[S]) {
+        let _guard = self.span.as_ref().map(|span| span.enter());
+
+        while self.next_sample < samples.len() {
+            samples = &samples[self.next_sample..];
+
+            let sample = &samples[0];
+            tracing::debug!(?sample);
+
+            self.next_sample = self.interval;
+        }
+        self.next_sample -= samples.len();
     }
 }
 

@@ -31,6 +31,7 @@ pub mod io;
 pub mod sample;
 pub mod sink;
 pub mod source;
+pub mod util;
 
 pub trait GetSampleRate {
     fn sample_rate(&self) -> f32;
