@@ -3,29 +3,20 @@ use color_eyre::eyre::Error;
 use mrrp::{
     GetSampleRate,
     audio::play_audio,
-    filter::{
-        Decimate,
-        biquad::BiquadDf2t,
-    },
-    io::{
-        AsyncReadSamplesExt,
-        LogSamplesInspector,
-    },
+    filter::biquad,
+    io::AsyncReadSamplesExt,
     source::rtlsdr::RtlSdrSource,
 };
 use tokio::signal::ctrl_c;
 
-use crate::demod::{
-    DifferentiateAndAccessPhase,
-    DifferentiateAndDivide,
-};
+use crate::demod::DifferentiateAndAccessPhase;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
     color_eyre::install()?;
     tracing_subscriber::fmt::init();
-    tracing::info!("AM receiver example");
+    tracing::info!("FM receiver example");
 
     let args = Args::parse();
 
@@ -36,27 +27,32 @@ async fn main() -> Result<(), Error> {
     // Note that we can't sample the RTL-SDR at our desired audio sampling rate.
     const RTLSDR_SAMPLE_RATE: f32 = 2_400_000.0; // 2.4 MHz
 
-    const DECIMATION: usize = (RTLSDR_SAMPLE_RATE / AUDIO_SAMPLE_RATE) as usize;
-
     // Open the RTL-SDR and get a complex IQ stream
-    let radio_source = RtlSdrSource::open(args.device, args.frequency, RTLSDR_SAMPLE_RATE).await?;
+    let baseband = RtlSdrSource::open(args.device, args.frequency, RTLSDR_SAMPLE_RATE).await?;
 
-    let lowpass = BiquadDf2t::lowpass(radio_source, 150_000.0);
-    //let demod = DifferentiateAndAccessPhase::new(RTLSDR_SAMPLE_RATE, 75_000.0);
-    let demod = DifferentiateAndDivide::new(RTLSDR_SAMPLE_RATE, 75_000.0);
-    let fm_demod = lowpass
-        .scan_with(demod)
-        .inspect_with(LogSamplesInspector::new(2_400_000));
-    //let lowpass = AverageDecimate::new(fm_demod, DECIMATION);
-    let lowpass = Decimate::new(BiquadDf2t::lowpass(fm_demod, 10_000.0), DECIMATION);
+    // fixme: this filter is not linear-phase
+    //let sample_rate = baseband.sample_rate();
+    //let filtered_baseband =
+    // baseband.scan_in_place_with(biquad::lowpass(sample_rate, 150000.0));
+    let filtered_baseband = baseband;
 
-    println!("audio_sample_rate: {}", lowpass.sample_rate());
+    let demodulated = filtered_baseband.scan_with(DifferentiateAndAccessPhase::new(
+        RTLSDR_SAMPLE_RATE,
+        75_000.0,
+    ));
+
+    let sample_rate = demodulated.sample_rate();
+    let filtered = demodulated
+        .scan_in_place_with(biquad::lowpass(sample_rate, 10000.0))
+        .decimate_to(AUDIO_SAMPLE_RATE);
+
+    println!("audio_sample_rate: {}", filtered.sample_rate());
 
     // Now we can just play it!
     //
     // `play_audio` is just a helper function that turns our mrrp stream into a
     // rodio stream, creates an audio sink and plays the sound.
-    play_audio(lowpass, args.volume)?;
+    play_audio(filtered, args.volume)?;
 
     let _ = ctrl_c().await;
     println!("Ctrl-C pressed. Aborting.");
@@ -76,15 +72,11 @@ struct Args {
 }
 
 mod demod {
-    use std::f32::consts::{
-        PI,
-        TAU,
-    };
+    #![allow(dead_code)]
 
-    use mrrp::{
-        filter::DelayLine,
-        io::Scanner,
-    };
+    use std::f32::consts::TAU;
+
+    use mrrp::io::Scanner;
     use num_complex::Complex;
     use num_traits::Zero;
 

@@ -1,3 +1,5 @@
+pub mod file;
+mod noise;
 #[cfg(feature = "rtlsdr")]
 pub mod rtlsdr;
 mod sine;
@@ -12,10 +14,8 @@ use std::{
 };
 
 use futures_util::Stream;
-pub use sine::{
-    ComplexSineWave,
-    SineWave,
-};
+pub use noise::*;
+pub use sine::*;
 
 use crate::{
     GetSampleRate,

@@ -54,6 +54,10 @@ pub trait ArrayLike<D: Dim, T> {
 
     fn from_fn(dim: D, f: impl FnMut() -> T) -> Self;
 
+    fn as_slice(&self) -> &[T];
+
+    fn as_slice_mut(&mut self) -> &mut [T];
+
     fn len(&self) -> usize {
         self.dim().dim()
     }
@@ -125,6 +129,16 @@ impl<const DIM: usize, T> ArrayLike<Const<DIM>, T> for [T; DIM] {
         }
         vec.into_inner().unwrap_or_else(|_| unreachable!())
     }
+
+    #[inline]
+    fn as_slice(&self) -> &[T] {
+        &self[..]
+    }
+
+    #[inline]
+    fn as_slice_mut(&mut self) -> &mut [T] {
+        &mut self[..]
+    }
 }
 
 impl<const DIM: usize, T> VecLike<Const<DIM>, T> for ArrayVec<T, DIM> {
@@ -160,6 +174,16 @@ impl<T> ArrayLike<Dyn, T> for DynArray<T> {
 
         let items = unsafe { items.assume_init() };
         Self { items }
+    }
+
+    #[inline]
+    fn as_slice(&self) -> &[T] {
+        &self.items[..]
+    }
+
+    #[inline]
+    fn as_slice_mut(&mut self) -> &mut [T] {
+        &mut self.items[..]
     }
 }
 

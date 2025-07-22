@@ -65,14 +65,14 @@ impl GetSampleRate for SineWave {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct ComplexSineWave {
+pub struct ComplexSinusoid {
     frequency: f32,
     sample_rate: f32,
     phase: f32,
     step: f32,
 }
 
-impl ComplexSineWave {
+impl ComplexSinusoid {
     pub fn new(frequency: f32, sample_rate: f32) -> Self {
         Self {
             frequency,
@@ -92,7 +92,7 @@ impl ComplexSineWave {
     }
 }
 
-impl SignalGenerator for ComplexSineWave {
+impl SignalGenerator for ComplexSinusoid {
     type Sample = Complex<f32>;
 
     fn set_sample_rate(&mut self, sample_rate: f32) {
@@ -113,9 +113,19 @@ impl SignalGenerator for ComplexSineWave {
     }
 }
 
-impl GetSampleRate for ComplexSineWave {
+impl GetSampleRate for ComplexSinusoid {
     #[inline]
     fn sample_rate(&self) -> f32 {
         self.sample_rate
     }
+}
+
+#[inline]
+pub fn sine(frequency: f32, sample_rate: f32) -> SineWave {
+    SineWave::new(frequency, sample_rate)
+}
+
+#[inline]
+pub fn complex_sinusoid(frequency: f32, sample_rate: f32) -> ComplexSinusoid {
+    ComplexSinusoid::new(frequency, sample_rate)
 }

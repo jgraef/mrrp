@@ -1,9 +1,11 @@
 pub mod biquad;
-pub mod synthesis;
+pub mod resampling;
 
 use std::{
+    collections::VecDeque,
     fmt::Debug,
     ops::{
+        Add,
         AddAssign,
         Div,
         Mul,
@@ -16,20 +18,18 @@ use std::{
 };
 
 use num_traits::{
+    Float,
+    FloatConst,
     FromPrimitive,
     Zero,
 };
-use pin_project_lite::pin_project;
 
 use crate::{
     GetSampleRate,
-    buf::{
-        SampleBufMut,
-        SamplesMut,
-    },
     io::{
         AsyncReadSamples,
         ReadBuf,
+        Scanner,
     },
     sample::Sample,
     util::dim::{
@@ -83,26 +83,6 @@ impl<D: Dim, S> DelayLine<D, S> {
     pub fn get(&mut self, age: usize) -> Option<&S> {
         let index = self.buffer.len().checked_sub(age + 1)?;
         self.buffer.get(index)
-    }
-}
-
-pub struct Coefficients<D: Dim, T>(pub <D as Dim>::Array<T>);
-
-impl<D: Dim, T> Clone for Coefficients<D, T>
-where
-    <D as Dim>::Array<T>: Clone,
-{
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
-impl<D: Dim, T> Debug for Coefficients<D, T>
-where
-    <D as Dim>::Array<T>: Debug,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple("Coefficients").field(&self.0).finish()
     }
 }
 
@@ -194,52 +174,78 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub struct FirFilter<T, S, C> {
-    pub input: T,
-    pub coefficients: Vec<C>,
-    pub delayed: SamplesMut<S>,
+pub struct FirFilter<S, C> {
+    coefficients: Vec<C>,
+    delayed: VecDeque<S>,
 }
 
-impl<T, S, C> AsyncReadSamples<S> for FirFilter<T, S, C>
-where
-    S: Copy,
-    T: AsyncReadSamples<S> + Unpin,
-    S: Clone + Zero + AddAssign + Unpin,
-    C: Unpin,
-    for<'a> &'a C: Mul<&'a S, Output = S>,
-{
-    type Error = T::Error;
+impl<S, C> FirFilter<S, C> {
+    #[inline]
+    pub fn new(coefficients: Vec<C>) -> Self {
+        assert!(coefficients.len() > 0);
 
-    fn poll_read_samples(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = &mut *self;
+        let delayed = VecDeque::with_capacity(coefficients.len() - 1);
 
-        match Pin::new(&mut this.input).poll_read_samples(cx, buffer) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-            Poll::Ready(Ok(())) => {
-                let read = buffer.filled_mut();
-                convolve_delayed(&this.coefficients, &mut this.delayed, read);
-                todo!();
-            }
+        Self {
+            coefficients,
+            delayed,
         }
+    }
+
+    #[inline]
+    pub fn order(&self) -> usize {
+        self.coefficients.len() - 1
     }
 }
 
-fn convolve_delayed<S, C>(coeffients: &[C], delayed: &mut SamplesMut<S>, read: &mut [S]) -> usize
+impl<S, C> FirFilter<S, C>
 where
-    S: Clone + Zero + AddAssign,
-    for<'a> &'a C: Mul<&'a S, Output = S>,
+    C: Float + FloatConst + FromPrimitive,
+{
+    pub fn hann(_sample_frequency: f32, _cutoff_frequency: f32) -> Self {
+        //Self::new(hann_window(order).collect())
+        todo!();
+    }
+}
+
+impl<S, C> Scanner<S> for FirFilter<S, C>
+where
+    S: Copy + Mul<C, Output = S> + Add<S, Output = S>,
+    C: Copy,
+{
+    type Output = S;
+
+    fn scan(&mut self, sample: S) -> Self::Output {
+        debug_assert!(self.delayed.len() < self.coefficients.len());
+
+        let mut output = sample * self.coefficients[0];
+        for (delayed, coeff) in self.delayed.iter().zip(&self.coefficients[1..]) {
+            output = sample + *delayed * *coeff;
+        }
+
+        if self.delayed.len() == self.coefficients.len() - 1 {
+            self.delayed.pop_back();
+        }
+        self.delayed.push_front(sample);
+
+        output
+    }
+}
+
+// I wanted to implement a fast convolution on the delayed buffer and read
+// buffer, but it got too complicated lol
+#[allow(dead_code)]
+fn convolve_delayed<S, C>(coeffients: &[C], delayed: &mut Vec<S>, read: &mut [S]) -> usize
+where
+    S: Sample + Zero + AddAssign,
+    C: Copy + Mul<S, Output = S>,
 {
     assert!(delayed.len() < coeffients.len());
 
     // if we're missing samples in the delay buffer, we need to copy them over,
     // because the read buffer will be overwritten.
     let missing_in_delay = coeffients.len().saturating_sub(delayed.len() + 1);
-    delayed.put(&read[..missing_in_delay]);
+    delayed.extend_from_slice(&read[..missing_in_delay]);
 
     let read_start = missing_in_delay;
 
@@ -250,12 +256,12 @@ where
         let mut c = coeffients.len() - 1;
 
         for j in i..delayed.len() {
-            s += &coeffients[c] * &delayed[j];
+            s += coeffients[c] * delayed[j];
             c -= 1;
         }
 
         for j in 0..=i {
-            s += &coeffients[c] * &read[read_start + j];
+            s += coeffients[c] * read[read_start + j];
             c -= 1;
         }
 
@@ -273,7 +279,7 @@ where
         let mut c = coeffients.len() - 1;
 
         for j in i0..=i {
-            s += &coeffients[c] * &read[read_start + j];
+            s += coeffients[c] * read[read_start + j];
             c -= 1;
         }
 
@@ -286,85 +292,10 @@ where
     n
 }
 
-pin_project! {
-    #[derive(Clone, Debug)]
-    pub struct Decimate<R> {
-        #[pin]
-        input: R,
-        decimate: usize,
-        counter: usize,
-    }
-}
-
-impl<R> Decimate<R> {
-    pub fn new(input: R, decimate: usize) -> Self {
-        Self {
-            input,
-            decimate,
-            counter: 0,
-        }
-    }
-}
-
-impl<R, S> AsyncReadSamples<S> for Decimate<R>
+pub fn hann_window<T>(n: usize) -> impl Iterator<Item = T>
 where
-    R: AsyncReadSamples<S>,
+    T: Float + FloatConst + FromPrimitive,
 {
-    type Error = R::Error;
-
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-
-        let mut read_buf = ReadBuf::uninit(buffer.unfilled_mut());
-
-        match this.input.poll_read_samples(cx, &mut read_buf) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-            Poll::Ready(Ok(())) => {
-                let mut read_pos = 0;
-                let mut write_pos = 0;
-
-                let num_samples = read_buf.filled().len();
-                let buffer_uninit = read_buf.inner_mut();
-
-                while read_pos < num_samples {
-                    // note: we drop all the samples that are not written back
-
-                    let sample = unsafe { buffer_uninit[read_pos].assume_init_read() };
-                    read_pos += 1;
-
-                    if *this.counter == 0 {
-                        buffer_uninit.write_sample(write_pos, sample);
-                        write_pos += 1;
-                    }
-
-                    *this.counter += 1;
-                    if this.counter == this.decimate {
-                        *this.counter = 0;
-                    }
-                }
-
-                unsafe {
-                    buffer.assume_init(write_pos);
-                }
-                buffer.set_filled(buffer.filled().len() + write_pos);
-
-                Poll::Ready(Ok(()))
-            }
-        }
-    }
-}
-
-impl<R> GetSampleRate for Decimate<R>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.input.sample_rate() / self.decimate as f32
-    }
+    let n_t = T::from_usize(n).unwrap();
+    (0..=n).map(move |i| (T::PI() * T::from_usize(i).unwrap() / n_t).sin().powi(2))
 }

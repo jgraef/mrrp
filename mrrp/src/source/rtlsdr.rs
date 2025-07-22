@@ -32,18 +32,14 @@ use crate::{
         AsyncReadSamples,
         ReadBuf,
     },
-    sample::{
-        FromSample,
-        IntoSample,
-        Sample,
-    },
+    sample::IntoSample,
 };
 
 pub type Error = rtlsdr_async::Error;
 
 #[inline]
 fn try_advance_chunk<S>(chunk: &mut Chunk<S>, amount: usize) -> Result<(), TryAdvanceError> {
-    if amount < chunk.len() {
+    if amount <= chunk.len() {
         chunk.slice(amount..);
         Ok(())
     }
@@ -73,50 +69,16 @@ impl<S: Pod> SampleBuf<S> for Chunk<S> {
 }
 
 #[inline]
-pub const fn convert_iq_to_complex(iq: Iq) -> Complex<u8> {
+pub(crate) const fn convert_iq_to_complex(iq: Iq) -> Complex<u8> {
     Complex { re: iq.i, im: iq.q }
 }
 
 #[inline]
-pub const fn convert_complex_to_iq(complex: Complex<u8>) -> Iq {
+pub(crate) const fn convert_complex_to_iq(complex: Complex<u8>) -> Iq {
     Iq {
         i: complex.re,
         q: complex.im,
     }
-}
-
-impl Sample for Iq {
-    type Signed = <Complex<u8> as Sample>::Signed;
-    type Float = <Complex<u8> as Sample>::Float;
-    type Scalar = u8;
-
-    const EQUILIBRIUM: Self = convert_complex_to_iq(<Complex<u8> as Sample>::EQUILIBRIUM);
-}
-
-macro_rules! impl_from_sample {
-    {$($T:ty,)*} => {
-        $(
-            impl FromSample<Iq> for Complex<$T> {
-                #[inline]
-                fn from_sample(sample: Iq) -> Self {
-                    convert_iq_to_complex(sample).into_sample()
-                }
-            }
-
-            impl FromSample<Complex<$T>> for Iq {
-                #[inline]
-                fn from_sample(sample: Complex<$T>) -> Self {
-                    convert_complex_to_iq(sample.into_sample())
-                }
-            }
-        )*
-    };
-}
-
-impl_from_sample! {
-    u8,
-    i8,
-    f32,
 }
 
 #[derive(Clone, Debug)]
@@ -176,7 +138,7 @@ impl AsyncReadSamples<Complex<f32>> for RtlSdrSource {
 
             if let Some(chunk) = &mut this.chunk {
                 while chunk.has_remaining() && buffer.has_remaining_mut() {
-                    buffer.put_sample(chunk.get_sample().into_sample());
+                    buffer.put_sample(convert_iq_to_complex(chunk.get_sample()).into_sample());
                 }
 
                 if !chunk.has_remaining() {

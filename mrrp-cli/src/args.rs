@@ -25,6 +25,7 @@ pub enum Command {
     #[clap(name = "tui")]
     Main(MainArgs),
     ImportSdrppBookmarks(ImportSdrppBookmarksArgs),
+    Proxy(ProxyArgs),
     #[clap(hide = true)]
     DumpState {
         path: Option<PathBuf>,
@@ -99,6 +100,15 @@ pub struct MainArgs {
 #[derive(Debug, clap::Args)]
 pub struct ImportSdrppBookmarksArgs {
     pub path: PathBuf,
+}
+
+#[derive(Debug, clap::Args)]
+pub struct ProxyArgs {
+    #[clap(short, long)]
+    pub output: String,
+
+    #[clap(short, long)]
+    pub input: String,
 }
 
 #[derive(Clone, Copy, Debug)]

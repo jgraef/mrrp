@@ -7,6 +7,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
     time::{
         Duration,
@@ -15,17 +16,38 @@ use std::{
 };
 
 use bytemuck::Pod;
+use futures_util::{
+    FutureExt,
+    future::{
+        Fuse,
+        FusedFuture,
+    },
+};
 use pin_project_lite::pin_project;
 use tracing::Span;
 
 use crate::{
     GetSampleRate,
+    WithSampleRate,
     buf::{
         SampleBufMut,
         UninitSlice,
     },
+    filter::resampling::{
+        Decimate,
+        Interpolate,
+    },
+    io::{
+        AsyncWriteSamples,
+        Buffer,
+        Forward,
+        WithSpan,
+    },
 };
 
+// todo: We really must make this S: Copy. Lots of places assume this and it's a
+// hassle otherwise (e.g. when writing to unfilled_mut()). otherwise removing
+// the filled..initialized portion of the buffer would make things a lot easier.
 #[derive(Debug)]
 pub struct ReadBuf<'a, S> {
     buffer: &'a mut UninitSlice<S>,
@@ -81,7 +103,7 @@ impl<'a, S> ReadBuf<'a, S> {
 
     #[inline]
     pub fn initialized(&self) -> &[S] {
-        unsafe { self.buffer[..self.initialized].assume_init() }
+        unsafe { self.buffer[..self.initialized].assume_init_ref() }
     }
 
     #[inline]
@@ -146,9 +168,21 @@ impl<'a, S> ReadBuf<'a, S> {
     where
         S: Clone,
     {
+        unsafe {
+            self.buffer[self.filled..(self.filled + samples.len()).min(self.initialized)]
+                .assume_init_drop();
+        }
+
         self.buffer[self.filled..][..samples.len()].clone_from_slice(samples);
         self.filled += samples.len();
         self.initialized = self.initialized.max(self.filled);
+    }
+
+    #[inline]
+    pub unsafe fn drop_unfilled_initialized(&mut self) {
+        unsafe {
+            self.buffer[self.filled..self.initialized].assume_init_drop();
+        }
     }
 }
 
@@ -383,11 +417,86 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     {
         Buffered {
             inner: self,
-            buffer: Buffer {
-                buffer: UninitSlice::box_new(buffer_size),
-                read_pos: 0,
-                write_pos: 0,
-            },
+            buffer: Buffer::new(buffer_size),
+        }
+    }
+
+    #[inline]
+    fn forward<W>(self, sink: W, buffer_size: usize) -> Forward<Self, W, S>
+    where
+        Self: Sized,
+        W: AsyncWriteSamples<S>,
+    {
+        Forward::new(self, sink, buffer_size)
+    }
+
+    #[inline]
+    fn with_span(self, span: Span) -> WithSpan<Self>
+    where
+        Self: Sized,
+    {
+        WithSpan { inner: self, span }
+    }
+
+    #[inline]
+    fn decimate(self, factor: usize) -> Decimate<Self>
+    where
+        Self: Sized,
+    {
+        Decimate::new(self, factor)
+    }
+
+    #[inline]
+    fn decimate_to(self, target_sample_rate: f32) -> Decimate<Self>
+    where
+        Self: Sized + GetSampleRate,
+    {
+        let sample_rate = self.sample_rate();
+        self.decimate((sample_rate / target_sample_rate) as usize)
+    }
+
+    #[inline]
+    fn interpolate(self, factor: usize) -> Interpolate<Self>
+    where
+        Self: Sized,
+    {
+        Interpolate::new(self, factor)
+    }
+
+    #[inline]
+    fn interpolate_to(self, target_sample_rate: f32) -> Interpolate<Self>
+    where
+        Self: Sized + GetSampleRate,
+    {
+        let sample_rate = self.sample_rate();
+        self.interpolate((target_sample_rate / sample_rate) as usize)
+    }
+
+    #[inline]
+    fn throttle(self, sample_duration: Duration) -> Throttled<Self>
+    where
+        Self: Sized,
+    {
+        Throttled::new(self, sample_duration)
+    }
+
+    #[inline]
+    fn throttle_to_sample_rate(self) -> Throttled<Self>
+    where
+        Self: Sized + GetSampleRate,
+    {
+        let sample_duration = Duration::from_secs_f32(1.0 / self.sample_rate());
+        self.throttle(sample_duration)
+    }
+
+    #[inline]
+    fn with_sample_rate(self, sample_rate: f32) -> WithSampleRate<Self>
+    where
+        Self: Sized,
+    {
+        WithSampleRate {
+            inner: self,
+            sample_rate,
         }
     }
 }
@@ -395,6 +504,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
 impl<R, S> AsyncReadSamplesExt<S> for R where R: AsyncReadSamples<S> + ?Sized {}
 
 #[derive(Debug)]
+#[must_use]
 pub struct ReadSample<'a, R, S>
 where
     R: ?Sized,
@@ -440,6 +550,7 @@ where
 
 /// Future that reads samples into a buffer.
 #[derive(Debug)]
+#[must_use]
 pub struct ReadSamples<'a, R, S>
 where
     R: ?Sized,
@@ -464,6 +575,7 @@ where
 
 /// Future that tries to read an exact amount of samples.
 #[derive(Debug)]
+#[must_use]
 pub struct ReadSamplesExact<'a, R, S>
 where
     R: ?Sized,
@@ -982,41 +1094,6 @@ pin_project! {
     }
 }
 
-/// The buffer used for [`Buffered`]. Ideally this would just be a SamplesMut
-#[derive(Debug)]
-struct Buffer<S> {
-    buffer: Box<UninitSlice<S>>,
-    read_pos: usize,
-    write_pos: usize,
-}
-
-impl<S> Clone for Buffer<S>
-where
-    S: Clone,
-{
-    fn clone(&self) -> Self {
-        let mut buffer = UninitSlice::box_new(self.buffer.len());
-
-        let filled = unsafe { self.buffer[self.read_pos..self.write_pos].assume_init() };
-        buffer[self.read_pos..self.write_pos].clone_from_slice(filled);
-
-        Self {
-            buffer,
-            read_pos: self.read_pos,
-            write_pos: self.write_pos,
-        }
-    }
-}
-
-impl<S> Drop for Buffer<S> {
-    fn drop(&mut self) {
-        // everything in read_pos..write_pos is initialized, so we need to drop it
-        unsafe {
-            self.buffer[self.read_pos..self.write_pos].assume_init_drop();
-        }
-    }
-}
-
 impl<R, S> AsyncReadSamples<S> for Buffered<R, S>
 where
     R: AsyncReadSamples<S>,
@@ -1029,6 +1106,7 @@ where
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
         let mut inner_is_pending = false;
+        let mut have_filled_buf = false;
 
         while buffer.remaining() > 0 {
             let mut this = self.as_mut().project();
@@ -1048,6 +1126,7 @@ where
                     buffer.assume_init(n);
                 }
                 buffer.set_filled(buffer.filled().len() + n);
+                have_filled_buf = true;
 
                 this.buffer.read_pos += n;
                 if this.buffer.read_pos == this.buffer.write_pos {
@@ -1077,6 +1156,13 @@ where
                             Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
                             Poll::Ready(Ok(())) => {
                                 this.buffer.write_pos = read_buf.filled;
+                                unsafe {
+                                    read_buf.drop_unfilled_initialized();
+                                }
+
+                                if this.buffer.write_pos == 0 {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -1086,34 +1172,121 @@ where
                     // our buffer and then copying to the destination buffer, we can read directly
                     // to the destination buffer
 
-                    match buffer
-                        .with_read_buf(|read_buf| this.inner.poll_read_samples(cx, read_buf))
-                    {
+                    let filled_before = buffer.filled().len();
+                    match this.inner.poll_read_samples(cx, buffer) {
                         Poll::Pending => {
                             inner_is_pending = true;
                             break;
                         }
                         Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
                         Poll::Ready(Ok(())) => {
+                            if buffer.filled().len() == filled_before {
+                                // eof
+                                break;
+                            }
+
                             // directly read to destination buffer, so nothing
                             // to do here.
+                            have_filled_buf = true;
                         }
                     }
                 }
             }
         }
 
-        if buffer.filled > 0 {
-            Poll::Ready(Ok(()))
+        if inner_is_pending && !have_filled_buf {
+            Poll::Pending
         }
         else {
-            assert!(inner_is_pending);
-            Poll::Pending
+            Poll::Ready(Ok(()))
         }
     }
 }
 
 impl<R, S> GetSampleRate for Buffered<R, S>
+where
+    R: GetSampleRate,
+{
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.inner.sample_rate()
+    }
+}
+
+pin_project! {
+    /// Stream wrapper that maps the error type.
+    #[derive(Debug)]
+    pub struct Throttled<R> {
+        #[pin]
+        inner: R,
+        sample_duration: Duration,
+        delay: Pin<Box<Fuse<tokio::time::Sleep>>>,
+    }
+}
+
+impl<R> Throttled<R> {
+    pub fn new(inner: R, sample_duration: Duration) -> Self {
+        Self {
+            inner,
+            sample_duration,
+            delay: Box::pin(Fuse::terminated()),
+        }
+    }
+}
+
+impl<R, S> AsyncReadSamples<S> for Throttled<R>
+where
+    R: AsyncReadSamples<S>,
+{
+    type Error = R::Error;
+
+    fn poll_read_samples(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<S>,
+    ) -> Poll<Result<(), Self::Error>> {
+        let this = self.project();
+
+        loop {
+            if this.delay.is_terminated() {
+                // this branch always returns
+
+                let num_samples_before = buffer.filled().len();
+                match this.inner.poll_read_samples(cx, buffer) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                    Poll::Ready(Ok(())) => {
+                        let num_samples = buffer.filled().len() - num_samples_before;
+
+                        // 32bit at 2.4 MHz is exhausted in about 30 minutes
+                        let num_samples = u32::try_from(num_samples).unwrap_or_else(|_| {
+                            tracing::warn!("samples per read is overflowing u32 in Throttled");
+                            u32::MAX
+                        });
+
+                        // well, we'll just wait 1 second... close enough :D
+                        let delay = this
+                            .sample_duration
+                            .checked_mul(num_samples)
+                            .unwrap_or_else(|| Duration::from_secs(1));
+
+                        this.delay.set(tokio::time::sleep(delay).fuse());
+
+                        return Poll::Ready(Ok(()));
+                    }
+                }
+            }
+            else {
+                // either we return Poll::Pending or the future will be terminated in the next
+                // loop iteration
+
+                ready!(this.delay.poll_unpin(cx));
+            }
+        }
+    }
+}
+
+impl<R> GetSampleRate for Throttled<R>
 where
     R: GetSampleRate,
 {

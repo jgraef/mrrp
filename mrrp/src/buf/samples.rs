@@ -130,7 +130,7 @@ impl<S> Samples<S> {
     #[inline]
     fn full_slice(&self) -> &[S] {
         assert!(self.start + self.length <= self.initialized);
-        unsafe { self.buffer[self.start..][..self.length].assume_init() }
+        unsafe { self.buffer[self.start..][..self.length].assume_init_ref() }
     }
 
     #[inline]

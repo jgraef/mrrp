@@ -399,6 +399,25 @@ impl<S> SampleBufMut<S> for &mut [S] {
     }
 }
 
+impl<S> SampleBufMut<S> for Vec<S> {
+    unsafe fn advance_mut(&mut self, amount: usize) {
+        let new_length = self.len() + amount;
+        assert!(new_length <= self.capacity());
+        unsafe {
+            self.set_len(new_length);
+        }
+    }
+
+    fn remaining_mut(&self) -> usize {
+        usize::MAX.saturating_sub(self.len())
+    }
+
+    fn chunk_mut(&mut self) -> &mut UninitSlice<S> {
+        self.reserve(1);
+        UninitSlice::slice_mut_from_uninit(self.spare_capacity_mut())
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct IntoIter<B, S> {
     buf: B,

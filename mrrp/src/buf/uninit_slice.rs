@@ -121,7 +121,7 @@ impl<S> UninitSlice<S> {
     }
 
     #[inline]
-    pub unsafe fn assume_init(&self) -> &[S] {
+    pub unsafe fn assume_init_ref(&self) -> &[S] {
         unsafe { self.0.assume_init_ref() }
     }
 

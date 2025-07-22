@@ -14,10 +14,10 @@ pub use self::types::{
     U48,
 };
 
-pub trait Sample: Sized {
+pub trait Sample: Copy + Sized {
     type Signed: FromSample<Self>;
     type Float: FromSample<Self>;
-    type Scalar;
+    type Scalar: Copy + Sized;
 
     const EQUILIBRIUM: Self;
 
@@ -86,15 +86,15 @@ macro_rules! impl_sample {
 impl_sample! {
     i8:  Signed: i8,  Float: f32, EQUILIBRIUM: 0,
     i16: Signed: i16, Float: f32, EQUILIBRIUM: 0,
-    I24: Signed: I24, Float: f32, EQUILIBRIUM: types::i24::EQUILIBRIUM,
+    //I24: Signed: I24, Float: f32, EQUILIBRIUM: types::i24::EQUILIBRIUM,
     i32: Signed: i32, Float: f32, EQUILIBRIUM: 0,
-    I48: Signed: I48, Float: f64, EQUILIBRIUM: types::i48::EQUILIBRIUM,
+    //I48: Signed: I48, Float: f64, EQUILIBRIUM: types::i48::EQUILIBRIUM,
     i64: Signed: i64, Float: f64, EQUILIBRIUM: 0,
     u8:  Signed: i8,  Float: f32, EQUILIBRIUM: 128,
     u16: Signed: i16, Float: f32, EQUILIBRIUM: 32_768,
-    U24: Signed: i32, Float: f32, EQUILIBRIUM: types::u24::EQUILIBRIUM,
+    //U24: Signed: i32, Float: f32, EQUILIBRIUM: types::u24::EQUILIBRIUM,
     u32: Signed: i32, Float: f32, EQUILIBRIUM: 2_147_483_648,
-    U48: Signed: i64, Float: f64, EQUILIBRIUM: types::u48::EQUILIBRIUM,
+    //U48: Signed: i64, Float: f64, EQUILIBRIUM: types::u48::EQUILIBRIUM,
     u64: Signed: i64, Float: f64, EQUILIBRIUM: 9_223_372_036_854_775_808,
     f32: Signed: f32, Float: f32, EQUILIBRIUM: 0.0,
     f64: Signed: f64, Float: f64, EQUILIBRIUM: 0.0

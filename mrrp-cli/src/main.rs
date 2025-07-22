@@ -3,6 +3,7 @@ pub mod args;
 pub mod demodulator;
 pub mod fft;
 pub mod files;
+pub mod proxy;
 pub mod reader;
 pub mod ui;
 pub mod util;
@@ -106,6 +107,10 @@ async fn main() -> Result<(), Error> {
             for bookmark in import_sdrpp_bookmarks(&args.path)? {
                 bookmarks.add_and_save_bookmark(bookmark)?;
             }
+            Ok(())
+        }
+        Command::Proxy(args) => {
+            proxy::serve(&args.input, &args.output).await?;
             Ok(())
         }
     };
