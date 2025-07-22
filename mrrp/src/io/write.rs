@@ -1,4 +1,5 @@
 use std::{
+    convert::Infallible,
     marker::PhantomData,
     pin::Pin,
     task::{
@@ -216,4 +217,32 @@ where
 
         Poll::Ready(Ok(()))
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NullSink;
+
+impl<S> AsyncWriteSamples<S> for NullSink {
+    type Error = Infallible;
+
+    fn poll_write_samples(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buffer: &[S],
+    ) -> Poll<Result<usize, Self::Error>> {
+        Poll::Pending
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+}
+
+#[inline]
+pub fn null_sink() -> NullSink {
+    NullSink
 }

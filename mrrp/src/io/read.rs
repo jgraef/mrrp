@@ -43,6 +43,7 @@ use crate::{
         Forward,
         WithSpan,
     },
+    sample::Sample,
 };
 
 // todo: We really must make this S: Copy. Lots of places assume this and it's a
@@ -1317,14 +1318,89 @@ where
     }
 }
 
+#[inline]
 pub fn repeat<S>(sample: S) -> Repeat<S> {
     Repeat { sample }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NullSource;
+
+impl<S> AsyncReadSamples<S> for NullSource {
+    type Error = Infallible;
+
+    fn poll_read_samples(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        _buffer: &mut ReadBuf<S>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Poll::Pending
+    }
+}
+
+#[inline]
+pub fn null_source() -> NullSource {
+    NullSource
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Silence;
+
+impl<S: Sample> AsyncReadSamples<S> for Silence {
+    type Error = Infallible;
+
+    fn poll_read_samples(
+        self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<S>,
+    ) -> Poll<Result<(), Self::Error>> {
+        buffer.fill_with(|| S::EQUILIBRIUM);
+        Poll::Ready(Ok(()))
+    }
+}
+
+#[inline]
+pub fn silence() -> Silence {
+    Silence
 }
 
 pub trait Scanner<S> {
     type Output;
 
     fn scan(&mut self, sample: S) -> Self::Output;
+}
+
+impl<T, S> Scanner<S> for &mut T
+where
+    T: Scanner<S> + ?Sized,
+{
+    type Output = T::Output;
+
+    #[inline]
+    fn scan(&mut self, sample: S) -> Self::Output {
+        (&mut **self).scan(sample)
+    }
+}
+
+impl<T, S> Scanner<S> for Box<T>
+where
+    T: Scanner<S> + ?Sized,
+{
+    type Output = T::Output;
+
+    #[inline]
+    fn scan(&mut self, sample: S) -> Self::Output {
+        (&mut **self).scan(sample)
+    }
+}
+
+impl<S> Scanner<S> for () {
+    type Output = S;
+
+    #[inline]
+    fn scan(&mut self, sample: S) -> Self::Output {
+        sample
+    }
 }
 
 #[derive(Debug)]

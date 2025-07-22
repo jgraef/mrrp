@@ -12,5 +12,5 @@ strip = "none"
 
 [workspace.dependencies.rtlsdr-async]
 version = "0.1.0"
-#git = "https://github.com/jgraef/rtlsdr-async.git"
-path = "../rtlsdr-async/rtlsdr-async"
+git = "https://github.com/jgraef/rtlsdr-async.git"
+#path = "../rtlsdr-async/rtlsdr-async"

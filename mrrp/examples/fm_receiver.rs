@@ -3,7 +3,13 @@ use color_eyre::eyre::Error;
 use mrrp::{
     GetSampleRate,
     audio::play_audio,
-    filter::biquad,
+    filter::{
+        biquad,
+        fir::{
+            FirFilter,
+            equiripple_fft,
+        },
+    },
     io::AsyncReadSamplesExt,
     source::rtlsdr::RtlSdrSource,
 };
@@ -34,7 +40,20 @@ async fn main() -> Result<(), Error> {
     //let sample_rate = baseband.sample_rate();
     //let filtered_baseband =
     // baseband.scan_in_place_with(biquad::lowpass(sample_rate, 150000.0));
-    let filtered_baseband = baseband;
+    //let filtered_baseband = baseband;
+    let filter_design = equiripple_fft::lowpass(
+        RTLSDR_SAMPLE_RATE,
+        150000.0,
+        10000.0,
+        0.05,
+        0.05,
+        17,
+        None,
+        |_i, e| e < 1e-6,
+    )
+    .unwrap();
+    println!("filter design: {filter_design:#?}");
+    let filtered_baseband = baseband.scan_in_place_with(FirFilter::new(filter_design.coefficients));
 
     let demodulated = filtered_baseband.scan_with(DifferentiateAndAccessPhase::new(
         RTLSDR_SAMPLE_RATE,
@@ -43,7 +62,7 @@ async fn main() -> Result<(), Error> {
 
     let sample_rate = demodulated.sample_rate();
     let filtered = demodulated
-        .scan_in_place_with(biquad::lowpass(sample_rate, 10000.0))
+        .scan_in_place_with(biquad::lowpass(sample_rate, 0.5 * AUDIO_SAMPLE_RATE))
         .decimate_to(AUDIO_SAMPLE_RATE);
 
     println!("audio_sample_rate: {}", filtered.sample_rate());

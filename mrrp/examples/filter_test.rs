@@ -1,10 +1,22 @@
 use std::path::PathBuf;
 
 use clap::Parser;
-use color_eyre::eyre::Error;
+use color_eyre::eyre::{
+    Error,
+    bail,
+};
 use mrrp::{
-    filter::biquad,
-    io::AsyncReadSamplesExt,
+    filter::{
+        biquad,
+        fir::{
+            FirFilter,
+            equiripple_fft,
+        },
+    },
+    io::{
+        AsyncReadSamplesExt,
+        Scanner,
+    },
     sink::{
         file::write_stream_to_wav,
         rtl_tcp,
@@ -28,7 +40,45 @@ async fn main() -> Result<(), Error> {
     let cutoff_frequency = args
         .cutoff_frequency
         .unwrap_or_else(|| args.sample_rate / 4.0);
-    let output = noise.scan_in_place_with(biquad::lowpass(args.sample_rate, cutoff_frequency));
+    let transition_bandwidth = args
+        .transition_bandwidth
+        .unwrap_or_else(|| cutoff_frequency * 0.2);
+
+    println!("cutoff frequency: {cutoff_frequency}");
+    println!("transition bandwidth: {transition_bandwidth}");
+
+    let filter: Box<dyn Scanner<Complex<f32>, Output = Complex<f32>> + Send> =
+        if let Some(filter) = &args.filter {
+            match filter.as_str() {
+                "biquad" => Box::new(biquad::lowpass(args.sample_rate, cutoff_frequency)),
+                "fir-equiripple-fft" => {
+                    let filter_design = equiripple_fft::lowpass(
+                        args.sample_rate,
+                        cutoff_frequency,
+                        transition_bandwidth,
+                        0.05,
+                        0.005,
+                        None,
+                        None,
+                        |_i, e| e < 1e-6,
+                    )
+                    .unwrap();
+                    println!("filter design: {filter_design:#?}");
+                    let coefficients = filter_design.coefficients;
+                    Box::new(FirFilter::new(coefficients))
+                }
+                "fir-halfband" => {
+                    let coefficients = fir_half_band_lowpass();
+                    Box::new(FirFilter::new(coefficients))
+                }
+                _ => bail!("Unknown filter type: {filter}"),
+            }
+        }
+        else {
+            Box::new(())
+        };
+
+    let output = noise.scan_in_place_with(filter);
 
     if let Some(path) = &args.file_output {
         write_stream_to_wav(path, output).await?;
@@ -53,9 +103,32 @@ struct Args {
     #[clap(short = 'f', long)]
     cutoff_frequency: Option<f32>,
 
+    #[clap(short, long)]
+    transition_bandwidth: Option<f32>,
+
     #[clap(short = 'o', long)]
     file_output: Option<PathBuf>,
 
     #[clap(long)]
     tcp_output: Option<String>,
+
+    #[clap(short = 'F', long)]
+    filter: Option<String>,
+}
+
+fn fir_half_band_lowpass() -> Vec<f32> {
+    // taken from https://yoksis.bilkent.edu.tr/pdf/files/10.1109-79.581378.pdf
+    let mut coefficients = vec![
+        0.5261e-1,
+        -5.7907e-7,
+        -0.9116e-1,
+        -2.6443e-16,
+        0.3130e0,
+        0.5e0,
+    ];
+    coefficients.resize(11, 0.0);
+    for i in 0..5 {
+        coefficients[6 + i] = coefficients[4 - i];
+    }
+    coefficients
 }
