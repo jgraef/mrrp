@@ -4,9 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+argmin = "0.10.0"
+argmin-math = { version = "0.4", features = ["nalgebra_latest"] }
 arraydeque = "0.5.1"
 arrayvec = "0.7.6"
-biquad = { git = "https://github.com/jgraef/biquad-rs.git", branch = "switch/complex" }
+biquad = { git = "https://github.com/korken89/biquad-rs.git" }
 bytemuck = { version = "1.23.1", features = ["derive"] }
 bytes = "1.10.1"
 derive_more = { version = "2.0.1", features = ["debug"] }
@@ -16,6 +18,7 @@ num-complex = { version = "0.4.6", features = ["bytemuck", "rand"] }
 num-traits = "0.2.19"
 parking_lot = "0.12.4"
 pin-project-lite = "0.2.16"
+pm-remez = { version = "0.1.8", default-features = false, features = ["openblas-static"] }
 rand = { version = "0.8.5", default-features = false, features = ["std", "std_rng", "small_rng"] }
 rodio = { version = "0.21.1", default-features = false, optional = true }
 rtlsdr-async = { workspace = true, optional = true, features = ["tcp"] }

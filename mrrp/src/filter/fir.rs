@@ -1,5 +1,3 @@
-pub mod equiripple_fft;
-
 use std::{
     collections::VecDeque,
     ops::{

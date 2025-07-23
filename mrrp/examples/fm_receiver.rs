@@ -5,17 +5,20 @@ use mrrp::{
     audio::play_audio,
     filter::{
         biquad,
-        fir::{
-            FirFilter,
+        design::{
+            Lowpass,
             equiripple_fft,
         },
+        fir::FirFilter,
     },
     io::AsyncReadSamplesExt,
     source::rtlsdr::RtlSdrSource,
 };
 use tokio::signal::ctrl_c;
 
-use crate::demod::DifferentiateAndAccessPhase;
+use crate::demod::DifferentiateAndDivide;
+
+// https://github.com/JulianKemmerer/PipelineC/wiki/Example:-FM-Radio-Demodulation
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -36,29 +39,40 @@ async fn main() -> Result<(), Error> {
     // Open the RTL-SDR and get a complex IQ stream
     let baseband = RtlSdrSource::open(args.device, args.frequency, RTLSDR_SAMPLE_RATE).await?;
 
+    // decimate down to 300 kHz
+    //let baseband = baseband.decimate(2);
+
+    let sample_rate = baseband.sample_rate();
+    //let filtered_baseband = baseband;
+
     // fixme: this filter is not linear-phase
     //let sample_rate = baseband.sample_rate();
     //let filtered_baseband =
     // baseband.scan_in_place_with(biquad::lowpass(sample_rate, 150000.0));
-    //let filtered_baseband = baseband;
-    let filter_design = equiripple_fft::lowpass(
-        RTLSDR_SAMPLE_RATE,
-        150000.0,
-        10000.0,
-        0.05,
-        0.05,
+
+    // use equiripple fft methods
+    let filter_design = equiripple_fft::run(
+        Lowpass::new(
+            150000.0 / RTLSDR_SAMPLE_RATE,
+            10000.0 / RTLSDR_SAMPLE_RATE,
+            0.05,
+            0.05,
+        ),
         17,
         None,
         |_i, e| e < 1e-6,
     )
     .unwrap();
     println!("filter design: {filter_design:#?}");
-    let filtered_baseband = baseband.scan_in_place_with(FirFilter::new(filter_design.coefficients));
+    let coefficients = filter_design.coefficients;
 
-    let demodulated = filtered_baseband.scan_with(DifferentiateAndAccessPhase::new(
-        RTLSDR_SAMPLE_RATE,
-        75_000.0,
-    ));
+    //let coefficients = pm_remez::lowpass(200000.0 / sample_rate, 15000.0 /
+    // sample_rate, 15)?;
+
+    let filtered_baseband = baseband.scan_in_place_with(FirFilter::new(coefficients));
+
+    let demodulated =
+        filtered_baseband.scan_with(DifferentiateAndDivide::new(sample_rate, 75_000.0));
 
     let sample_rate = demodulated.sample_rate();
     let filtered = demodulated
@@ -126,6 +140,7 @@ mod demod {
     }
 
     /// https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/
+    /// buggy
     #[derive(Clone, Copy, Debug)]
     pub struct AccessPhaseAndDifferentiate {
         delayed: f32,

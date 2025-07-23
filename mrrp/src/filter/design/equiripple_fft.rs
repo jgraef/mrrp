@@ -1,6 +1,9 @@
 //! [Equiripple FIR filter design by the FFT algorithm][1]
 //!
+//! There's an example [here][2].
+//!
 //! [1]: https://yoksis.bilkent.edu.tr/pdf/files/10.1109-79.581378.pdf
+//! [2]: https://www.recordingblogs.com/wiki/equiripple-filter
 
 use std::sync::Arc;
 
@@ -11,31 +14,24 @@ use rustfft::{
     FftPlanner,
 };
 
+use crate::filter::design::{
+    FilterSpecification,
+    SampledIdealFrequencyResponse,
+    fft_size_for_filter_length,
+};
+
 #[derive(Debug, thiserror::Error)]
 #[error("equiripple fft algorithm error")]
 pub enum Error {
     #[error("produced NAN")]
     NotFinite,
+    #[error("filter length not specified")]
+    FilterLengthNotSpecified,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub struct FrequencyResponseBin {
-    pub amplitude: f32,
-    pub tolerance: f32,
-}
-
-pub trait FrequencyResponse {
-    fn len(&self) -> usize;
-    fn get(&self, index: usize) -> Option<FrequencyResponseBin>;
-
-    fn iter(&self) -> impl Iterator<Item = Option<FrequencyResponseBin>> {
-        (0..self.len()).map(|i| self.get(i))
-    }
-}
-
-pub struct Algorithm<F> {
+pub struct Algorithm<S> {
     length: usize,
-    frequency_response: F,
+    ideal_frequency_response: SampledIdealFrequencyResponse<S>,
     h: Vec<Complex<f32>>,
     h_before: Vec<Complex<f32>>,
     fft_forward: Arc<dyn Fft<f32>>,
@@ -44,15 +40,19 @@ pub struct Algorithm<F> {
     norm_factor: f32,
 }
 
-impl<F> Algorithm<F>
+impl<S> Algorithm<S>
 where
-    F: FrequencyResponse,
+    S: FilterSpecification,
 {
-    fn new(length: usize, frequency_response: F, fft_planner: &mut FftPlanner<f32>) -> Self {
+    fn new(
+        length: usize,
+        ideal_frequency_response: SampledIdealFrequencyResponse<S>,
+        fft_planner: &mut FftPlanner<f32>,
+    ) -> Self {
         assert!(length > 0);
         assert_eq!(length % 2, 1);
 
-        let fft_size = frequency_response.len();
+        let fft_size = ideal_frequency_response.fft_size;
         assert!(fft_size >= length);
 
         let fft_forward = fft_planner.plan_fft_forward(fft_size);
@@ -63,7 +63,7 @@ where
 
         Self {
             length,
-            frequency_response,
+            ideal_frequency_response,
             h: vec![Zero::zero(); fft_size],
             h_before: vec![Zero::zero(); fft_size],
             fft_forward,
@@ -75,21 +75,21 @@ where
 
     pub fn with_h0_estimate(
         length: usize,
-        frequency_response: F,
+        ideal_frequency_response: SampledIdealFrequencyResponse<S>,
         fft_planner: &mut FftPlanner<f32>,
     ) -> Self {
-        let mut this = Self::new(length, frequency_response, fft_planner);
+        let mut this = Self::new(length, ideal_frequency_response, fft_planner);
         this.set_h_with_h0_estimate();
         this
     }
 
     pub fn with_h0(
         length: usize,
-        frequency_response: F,
+        ideal_frequency_response: SampledIdealFrequencyResponse<S>,
         fft_planner: &mut FftPlanner<f32>,
         h0: &[f32],
     ) -> Self {
-        let mut this = Self::new(length, frequency_response, fft_planner);
+        let mut this = Self::new(length, ideal_frequency_response, fft_planner);
         this.set_h_from_h0(h0);
         this
     }
@@ -107,7 +107,18 @@ where
     }
 
     fn set_h_with_h0_estimate(&mut self) {
-        for (h, h0) in self.h.iter_mut().zip(self.frequency_response.iter()) {
+        for (_i, (h, h0)) in self
+            .h
+            .iter_mut()
+            .zip(self.ideal_frequency_response.iter())
+            .enumerate()
+        {
+            // todo: is this needed? no appararent changes to result
+            // phase shift for delay by half the samples
+            //let m = (self.frequency_response.fft_size() / 2  - 1) as f32;
+            //let w = self.frequency_response.frequency(i);
+            //let p = (Complex::i() * TAU * w * m).exp();
+
             *h = h0.map_or(Zero::zero(), |response| Complex::from(response.amplitude));
         }
         self.fft_inverse
@@ -135,6 +146,7 @@ where
 
         for h in &mut self.h[..self.length] {
             *h *= self.norm_factor;
+            //h.im = 0.0;
         }
         for h in &mut self.h[self.length..] {
             *h = Zero::zero();
@@ -149,7 +161,7 @@ where
 
         //panic!("{:#?}", ha);
 
-        for (h, h_id) in self.h.iter_mut().zip(self.frequency_response.iter()) {
+        for (h, h_id) in self.h.iter_mut().zip(self.ideal_frequency_response.iter()) {
             // normalize
             *h *= self.norm_factor;
 
@@ -185,139 +197,54 @@ where
         Ok(mse)
     }
 
-    pub fn h(&self) -> impl Iterator<Item = f32> {
+    pub fn h(&self) -> impl Iterator<Item = Complex<f32>> {
         /*let i0 = self.h.len() - self.length / 2 - 1;
         let i1 = self.length / 2 + 1;
         self.h[..i1].iter().chain(self.h[i0..].iter()).map(|h| h.re)*/
 
-        self.h[..self.length].iter().map(|h| h.re)
-    }
-
-    fn force_symmetry(&mut self) {
-        let half = self.length / 2;
-        for i in 0..half {
-            let j = self.length - i - 1;
-            let h = 0.5 * (self.h[i] + self.h[j]);
-            self.h[i] = h;
-            self.h[j] = h;
-        }
-    }
-}
-
-fn estimate_filter_length_for_lowpass_or_highpass(
-    transition_bandwidth: f32,
-    passband_tolerance: f32,
-    stopband_tolerance: f32,
-) -> f32 {
-    (-20.0 * (passband_tolerance * stopband_tolerance).sqrt().log10() - 13.0)
-        / (14.6 * transition_bandwidth)
-}
-
-fn default_fft_size(length: usize) -> usize {
-    (5 * (length - 1) + 1).next_power_of_two()
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Lowpass {
-    pub passband_end: f32,
-    pub stopband_start: f32,
-    pub passband_tolerance: f32,
-    pub stopband_tolerance: f32,
-    pub fft_size: usize,
-}
-
-impl FrequencyResponse for Lowpass {
-    fn len(&self) -> usize {
-        self.fft_size
-    }
-
-    fn get(&self, index: usize) -> Option<FrequencyResponseBin> {
-        /*
-        // [0..1] <-> [0..fs]
-        let mut f = index as f32 / self.fft_size as f32;
-
-        // this is equivalent to first changing to [-0.5..0.5] and then taking the
-        // absolute
-        if f > 0.5 {
-            f = 1.0 - f;
-        }
-         */
-
-        let f = if index < self.fft_size / 2 {
-            index as f32 / self.fft_size as f32
-        }
-        else {
-            (self.fft_size - 1 - index) as f32 / self.fft_size as f32
-        };
-
-        if f <= self.passband_end {
-            Some(FrequencyResponseBin {
-                amplitude: 1.0,
-                tolerance: self.passband_tolerance,
-            })
-        }
-        else if f >= self.stopband_start {
-            Some(FrequencyResponseBin {
-                amplitude: 0.0,
-                tolerance: self.stopband_tolerance,
-            })
-        }
-        else {
-            None
-        }
+        //self.h[..self.length].iter().map(|h| h.re)
+        self.h[..self.length].iter().copied()
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct FilterDesign {
-    pub coefficients: Vec<f32>,
+    pub coefficients: Vec<Complex<f32>>,
     pub interations: usize,
     pub mean_square_error: f32,
     pub fft_size: usize,
 }
 
-pub fn lowpass(
-    sample_rate: f32,
-    cutoff_frequency: f32,
-    transition_bandwidth: f32,
-    passband_tolerance: f32,
-    stopband_tolerance: f32,
+pub fn run<S>(
+    filter_specification: S,
     length: impl Into<Option<usize>>,
     fft_size: impl Into<Option<usize>>,
     mut stop_condition: impl FnMut(usize, f32) -> bool,
-) -> Result<FilterDesign, Error> {
-    let cutoff_frequency = cutoff_frequency / sample_rate;
-    let transition_bandwidth = transition_bandwidth / sample_rate;
-
-    let length = length.into().unwrap_or_else(|| {
-        let mut length = estimate_filter_length_for_lowpass_or_highpass(
-            transition_bandwidth,
-            passband_tolerance,
-            stopband_tolerance,
-        )
-        .ceil() as usize;
-        if length % 2 == 0 {
-            length += 1;
-        }
-        length
-    });
+) -> Result<FilterDesign, Error>
+where
+    S: FilterSpecification,
+{
+    let length = length
+        .into()
+        .or_else(|| {
+            let mut length = filter_specification.optimal_filter_length()?;
+            if length % 2 == 0 {
+                length += 1;
+            }
+            Some(length)
+        })
+        .ok_or_else(|| Error::FilterLengthNotSpecified)?;
     dbg!(length);
 
-    let fft_size = fft_size.into().unwrap_or_else(|| default_fft_size(length));
-    dbg!(fft_size);
+    let fft_size = fft_size
+        .into()
+        .unwrap_or_else(|| fft_size_for_filter_length(length));
 
-    let b = 0.5 * transition_bandwidth;
-    let frequency_response = Lowpass {
-        passband_end: cutoff_frequency - b,
-        stopband_start: cutoff_frequency + b,
-        passband_tolerance,
-        stopband_tolerance,
-        fft_size,
-    };
-    dbg!(frequency_response);
-
-    let mut algorithm =
-        Algorithm::with_h0_estimate(length, frequency_response, &mut FftPlanner::new());
+    let mut algorithm = Algorithm::with_h0_estimate(
+        length,
+        filter_specification.sampled(fft_size),
+        &mut FftPlanner::new(),
+    );
 
     let mut i = 0;
     let mut mse;
@@ -339,28 +266,22 @@ pub fn lowpass(
 
 #[cfg(test)]
 mod tests {
-    use approx::assert_abs_diff_eq;
 
-    use crate::filter::fir::equiripple_fft::{
-        estimate_filter_length_for_lowpass_or_highpass,
-        lowpass,
-    };
+    use super::run;
+    use crate::filter::design::Lowpass;
 
     #[test]
     fn it_reproduces_the_example_from_the_paper() {
-        let filter_design =
-            lowpass(1.0, 0.25, 0.1, 0.05, 0.05, 11, None, |_, e| e < 1.0e-4).unwrap();
+        let filter_design = run(Lowpass::new(0.25, 0.1, 0.05, 0.05), 11, None, |_, e| {
+            e < 1.0e-4
+        })
+        .unwrap();
+
         let h = filter_design.coefficients;
         let n = (h.len() - 1) / 2;
         for (i, h) in h.iter().enumerate() {
             println!("{}: {h}", i as isize - n as isize);
         }
         todo!();
-    }
-
-    #[test]
-    fn it_estimates_lowpass_filter_length_correctly() {
-        let length = estimate_filter_length_for_lowpass_or_highpass(0.1, 0.05, 0.05);
-        assert_abs_diff_eq!(length, 8.918219118684673);
     }
 }

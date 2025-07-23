@@ -1,4 +1,5 @@
 pub mod biquad;
+pub mod design;
 pub mod fir;
 pub mod resampling;
 

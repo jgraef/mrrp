@@ -8,10 +8,13 @@ use color_eyre::eyre::{
 use mrrp::{
     filter::{
         biquad,
-        fir::{
-            FirFilter,
+        design::{
+            Lowpass,
+            argmin,
             equiripple_fft,
+            pm_remez,
         },
+        fir::FirFilter,
     },
     io::{
         AsyncReadSamplesExt,
@@ -37,46 +40,49 @@ async fn main() -> Result<(), Error> {
 
     let noise = white_noise::<Complex<f32>>().with_sample_rate(args.sample_rate);
 
-    let cutoff_frequency = args
-        .cutoff_frequency
-        .unwrap_or_else(|| args.sample_rate / 4.0);
-    let transition_bandwidth = args
-        .transition_bandwidth
-        .unwrap_or_else(|| cutoff_frequency * 0.2);
+    println!("cutoff frequency: {}", args.cutoff_frequency());
+    println!("transition bandwidth: {}", args.transition_bandwidth());
 
-    println!("cutoff frequency: {cutoff_frequency}");
-    println!("transition bandwidth: {transition_bandwidth}");
-
-    let filter: Box<dyn Scanner<Complex<f32>, Output = Complex<f32>> + Send> =
-        if let Some(filter) = &args.filter {
-            match filter.as_str() {
-                "biquad" => Box::new(biquad::lowpass(args.sample_rate, cutoff_frequency)),
-                "fir-equiripple-fft" => {
-                    let filter_design = equiripple_fft::lowpass(
-                        args.sample_rate,
-                        cutoff_frequency,
-                        transition_bandwidth,
-                        0.05,
-                        0.005,
-                        None,
-                        None,
-                        |_i, e| e < 1e-6,
-                    )
-                    .unwrap();
-                    println!("filter design: {filter_design:#?}");
-                    let coefficients = filter_design.coefficients;
-                    Box::new(FirFilter::new(coefficients))
-                }
-                "fir-halfband" => {
-                    let coefficients = fir_half_band_lowpass();
-                    Box::new(FirFilter::new(coefficients))
-                }
-                _ => bail!("Unknown filter type: {filter}"),
+    let filter: Box<dyn Scanner<Complex<f32>, Output = Complex<f32>> + Send> = if let Some(filter) =
+        &args.filter
+    {
+        match filter.as_str() {
+            "biquad" => Box::new(biquad::lowpass(args.sample_rate, args.cutoff_frequency())),
+            "fir-halfband" => {
+                let coefficients = fir_half_band_lowpass();
+                Box::new(FirFilter::new(coefficients))
             }
+            "fir-equiripple-fft" => {
+                let filter_design =
+                    equiripple_fft::run(args.filter_specification(), None, None, |i, e| {
+                        e < 1e-6 && i >= 20
+                    })
+                    .unwrap();
+                println!("filter design: {filter_design:#?}");
+                let coefficients = filter_design.coefficients;
+                Box::new(FirFilter::new(coefficients))
+            }
+            "fir-fft-particleswarm" => {
+                let coefficients =
+                    argmin::particle_swarm_fft(args.filter_specification(), None, None).unwrap();
+                println!("filter design: {coefficients:#?}");
+                Box::new(FirFilter::new(coefficients))
+            }
+            "fir-pmremez" => {
+                let coefficients = pm_remez::lowpass(
+                    args.cutoff_frequency() / args.sample_rate,
+                    args.transition_bandwidth() / args.sample_rate,
+                    11,
+                )?;
+                println!("filter design: {coefficients:#?}");
+                Box::new(FirFilter::new(coefficients))
+            }
+            _ => bail!("Unknown filter type: {filter}"),
         }
-        else {
-            Box::new(())
-        };
+    }
+    else {
+        Box::new(())
+    };
 
     let output = noise.scan_in_place_with(filter);
 
@@ -114,6 +120,27 @@ struct Args {
 
     #[clap(short = 'F', long)]
     filter: Option<String>,
+}
+
+impl Args {
+    fn cutoff_frequency(&self) -> f32 {
+        self.cutoff_frequency
+            .unwrap_or_else(|| self.sample_rate / 4.0)
+    }
+
+    fn transition_bandwidth(&self) -> f32 {
+        self.transition_bandwidth
+            .unwrap_or_else(|| self.cutoff_frequency() * 0.4)
+    }
+
+    fn filter_specification(&self) -> Lowpass {
+        Lowpass::new(
+            self.cutoff_frequency() / self.sample_rate,
+            self.transition_bandwidth() / self.sample_rate,
+            0.05,
+            0.05,
+        )
+    }
 }
 
 fn fir_half_band_lowpass() -> Vec<f32> {
