@@ -69,11 +69,7 @@ async fn main() -> Result<(), Error> {
                 Box::new(FirFilter::new(coefficients))
             }
             "fir-pmremez" => {
-                let coefficients = pm_remez::lowpass(
-                    args.cutoff_frequency() / args.sample_rate,
-                    args.transition_bandwidth() / args.sample_rate,
-                    11,
-                )?;
+                let coefficients = pm_remez::lowpass(args.filter_specification(), 11)?;
                 println!("filter design: {coefficients:#?}");
                 Box::new(FirFilter::new(coefficients))
             }

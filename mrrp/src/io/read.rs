@@ -453,7 +453,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         Self: Sized + GetSampleRate,
     {
         let sample_rate = self.sample_rate();
-        self.decimate((sample_rate / target_sample_rate) as usize)
+        self.decimate((sample_rate / target_sample_rate).round() as usize)
     }
 
     #[inline]
@@ -470,7 +470,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         Self: Sized + GetSampleRate,
     {
         let sample_rate = self.sample_rate();
-        self.interpolate((target_sample_rate / sample_rate) as usize)
+        self.interpolate((target_sample_rate / sample_rate).round() as usize)
     }
 
     #[inline]

@@ -4,7 +4,14 @@ use clap::Parser;
 use color_eyre::eyre::Error;
 use mrrp::{
     GetSampleRate,
-    filter::biquad,
+    filter::{
+        biquad,
+        design::{
+            Lowpass,
+            equiripple_fft,
+        },
+        fir::FirFilter,
+    },
     io::AsyncReadSamplesExt,
     sink::{
         file::write_stream_to_wav,
@@ -38,10 +45,22 @@ async fn main() -> Result<(), Error> {
     let sample_rate = interpolated.sample_rate();
     let fm_modulated = interpolated.scan_with(FmModulator::new(sample_rate, 75000.0));
 
-    //let filtered_output = BiquadDf2t::lowpass(fm_modulated, 100000.0);
+    //let filtered = fm_modulated;
+    let filter_design = equiripple_fft::run(
+        Lowpass::new(75000.0 / sample_rate, 5000.0 / sample_rate, 0.05, 0.05),
+        11,
+        None,
+        |_i, e| e < 1e-6,
+    )
+    .unwrap();
+    println!("filter design: {filter_design:#?}");
+    let coefficients = filter_design.coefficients;
+
+    let filtered = fm_modulated.scan_in_place_with(FirFilter::new(coefficients));
+    println!("output sample rate: {}", filtered.sample_rate());
 
     if let Some(output) = &args.file_output {
-        write_stream_to_wav(output, fm_modulated).await?;
+        write_stream_to_wav(output, filtered).await?;
     }
     else if let Some(output) = &args.tcp_output {
         //let tcp_stream = TcpStream::connect(&output).await?;
@@ -49,7 +68,7 @@ async fn main() -> Result<(), Error> {
         let tcp_listener = TcpListener::bind(&output).await?;
         let (tcp_stream, _) = tcp_listener.accept().await?;
         println!("Client connected");
-        rtl_tcp::serve_connection(tcp_stream, fm_modulated.throttle_to_sample_rate()).await?;
+        rtl_tcp::serve_connection(tcp_stream, filtered.throttle_to_sample_rate()).await?;
     }
 
     Ok(())

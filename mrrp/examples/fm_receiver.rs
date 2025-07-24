@@ -52,12 +52,7 @@ async fn main() -> Result<(), Error> {
 
     // use equiripple fft methods
     let filter_design = equiripple_fft::run(
-        Lowpass::new(
-            150000.0 / RTLSDR_SAMPLE_RATE,
-            10000.0 / RTLSDR_SAMPLE_RATE,
-            0.05,
-            0.05,
-        ),
+        Lowpass::new(150000.0 / sample_rate, 10000.0 / sample_rate, 0.05, 0.05),
         17,
         None,
         |_i, e| e < 1e-6,
