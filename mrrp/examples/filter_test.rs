@@ -69,7 +69,7 @@ async fn main() -> Result<(), Error> {
                 Box::new(FirFilter::new(coefficients))
             }
             "fir-pmremez" => {
-                let coefficients = pm_remez::lowpass(args.filter_specification(), 11)?;
+                let coefficients = pm_remez::pm_remez(args.filter_specification(), 11)?;
                 println!("filter design: {coefficients:#?}");
                 Box::new(FirFilter::new(coefficients))
             }

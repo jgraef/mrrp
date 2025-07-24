@@ -3,6 +3,7 @@ pub mod equiripple_fft;
 pub mod pm_remez;
 
 pub trait FilterSpecification {
+    fn defined_on(&self) -> impl Iterator<Item = Band>;
     fn frequency_response_at(&self, frequency: f32) -> Option<FrequencyResponseAt>;
     fn optimal_filter_length(&self) -> Option<usize>;
 
@@ -15,6 +16,12 @@ pub trait FilterSpecification {
             fft_size,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Band {
+    pub start: f32,
+    pub end: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -49,6 +56,20 @@ impl Lowpass {
 }
 
 impl FilterSpecification for Lowpass {
+    fn defined_on(&self) -> impl Iterator<Item = Band> {
+        [
+            Band {
+                start: 0.0,
+                end: self.passband_end,
+            },
+            Band {
+                start: self.stopband_start,
+                end: 0.5,
+            },
+        ]
+        .into_iter()
+    }
+
     fn frequency_response_at(&self, frequency: f32) -> Option<FrequencyResponseAt> {
         if frequency <= self.passband_end {
             Some(FrequencyResponseAt {

@@ -1,62 +1,38 @@
 //mod implementation;
 
-use ::pm_remez::PMParameters;
-use pm_remez::{
-    Band,
-    ParametersBuilder,
-};
+use ::pm_remez::ParametersBuilder as _;
 
-use crate::{
-    filter::design::Lowpass,
-    util::{
-        lerp,
-        unlerp,
-    },
-};
+use crate::filter::design::FilterSpecification;
 
 pub type Error = pm_remez::error::Error;
 
-pub fn lowpass(filter_specification: Lowpass, filter_length: usize) -> Result<Vec<f32>, Error> {
-    let bands = vec![
-        Band::new(0.0, filter_specification.passband_end)?,
-        Band::new(filter_specification.passband_end, 0.5)?,
-    ];
-    let mut parameters = PMParameters::new(
+pub fn pm_remez<S>(filter_specification: S, filter_length: usize) -> Result<Vec<f32>, Error>
+where
+    S: FilterSpecification,
+{
+    let bands = filter_specification
+        .defined_on()
+        .map(|band| ::pm_remez::Band::new(band.start, band.end).unwrap())
+        .collect();
+
+    // even though the ideal frequency response is not defined on the transition
+    // band, the pm_remez crate will call this closure with frequencies outside the
+    // defined bands. we'll just return good defaults
+
+    let mut parameters = ::pm_remez::PMParameters::new(
         filter_length,
         bands,
         |frequency| {
-            // even though the ideal frequency response is not defined on the transition
-            // band, the pm_remez crate will call this closure with values for it. we'll
-            // just interpolate it between 1.0 and 0.0.
-
-            // this first unlerps such that the transition band is mapped to [0.0, 1.0],
-            // then it claps it to it and then lerps it to interpolate the transition band.
-            // since the intermediate value is clamped to 0.0 if below passband_end or 1.0
-            // if above stopband_start, this will produce the correct frequency response for
-            // the filter.
-            lerp(
-                unlerp(
-                    frequency,
-                    filter_specification.passband_end,
-                    filter_specification.stopband_start,
-                )
-                .clamp(0.0, 1.0),
-                1.0,
-                0.0,
-            )
+            filter_specification
+                .frequency_response_at(frequency)
+                .map(|response| response.amplitude)
+                .unwrap_or(0.5)
         },
         |frequency| {
-            if frequency <= filter_specification.passband_end {
-                filter_specification.stopband_tolerance / filter_specification.passband_tolerance
-            }
-            else if frequency >= filter_specification.stopband_start {
-                1.0
-            }
-            else {
-                //dbg!(filter_specification);
-                //panic!("weights undefined for f={frequency}");
-                1.0
-            }
+            filter_specification
+                .frequency_response_at(frequency)
+                .map(|response| 1.0 / response.tolerance)
+                .unwrap_or(0.0)
         },
     )?;
     parameters.set_symmetry(pm_remez::Symmetry::Even);
