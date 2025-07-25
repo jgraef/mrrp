@@ -25,9 +25,9 @@ use crate::io::{
 pub mod audio;
 pub mod buf;
 pub mod chunk;
-mod demod;
 pub mod filter;
 pub mod io;
+pub mod modem;
 pub mod sample;
 pub mod sink;
 pub mod source;

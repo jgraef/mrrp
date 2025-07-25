@@ -386,7 +386,7 @@ mod tests {
         Frame,
         Quality,
     };
-    use crate::demod::adsb::Cursor;
+    use crate::modem::adsb::Cursor;
 
     fn modulate(data: &[u8], mut sample: impl FnMut(bool) -> f32) -> Vec<f32> {
         let mut samples = vec![];

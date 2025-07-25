@@ -1,2 +1,3 @@
-https://ctf-2022.gnuradio.org/challenges
-https://github.com/sigmf/SigMF
+- demodulation ctf: https://ctf-2022.gnuradio.org/challenges
+- signal metadata format: https://github.com/sigmf/SigMF
+- IQ demo files: https://www.sdrplay.com/iq-demo-files/

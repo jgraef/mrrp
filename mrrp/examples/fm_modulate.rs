@@ -14,6 +14,7 @@ use mrrp::{
         },
     },
     io::AsyncReadSamplesExt,
+    modem::fm::FmModulator,
     sink::{
         file::write_stream_to_wav,
         rtl_tcp,
@@ -21,8 +22,6 @@ use mrrp::{
     source::file::WavSource,
 };
 use tokio::net::TcpListener;
-
-use crate::fm_modulate::FmModulator;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -83,42 +82,4 @@ struct Args {
 
     #[clap(long)]
     tcp_output: Option<String>,
-}
-
-mod fm_modulate {
-    use std::f32::consts::TAU;
-
-    use mrrp::io::Scanner;
-    use num_complex::Complex;
-
-    #[derive(Clone, Copy, Debug)]
-    pub struct FmModulator {
-        delay: f32,
-        frequency_modulation_factor: f32,
-        carrier_frequency: f32,
-    }
-
-    impl FmModulator {
-        pub fn new(sample_rate: f32, frequency_deviation: f32) -> Self {
-            Self {
-                delay: 0.0,
-                frequency_modulation_factor: sample_rate / (TAU * frequency_deviation),
-                carrier_frequency: 0.0,
-            }
-        }
-    }
-
-    impl Scanner<f32> for FmModulator {
-        type Output = Complex<f32>;
-
-        fn scan(&mut self, sample: f32) -> Self::Output {
-            let f = self.delay + self.frequency_modulation_factor * sample;
-            self.delay = f;
-            Complex {
-                re: 0.0,
-                im: f + self.carrier_frequency,
-            }
-            .exp()
-        }
-    }
 }

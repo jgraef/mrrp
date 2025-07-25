@@ -13,11 +13,10 @@ use mrrp::{
         },
     },
     io::AsyncReadSamplesExt,
+    modem::fm::FmDemodulator,
     source::rtlsdr::RtlSdrSource,
 };
 use tokio::signal::ctrl_c;
-
-use crate::demod::DifferentiateAndDivide;
 
 // https://github.com/JulianKemmerer/PipelineC/wiki/Example:-FM-Radio-Demodulation
 
@@ -62,8 +61,7 @@ async fn main() -> Result<(), Error> {
 
     let filtered_baseband = baseband.scan_in_place_with(filter_design.fir_filter());
 
-    let demodulated =
-        filtered_baseband.scan_with(DifferentiateAndDivide::new(sample_rate, 75_000.0));
+    let demodulated = filtered_baseband.scan_with(FmDemodulator::new(sample_rate, 75_000.0));
 
     let sample_rate = demodulated.sample_rate();
     let filtered = demodulated
@@ -93,107 +91,4 @@ struct Args {
 
     #[clap(short, long, default_value = "0.2")]
     volume: f32,
-}
-
-mod demod {
-    #![allow(dead_code)]
-
-    use std::f32::consts::TAU;
-
-    use mrrp::io::Scanner;
-    use num_complex::Complex;
-    use num_traits::Zero;
-
-    /// https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/
-    #[derive(Clone, Copy, Debug)]
-    pub struct DifferentiateAndAccessPhase {
-        delayed: Complex<f32>,
-        norm_factor: f32,
-    }
-
-    impl DifferentiateAndAccessPhase {
-        pub fn new(sample_rate: f32, frequency_deviation: f32) -> Self {
-            Self {
-                delayed: Complex::ZERO,
-                norm_factor: sample_rate / (TAU * frequency_deviation),
-            }
-        }
-    }
-
-    impl Scanner<Complex<f32>> for DifferentiateAndAccessPhase {
-        type Output = f32;
-
-        fn scan(&mut self, sample: Complex<f32>) -> Self::Output {
-            let phase_difference = (self.delayed.conj() * sample).arg();
-            self.delayed = sample;
-            phase_difference * self.norm_factor
-        }
-    }
-
-    /// https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/
-    /// buggy
-    #[derive(Clone, Copy, Debug)]
-    pub struct AccessPhaseAndDifferentiate {
-        delayed: f32,
-        norm_factor: f32,
-    }
-
-    impl AccessPhaseAndDifferentiate {
-        pub fn new(sample_rate: f32, frequency_deviation: f32) -> Self {
-            Self {
-                delayed: 0.0,
-                norm_factor: sample_rate / (TAU * frequency_deviation),
-            }
-        }
-    }
-
-    impl Scanner<Complex<f32>> for AccessPhaseAndDifferentiate {
-        type Output = f32;
-
-        fn scan(&mut self, sample: Complex<f32>) -> Self::Output {
-            let phase = sample.arg();
-            let phase_difference = phase - self.delayed;
-            self.delayed = phase;
-            phase_difference * self.norm_factor
-        }
-    }
-
-    /// [Slide 12](https://cci.usc.edu/wp-content/uploads/2017/09/CLASS-6-FM-modulation.pdf)
-    #[derive(Clone, Copy, Debug)]
-    pub struct DifferentiateAndDivide {
-        delay1: Complex<f32>,
-        delay2: Complex<f32>,
-        norm_factor: f32,
-    }
-
-    impl DifferentiateAndDivide {
-        pub fn new(sample_rate: f32, frequency_deviation: f32) -> Self {
-            Self {
-                delay1: Complex::zero(),
-                delay2: Complex::zero(),
-                norm_factor: sample_rate / (TAU * frequency_deviation),
-            }
-        }
-    }
-
-    impl Scanner<Complex<f32>> for DifferentiateAndDivide {
-        type Output = f32;
-
-        fn scan(&mut self, sample: Complex<f32>) -> Self::Output {
-            let output = if self.delay1.is_zero() {
-                // don't divide by 0
-                0.0
-            }
-            else {
-                let a = (sample.re - self.delay2.re) * self.delay1.im;
-                let b = (sample.im - self.delay2.im) * self.delay1.re;
-                (b - a) / self.delay1.norm_sqr() * self.norm_factor
-            };
-
-            self.delay2 = self.delay1;
-            self.delay1 = sample;
-
-            output
-        }
-    }
 }
