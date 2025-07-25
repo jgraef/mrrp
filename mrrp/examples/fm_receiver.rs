@@ -6,11 +6,11 @@ use mrrp::{
     filter::{
         biquad,
         design::{
+            FilterDesign,
             Lowpass,
             Normalize,
-            equiripple_fft,
+            pm_remez::pm_remez,
         },
-        fir::FirFilter,
     },
     io::AsyncReadSamplesExt,
     source::rtlsdr::RtlSdrSource,
@@ -41,31 +41,24 @@ async fn main() -> Result<(), Error> {
     let baseband = RtlSdrSource::open(args.device, args.frequency, RTLSDR_SAMPLE_RATE).await?;
 
     // decimate down to 300 kHz
-    //let baseband = baseband.decimate(2);
+    //let baseband = baseband.decimate(4);
 
+    // use Remez to design a linear-phase lowpass filter
     let sample_rate = baseband.sample_rate();
-    //let filtered_baseband = baseband;
-
-    // fixme: this filter is not linear-phase
-    //let sample_rate = baseband.sample_rate();
-    //let filtered_baseband =
-    // baseband.scan_in_place_with(biquad::lowpass(sample_rate, 150000.0));
-
-    // use equiripple fft methods
-    let filter_design = equiripple_fft::equiripple_fft(
-        Lowpass::new(150000.0, 10000.0, 0.05, 0.05).normalize(sample_rate),
-        17,
-        None,
-        |_i, e| e < 1e-6,
+    let filter_design = pm_remez(
+        Lowpass::new(150000.0, 10000.0, 0.05, 0.005).normalize(sample_rate),
+        11,
     )
     .unwrap();
+    /*let filter_design = equiripple_fft(
+        Lowpass::new(150000.0, 10000.0, 0.05, 0.05).normalize(sample_rate),
+        17,
+        512,
+        |i, e| i >= 20 || e < 1e-6,
+    )?;*/
     println!("filter design: {filter_design:#?}");
-    let coefficients = filter_design.coefficients;
 
-    //let coefficients = pm_remez::lowpass(200000.0 / sample_rate, 15000.0 /
-    // sample_rate, 15)?;
-
-    let filtered_baseband = baseband.scan_in_place_with(FirFilter::new(coefficients));
+    let filtered_baseband = baseband.scan_in_place_with(filter_design.fir_filter());
 
     let demodulated =
         filtered_baseband.scan_with(DifferentiateAndDivide::new(sample_rate, 75_000.0));

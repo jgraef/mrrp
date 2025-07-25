@@ -65,7 +65,7 @@ where
     type Design: FilterDesign;
     type Error: std::error::Error;
 
-    fn design_filter(&self, filter_specification: &F) -> Result<Self::Design, Self::Error>;
+    fn design_filter(&self, filter_specification: F) -> Result<Self::Design, Self::Error>;
 }
 
 pub trait FilterDesign {
@@ -91,27 +91,6 @@ impl FilterDesign for Vec<f32> {
     #[inline]
     fn filter_length(&self) -> usize {
         self.len()
-    }
-}
-
-/// Extension trait that gives filter specifications a design method
-///
-/// This basically extends any type that any design algorithm accepts with a
-/// method for convenient use.
-pub trait DesignFilterWith<A>
-where
-    A: DesignAlgorithm<Self>,
-{
-    fn design(&self, algorithm: &A) -> Result<A::Design, A::Error>;
-}
-
-impl<F, A> DesignFilterWith<A> for F
-where
-    A: DesignAlgorithm<Self>,
-{
-    #[inline]
-    fn design(&self, algorithm: &A) -> Result<A::Design, A::Error> {
-        algorithm.design_filter(self)
     }
 }
 

@@ -210,10 +210,16 @@ where
 
 #[derive(Clone, Debug)]
 pub struct FilterDesign {
-    pub coefficients: Vec<Complex<f32>>,
+    pub coefficients: Vec<f32>,
     pub interations: usize,
     pub mean_square_error: f32,
     pub fft_size: usize,
+}
+
+impl super::FilterDesign for FilterDesign {
+    fn coefficients(&self) -> &[f32] {
+        &self.coefficients
+    }
 }
 
 pub fn equiripple_fft<S>(
@@ -249,7 +255,7 @@ where
     }
 
     Ok(FilterDesign {
-        coefficients: algorithm.h().collect(),
+        coefficients: algorithm.h().map(|h| h.re).collect(),
         interations: i,
         mean_square_error: mse,
         fft_size,

@@ -53,10 +53,10 @@ where
     type Design = RemezDesign;
     type Error = Error;
 
-    fn design_filter(&self, filter_specification: &F) -> Result<Self::Design, Self::Error> {
+    fn design_filter(&self, filter_specification: F) -> Result<Self::Design, Self::Error> {
         let filter_length = self
             .filter_length
-            .to_concrete_filter_length(filter_specification);
+            .to_concrete_filter_length(&filter_specification);
         pm_remez(filter_specification, filter_length)
     }
 }
@@ -67,10 +67,13 @@ impl FilterDesign for RemezDesign {
     }
 }
 
-pub fn pm_remez<F>(filter_specification: &F, filter_length: usize) -> Result<RemezDesign, Error>
+pub fn pm_remez<F, L>(filter_specification: F, filter_length: L) -> Result<RemezDesign, Error>
 where
     F: DesiredFrequencyResponse + IsSymmetric,
+    L: ToConcreteFilterLength<F>,
 {
+    let filter_length = filter_length.to_concrete_filter_length(&filter_specification);
+
     let bands = filter_specification
         .defined_on()
         .into_iter()
@@ -78,9 +81,31 @@ where
         .collect();
     dbg!(&bands);
 
-    // even though the ideal frequency response is not defined on the transition
-    // band, the pm_remez crate will call this closure with frequencies outside the
-    // defined bands. we'll just return good defaults
+    // work around that get the frequency response at the band edge of the closest
+    // band, if the given frequency doesn't fall inside band
+    let closest_match = |frequency| {
+        let (_, edge) = filter_specification
+            .defined_on()
+            .into_iter()
+            .filter_map(|band| {
+                if frequency < band.start {
+                    Some((band.start - frequency, band.start))
+                }
+                else if frequency > band.end {
+                    Some((frequency - band.end, band.end))
+                }
+                else {
+                    None
+                }
+            })
+            .min_by(|(d1, _): &(f32, f32), (d2, _): &(f32, f32)| {
+                d1.partial_cmp(d2).expect("failed to compare band edges")
+            })
+            .expect("frequency response returned None for frequency inside bands");
+        filter_specification
+            .frequency_response_at(edge)
+            .expect("frequency response undefined on band edge")
+    };
 
     let mut parameters = ::pm_remez::PMParameters::new(
         filter_length,
@@ -88,13 +113,13 @@ where
         |frequency| {
             filter_specification
                 .frequency_response_at(frequency)
-                .unwrap_or_else(|| panic!("desired magnitude response queried at: {frequency}"))
+                .unwrap_or_else(|| closest_match(frequency))
                 .amplitude
         },
         |frequency| {
             1.0 / filter_specification
                 .frequency_response_at(frequency)
-                .unwrap_or_else(|| panic!("band weight queried at: {frequency}"))
+                .unwrap_or_else(|| closest_match(frequency))
                 .tolerance
         },
     )?;

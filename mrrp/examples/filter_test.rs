@@ -74,7 +74,7 @@ async fn main() -> Result<(), Error> {
                     Box::new(FirFilter::new(coefficients))
                 }
                 "fir-pmremez" => {
-                    let design = pm_remez::pm_remez(&args.filter_specification(), 11)?;
+                    let design = pm_remez::pm_remez(args.filter_specification(), 11)?;
                     println!("filter design: {design:#?}");
                     Box::new(FirFilter::new(design.impulse_response))
                 }
