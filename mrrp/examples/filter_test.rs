@@ -9,7 +9,10 @@ use mrrp::{
     filter::{
         biquad,
         design::{
+            Estimate,
             Lowpass,
+            Normalize,
+            Normalized,
             argmin,
             equiripple_fft,
             pm_remez,
@@ -43,42 +46,44 @@ async fn main() -> Result<(), Error> {
     println!("cutoff frequency: {}", args.cutoff_frequency());
     println!("transition bandwidth: {}", args.transition_bandwidth());
 
-    let filter: Box<dyn Scanner<Complex<f32>, Output = Complex<f32>> + Send> = if let Some(filter) =
-        &args.filter
-    {
-        match filter.as_str() {
-            "biquad" => Box::new(biquad::lowpass(args.sample_rate, args.cutoff_frequency())),
-            "fir-halfband" => {
-                let coefficients = fir_half_band_lowpass();
-                Box::new(FirFilter::new(coefficients))
-            }
-            "fir-equiripple-fft" => {
-                let filter_design =
-                    equiripple_fft::run(args.filter_specification(), None, None, |i, e| {
-                        e < 1e-6 && i >= 20
-                    })
+    let filter: Box<dyn Scanner<Complex<f32>, Output = Complex<f32>> + Send> =
+        if let Some(filter) = &args.filter {
+            match filter.as_str() {
+                "biquad" => Box::new(biquad::lowpass(args.sample_rate, args.cutoff_frequency())),
+                "fir-halfband" => {
+                    let coefficients = fir_half_band_lowpass();
+                    Box::new(FirFilter::new(coefficients))
+                }
+                "fir-equiripple-fft" => {
+                    let filter_design = equiripple_fft::equiripple_fft(
+                        args.filter_specification(),
+                        Estimate,
+                        None,
+                        |i, e| e < 1e-6 && i >= 20,
+                    )
                     .unwrap();
-                println!("filter design: {filter_design:#?}");
-                let coefficients = filter_design.coefficients;
-                Box::new(FirFilter::new(coefficients))
+                    println!("filter design: {filter_design:#?}");
+                    let coefficients = filter_design.coefficients;
+                    Box::new(FirFilter::new(coefficients))
+                }
+                "fir-fft-particleswarm" => {
+                    let coefficients =
+                        argmin::particle_swarm_fft(args.filter_specification(), Estimate, None)
+                            .unwrap();
+                    println!("filter design: {coefficients:#?}");
+                    Box::new(FirFilter::new(coefficients))
+                }
+                "fir-pmremez" => {
+                    let design = pm_remez::pm_remez(&args.filter_specification(), 11)?;
+                    println!("filter design: {design:#?}");
+                    Box::new(FirFilter::new(design.impulse_response))
+                }
+                _ => bail!("Unknown filter type: {filter}"),
             }
-            "fir-fft-particleswarm" => {
-                let coefficients =
-                    argmin::particle_swarm_fft(args.filter_specification(), None, None).unwrap();
-                println!("filter design: {coefficients:#?}");
-                Box::new(FirFilter::new(coefficients))
-            }
-            "fir-pmremez" => {
-                let coefficients = pm_remez::pm_remez(args.filter_specification(), 11)?;
-                println!("filter design: {coefficients:#?}");
-                Box::new(FirFilter::new(coefficients))
-            }
-            _ => bail!("Unknown filter type: {filter}"),
         }
-    }
-    else {
-        Box::new(())
-    };
+        else {
+            Box::new(())
+        };
 
     let output = noise.scan_in_place_with(filter);
 
@@ -129,13 +134,14 @@ impl Args {
             .unwrap_or_else(|| self.cutoff_frequency() * 0.4)
     }
 
-    fn filter_specification(&self) -> Lowpass {
+    fn filter_specification(&self) -> Normalized<Lowpass> {
         Lowpass::new(
-            self.cutoff_frequency() / self.sample_rate,
-            self.transition_bandwidth() / self.sample_rate,
+            self.cutoff_frequency(),
+            self.transition_bandwidth(),
             0.05,
             0.05,
         )
+        .normalize(self.sample_rate)
     }
 }
 

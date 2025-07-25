@@ -168,3 +168,9 @@ where
         }
     }
 }
+
+pub trait MakeFilter<R> {
+    type Filter;
+
+    fn make_filter(&self, input: &R) -> Self::Filter;
+}

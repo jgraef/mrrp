@@ -8,6 +8,7 @@ use mrrp::{
         biquad,
         design::{
             Lowpass,
+            Normalize,
             equiripple_fft,
         },
         fir::FirFilter,
@@ -46,8 +47,8 @@ async fn main() -> Result<(), Error> {
     let fm_modulated = interpolated.scan_with(FmModulator::new(sample_rate, 75000.0));
 
     //let filtered = fm_modulated;
-    let filter_design = equiripple_fft::run(
-        Lowpass::new(75000.0 / sample_rate, 5000.0 / sample_rate, 0.05, 0.05),
+    let filter_design = equiripple_fft::equiripple_fft(
+        Lowpass::new(75000.0, 5000.0, 0.05, 0.05).normalize(sample_rate),
         11,
         None,
         |_i, e| e < 1e-6,

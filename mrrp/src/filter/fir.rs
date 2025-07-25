@@ -15,7 +15,10 @@ use num_traits::{
 };
 
 use crate::{
-    io::Scanner,
+    io::{
+        ScanInPlaceWith,
+        Scanner,
+    },
     sample::Sample,
 };
 
@@ -62,6 +65,8 @@ where
         output
     }
 }
+
+pub type FirFiltered<R, S, C> = ScanInPlaceWith<R, FirFilter<S, C>>;
 
 // I wanted to implement a fast convolution on the delayed buffer and read
 // buffer, but it got too complicated lol

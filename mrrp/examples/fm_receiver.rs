@@ -7,6 +7,7 @@ use mrrp::{
         biquad,
         design::{
             Lowpass,
+            Normalize,
             equiripple_fft,
         },
         fir::FirFilter,
@@ -51,8 +52,8 @@ async fn main() -> Result<(), Error> {
     // baseband.scan_in_place_with(biquad::lowpass(sample_rate, 150000.0));
 
     // use equiripple fft methods
-    let filter_design = equiripple_fft::run(
-        Lowpass::new(150000.0 / sample_rate, 10000.0 / sample_rate, 0.05, 0.05),
+    let filter_design = equiripple_fft::equiripple_fft(
+        Lowpass::new(150000.0, 10000.0, 0.05, 0.05).normalize(sample_rate),
         17,
         None,
         |_i, e| e < 1e-6,

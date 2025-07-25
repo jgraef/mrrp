@@ -15,7 +15,8 @@ use rustfft::{
 };
 
 use crate::filter::design::{
-    FilterSpecification,
+    DesiredFrequencyResponse,
+    ToConcreteFilterLength,
     fft_size_for_filter_length,
 };
 
@@ -35,7 +36,7 @@ pub struct FftBestFit<S> {
 
 impl<S> FftBestFit<S>
 where
-    S: FilterSpecification,
+    S: DesiredFrequencyResponse,
 {
     pub fn particle_swarm_fft(&self, fft_planner: &mut FftPlanner<f32>) -> Result<Vec<f32>, Error> {
         let bounds = (
@@ -72,7 +73,7 @@ struct FftBestFitProblem<'a, S> {
 
 impl<'a, S> CostFunction for FftBestFitProblem<'a, S>
 where
-    S: FilterSpecification,
+    S: DesiredFrequencyResponse,
 {
     type Param = Vec<f32>;
     type Output = f32;
@@ -112,16 +113,13 @@ where
 
 pub fn particle_swarm_fft<S>(
     filter_specification: S,
-    filter_length: impl Into<Option<usize>>,
+    filter_length: impl ToConcreteFilterLength<S>,
     fft_size: impl Into<Option<usize>>,
 ) -> Result<Vec<f32>, Error>
 where
-    S: FilterSpecification,
+    S: DesiredFrequencyResponse,
 {
-    let filter_length = filter_length
-        .into()
-        .or_else(|| filter_specification.optimal_filter_length())
-        .ok_or_else(|| Error::FilterLengthNotSpecified)?;
+    let filter_length = filter_length.to_concrete_filter_length(&filter_specification);
 
     let fft_size = fft_size
         .into()
@@ -140,12 +138,19 @@ where
 #[cfg(test)]
 mod tests {
 
-    use crate::filter::design::Lowpass;
+    use crate::filter::design::{
+        Lowpass,
+        Normalize,
+    };
 
     #[test]
     fn particle_swarm_fft() {
-        let filter_design =
-            super::particle_swarm_fft(Lowpass::new(0.25, 0.1, 0.05, 0.05), 11, None).unwrap();
+        let filter_design = super::particle_swarm_fft(
+            Lowpass::new(0.25, 0.1, 0.05, 0.05).assert_normalized(),
+            11,
+            None,
+        )
+        .unwrap();
 
         let h = filter_design;
         let n = (h.len() - 1) / 2;

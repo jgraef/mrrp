@@ -15,8 +15,9 @@ use rustfft::{
 };
 
 use crate::filter::design::{
-    FilterSpecification,
+    DesiredFrequencyResponse,
     SampledIdealFrequencyResponse,
+    ToConcreteFilterLength,
     fft_size_for_filter_length,
 };
 
@@ -42,7 +43,7 @@ pub struct Algorithm<S> {
 
 impl<S> Algorithm<S>
 where
-    S: FilterSpecification,
+    S: DesiredFrequencyResponse,
 {
     fn new(
         length: usize,
@@ -215,25 +216,16 @@ pub struct FilterDesign {
     pub fft_size: usize,
 }
 
-pub fn run<S>(
+pub fn equiripple_fft<S>(
     filter_specification: S,
-    length: impl Into<Option<usize>>,
+    length: impl ToConcreteFilterLength<S>,
     fft_size: impl Into<Option<usize>>,
     mut stop_condition: impl FnMut(usize, f32) -> bool,
 ) -> Result<FilterDesign, Error>
 where
-    S: FilterSpecification,
+    S: DesiredFrequencyResponse,
 {
-    let length = length
-        .into()
-        .or_else(|| {
-            let mut length = filter_specification.optimal_filter_length()?;
-            if length % 2 == 0 {
-                length += 1;
-            }
-            Some(length)
-        })
-        .ok_or_else(|| Error::FilterLengthNotSpecified)?;
+    let length = length.to_concrete_filter_length(&filter_specification);
     dbg!(length);
 
     let fft_size = fft_size
@@ -267,14 +259,20 @@ where
 #[cfg(test)]
 mod tests {
 
-    use super::run;
-    use crate::filter::design::Lowpass;
+    use super::equiripple_fft;
+    use crate::filter::design::{
+        Lowpass,
+        Normalize,
+    };
 
     #[test]
     fn it_reproduces_the_example_from_the_paper() {
-        let filter_design = run(Lowpass::new(0.25, 0.1, 0.05, 0.05), 11, None, |_, e| {
-            e < 1.0e-4
-        })
+        let filter_design = equiripple_fft(
+            Lowpass::new(0.25, 0.1, 0.05, 0.05).assert_normalized(),
+            11,
+            None,
+            |_, e| e < 1.0e-4,
+        )
         .unwrap();
 
         let h = filter_design.coefficients;
