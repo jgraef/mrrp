@@ -7,11 +7,11 @@ use mrrp::{
     filter::{
         biquad,
         design::{
+            FilterDesign,
             Lowpass,
             Normalize,
-            equiripple_fft,
+            pm_remez::pm_remez,
         },
-        fir::FirFilter,
     },
     io::AsyncReadSamplesExt,
     sink::{
@@ -47,17 +47,14 @@ async fn main() -> Result<(), Error> {
     let fm_modulated = interpolated.scan_with(FmModulator::new(sample_rate, 75000.0));
 
     //let filtered = fm_modulated;
-    let filter_design = equiripple_fft::equiripple_fft(
-        Lowpass::new(75000.0, 5000.0, 0.05, 0.05).normalize(sample_rate),
+    let filter_design = pm_remez(
+        Lowpass::new(75000.0, 5000.0, 0.05, 0.005).normalize(sample_rate),
         11,
-        None,
-        |_i, e| e < 1e-6,
     )
     .unwrap();
     println!("filter design: {filter_design:#?}");
-    let coefficients = filter_design.coefficients;
 
-    let filtered = fm_modulated.scan_in_place_with(FirFilter::new(coefficients));
+    let filtered = fm_modulated.scan_in_place_with(filter_design.fir_filter());
     println!("output sample rate: {}", filtered.sample_rate());
 
     if let Some(output) = &args.file_output {

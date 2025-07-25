@@ -77,12 +77,15 @@ where
     let bands = filter_specification
         .defined_on()
         .into_iter()
-        .map(|band| ::pm_remez::Band::new(band.start, band.end).unwrap())
-        .collect();
-    dbg!(&bands);
+        .map(|band| ::pm_remez::Band::new(band.start, band.end))
+        .collect::<Result<Vec<_>, _>>()?;
 
     // work around that get the frequency response at the band edge of the closest
-    // band, if the given frequency doesn't fall inside band
+    // band, if the given frequency doesn't fall inside band.
+    //
+    // this might get fixed ([issue][1])
+    //
+    // [1]: https://github.com/maia-sdr/pm-remez/issues/24#issuecomment-3117639764
     let closest_match = |frequency| {
         let (_, edge) = filter_specification
             .defined_on()

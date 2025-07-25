@@ -40,13 +40,15 @@ async fn main() -> Result<(), Error> {
     // Open the RTL-SDR and get a complex IQ stream
     let baseband = RtlSdrSource::open(args.device, args.frequency, RTLSDR_SAMPLE_RATE).await?;
 
-    // decimate down to 300 kHz
-    //let baseband = baseband.decimate(4);
+    // decimate down to 200 kHz by averaging.
+    // the following FIR filter is better, but more expensive, so we decimate by a
+    // factor of 6 first.
+    //let baseband = AverageDecimate::new(baseband, 6);
 
     // use Remez to design a linear-phase lowpass filter
     let sample_rate = baseband.sample_rate();
     let filter_design = pm_remez(
-        Lowpass::new(150000.0, 10000.0, 0.05, 0.005).normalize(sample_rate),
+        Lowpass::new(150000.0, 5000.0, 0.05, 0.005).normalize(sample_rate),
         11,
     )
     .unwrap();
