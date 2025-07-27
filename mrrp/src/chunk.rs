@@ -14,7 +14,6 @@ use futures_util::{
 };
 
 use crate::{
-    GetSampleRate,
     buf::{
         SampleBuf,
         SampleBufMut,
@@ -24,6 +23,7 @@ use crate::{
         AsyncReadSamples,
         AsyncWriteSamples,
         AsyncWriteSamplesExt,
+        GetSampleRate,
         ReadBuf,
     },
 };

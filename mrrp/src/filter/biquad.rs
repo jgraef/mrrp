@@ -14,7 +14,7 @@ use biquad::{
 };
 use num_traits::Zero;
 
-use crate::io::Scanner;
+use crate::io::combinators::Scanner;
 
 impl<C, T> Scanner<T> for DirectForm1<C, T>
 where

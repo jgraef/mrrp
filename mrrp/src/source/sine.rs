@@ -3,7 +3,7 @@ use std::f32::consts::TAU;
 use num_complex::Complex;
 
 use crate::{
-    GetSampleRate,
+    io::GetSampleRate,
     source::SignalGenerator,
 };
 

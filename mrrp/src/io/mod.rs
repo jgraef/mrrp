@@ -1,3 +1,4 @@
+pub mod combinators;
 mod read;
 mod write;
 
@@ -10,13 +11,52 @@ use std::{
 };
 
 use pin_project_lite::pin_project;
-use tracing::Span;
 
 pub use self::{
     read::*,
     write::*,
 };
 use crate::buf::UninitSlice;
+
+pub trait GetSampleRate {
+    fn sample_rate(&self) -> f32;
+}
+
+impl<T: GetSampleRate> GetSampleRate for &T {
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        (&**self).sample_rate()
+    }
+}
+
+impl<T: GetSampleRate> GetSampleRate for &mut T {
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        (&**self).sample_rate()
+    }
+}
+
+pub trait GetCenterFrequency {
+    fn center_frequency(&self) -> f32;
+}
+
+impl<T: GetCenterFrequency> GetCenterFrequency for &T {
+    #[inline]
+    fn center_frequency(&self) -> f32 {
+        (&**self).center_frequency()
+    }
+}
+
+impl<T: GetCenterFrequency> GetCenterFrequency for &mut T {
+    #[inline]
+    fn center_frequency(&self) -> f32 {
+        (&**self).center_frequency()
+    }
+}
+
+pub trait StreamLength {
+    fn remaining(&self) -> usize;
+}
 
 pin_project! {
     #[derive(Debug)]
@@ -158,64 +198,5 @@ impl<S> Drop for Buffer<S> {
         unsafe {
             self.buffer[self.read_pos..self.write_pos].assume_init_drop();
         }
-    }
-}
-
-pin_project! {
-    #[derive(Clone, Debug)]
-    pub struct WithSpan<T> {
-        #[pin]
-        inner: T,
-        span: Span,
-    }
-}
-
-impl<T, S> AsyncReadSamples<S> for WithSpan<T>
-where
-    T: AsyncReadSamples<S>,
-{
-    type Error = T::Error;
-
-    #[inline]
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        let _guard = this.span.enter();
-        this.inner.poll_read_samples(cx, buffer)
-    }
-}
-
-impl<T, S> AsyncWriteSamples<S> for WithSpan<T>
-where
-    T: AsyncWriteSamples<S>,
-{
-    type Error = T::Error;
-
-    #[inline]
-    fn poll_write_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &[S],
-    ) -> Poll<Result<usize, Self::Error>> {
-        let this = self.project();
-        let _guard = this.span.enter();
-        this.inner.poll_write_samples(cx, buffer)
-    }
-
-    #[inline]
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        let _guard = this.span.enter();
-        this.inner.poll_flush(cx)
-    }
-
-    #[inline]
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        let _guard = this.span.enter();
-        this.inner.poll_close(cx)
     }
 }

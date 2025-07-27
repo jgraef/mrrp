@@ -1,7 +1,6 @@
 use clap::Parser;
 use color_eyre::eyre::Error;
 use mrrp::{
-    GetSampleRate,
     audio::play_audio,
     filter::{
         biquad,
@@ -12,7 +11,10 @@ use mrrp::{
             pm_remez::pm_remez,
         },
     },
-    io::AsyncReadSamplesExt,
+    io::{
+        AsyncReadSamplesExt,
+        GetSampleRate,
+    },
     modem::fm::FmDemodulator,
     source::rtlsdr::RtlSdrSource,
 };

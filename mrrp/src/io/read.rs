@@ -7,28 +7,14 @@ use std::{
     task::{
         Context,
         Poll,
-        ready,
     },
-    time::{
-        Duration,
-        Instant,
-    },
+    time::Duration,
 };
 
 use bytemuck::Pod;
-use futures_util::{
-    FutureExt,
-    future::{
-        Fuse,
-        FusedFuture,
-    },
-};
-use pin_project_lite::pin_project;
 use tracing::Span;
 
 use crate::{
-    GetSampleRate,
-    WithSampleRate,
     buf::{
         SampleBufMut,
         UninitSlice,
@@ -39,11 +25,32 @@ use crate::{
     },
     io::{
         AsyncWriteSamples,
-        Buffer,
         Forward,
-        WithSpan,
+        GetSampleRate,
+        combinators::{
+            Buffered,
+            Chained,
+            Converted,
+            Inspect,
+            InspectWith,
+            Limited,
+            Map,
+            MapErr,
+            MapInPlace,
+            MapInPlacePod,
+            ScanInPlaceWith,
+            ScanWith,
+            Scanner,
+            Throttled,
+            WithSampleRate,
+            WithSpan,
+            ZipWith,
+        },
     },
-    sample::Sample,
+    sample::{
+        FromSample,
+        Sample,
+    },
 };
 
 // todo: We really must make this S: Copy. Lots of places assume this and it's a
@@ -94,7 +101,7 @@ impl<'a, S> ReadBuf<'a, S> {
 
     #[inline]
     pub fn take(&mut self, n: usize) -> ReadBuf<'_, S> {
-        let max = self.remaining().max(n);
+        let max = self.remaining().min(n);
         ReadBuf {
             buffer: &mut self.buffer[self.filled..][..max],
             filled: 0,
@@ -300,6 +307,17 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         }
     }
 
+    #[inline]
+    fn read_to_end<'a>(&'a mut self, buffer: &'a mut Vec<S>) -> ReadToEnd<'a, Self, S>
+    where
+        Self: Unpin,
+    {
+        ReadToEnd {
+            read_samples: self,
+            buffer,
+        }
+    }
+
     /// Maps any errors returned by the underlying stream with the provided
     /// closure.
     #[inline]
@@ -308,34 +326,25 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         F: FnMut(Self::Error) -> E,
         Self: Sized,
     {
-        MapErr {
-            inner: self,
-            map_err: f,
-        }
+        MapErr::new(self, f)
     }
 
     #[inline]
     fn scan_with<Sc>(self, scanner: Sc) -> ScanWith<Self, S, Sc>
     where
+        Sc: Scanner<S>,
         Self: Sized,
     {
-        ScanWith {
-            inner: self,
-            scanner,
-            intermediate_buffer: UninitSlice::box_new(0),
-            max_buffer_size: usize::MAX,
-        }
+        ScanWith::new(self, scanner)
     }
 
     #[inline]
     fn scan_in_place_with<Sc>(self, scanner: Sc) -> ScanInPlaceWith<Self, Sc>
     where
+        Sc: Scanner<S, Output = S>,
         Self: Sized,
     {
-        ScanInPlaceWith {
-            inner: self,
-            scanner,
-        }
+        ScanInPlaceWith::new(self, scanner)
     }
 
     #[inline]
@@ -344,9 +353,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         F: FnMut(S) -> Q,
         Self: Sized,
     {
-        Map {
-            inner: self.scan_with(MapScanner { f }),
-        }
+        Map::new(self, f)
     }
 
     #[inline]
@@ -355,9 +362,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         F: FnMut(S) -> S,
         Self: Sized,
     {
-        MapInPlace {
-            inner: self.scan_in_place_with(MapScanner { f }),
-        }
+        MapInPlace::new(self, f)
     }
 
     /// Reads a [`AsyncReadSamples<S>`][AsyncReadSamples] and maps it with the
@@ -382,11 +387,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         F: FnMut(S) -> Q,
         Self: Sized,
     {
-        MapInPlacePod {
-            inner: self,
-            map: f,
-            _phantom: PhantomData,
-        }
+        MapInPlacePod::new(self, f)
     }
 
     #[inline]
@@ -394,10 +395,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     where
         Self: Sized,
     {
-        InspectWith {
-            inner: self,
-            inspector,
-        }
+        InspectWith::new(self, inspector)
     }
 
     #[inline]
@@ -406,9 +404,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         F: FnMut(&[S]),
         Self: Sized,
     {
-        Inspect {
-            inner: self.inspect_with(FuncInspector { f }),
-        }
+        Inspect::new(self, f)
     }
 
     #[inline]
@@ -416,10 +412,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     where
         Self: Sized,
     {
-        Buffered {
-            inner: self,
-            buffer: Buffer::new(buffer_size),
-        }
+        Buffered::new(self, buffer_size)
     }
 
     #[inline]
@@ -436,7 +429,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     where
         Self: Sized,
     {
-        WithSpan { inner: self, span }
+        WithSpan::new(self, span)
     }
 
     #[inline]
@@ -495,10 +488,52 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     where
         Self: Sized,
     {
-        WithSampleRate {
-            inner: self,
-            sample_rate,
-        }
+        WithSampleRate::new(self, sample_rate)
+    }
+
+    #[inline]
+    fn convert<Q>(self) -> Converted<Self, S, Q>
+    where
+        Self: Sized,
+        Q: FromSample<S>,
+    {
+        Converted::new(self)
+    }
+
+    #[inline]
+    fn chain<T>(self, other: T) -> Chained<Self, T>
+    where
+        Self: Sized,
+        T: Sized + AsyncReadSamples<S>,
+    {
+        Chained::new(self, other)
+    }
+
+    #[inline]
+    fn limit(self, num_samples: usize) -> Limited<Self>
+    where
+        Self: Sized,
+    {
+        Limited::new(self, num_samples)
+    }
+
+    #[inline]
+    fn limit_by_time(self, time: f32) -> Limited<Self>
+    where
+        Self: Sized + GetSampleRate,
+    {
+        let num_samples = (time * self.sample_rate()) as usize;
+        self.limit(num_samples)
+    }
+
+    #[inline]
+    fn zip_with<T, Q, Sc>(self, other: T, scanner: Sc) -> ZipWith<Self, T, Sc>
+    where
+        Self: Sized,
+        T: AsyncReadSamples<Q> + Sized,
+        Sc: Scanner<(S, Q)>,
+    {
+        ZipWith::new(self, other, scanner)
     }
 }
 
@@ -622,6 +657,44 @@ where
     }
 }
 
+#[derive(Debug)]
+#[must_use]
+pub struct ReadToEnd<'a, R, S>
+where
+    R: ?Sized,
+{
+    read_samples: &'a mut R,
+    buffer: &'a mut Vec<S>,
+}
+
+impl<'a, 'b, R, S> Future for ReadToEnd<'a, R, S>
+where
+    R: AsyncReadSamples<S> + Unpin + ?Sized,
+{
+    type Output = Result<(), EofError<R::Error>>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        loop {
+            let this = &mut *self;
+            let filled_before = this.buffer.len();
+
+            match this.buffer.with_read_buf(|read_buf| {
+                Pin::new(&mut this.read_samples).poll_read_samples(cx, read_buf)
+            }) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => {
+                    return Poll::Ready(Err(EofError::Other(error)));
+                }
+                Poll::Ready(Ok(())) => {
+                    if this.buffer.len() == filled_before {
+                        return Poll::Ready(Ok(()));
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Error returned by
 /// [`read_samples_exact`][AsyncReadSamplesExt::read_samples_exact]
 #[derive(Clone, Copy, Debug, thiserror::Error)]
@@ -633,668 +706,6 @@ pub enum EofError<E> {
     /// The underlying stream produced an error.
     #[error("{0}")]
     Other(#[from] E),
-}
-
-pin_project! {
-    /// Stream wrapper that maps the error type.
-    #[derive(Clone, Copy, Debug)]
-    pub struct MapErr<R, F> {
-        #[pin]
-        inner: R,
-        map_err: F,
-    }
-}
-
-impl<R, S, E, F> AsyncReadSamples<S> for MapErr<R, F>
-where
-    R: AsyncReadSamples<S>,
-    F: FnMut(R::Error) -> E,
-    E: std::error::Error,
-{
-    type Error = E;
-
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        this.inner
-            .poll_read_samples(cx, buffer)
-            .map_err(this.map_err)
-    }
-}
-
-pin_project! {
-    /// Stream wrapper that maps the samples using an intermediate buffer.
-    #[derive(Debug)]
-    pub struct ScanWith<R, S, Sc> {
-        #[pin]
-        inner: R,
-        scanner: Sc,
-        // would be nicer to use SamplesMut, but we need a SamplesMut::drain for that
-        intermediate_buffer: Box<UninitSlice<S>>,
-        max_buffer_size: usize,
-    }
-}
-
-impl<R, S, Sc> ScanWith<R, S, Sc> {
-    #[inline]
-    pub fn with_max_buffer_size(mut self, max_buffer_size: usize) -> Self {
-        self.max_buffer_size = max_buffer_size;
-        self
-    }
-}
-
-impl<R, S, Q, Sc> AsyncReadSamples<Q> for ScanWith<R, S, Sc>
-where
-    R: AsyncReadSamples<S>,
-    Sc: Scanner<S, Output = Q>,
-{
-    type Error = R::Error;
-
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<Q>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-
-        let read_length = (*this.max_buffer_size).min(buffer.remaining());
-
-        if read_length > this.intermediate_buffer.len() {
-            *this.intermediate_buffer = UninitSlice::box_new(read_length);
-        }
-
-        let mut read_buf = ReadBuf::uninit(&mut this.intermediate_buffer[..read_length]);
-
-        match this.inner.poll_read_samples(cx, &mut read_buf) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-            Poll::Ready(Ok(())) => {
-                let filled = read_buf.filled().len();
-
-                for i in 0..filled {
-                    let sample = unsafe { this.intermediate_buffer[i].assume_init_read() };
-                    let sample = this.scanner.scan(sample);
-
-                    buffer.put_sample(sample);
-                }
-
-                Poll::Ready(Ok(()))
-            }
-        }
-    }
-}
-
-impl<R, S, Sc> GetSampleRate for ScanWith<R, S, Sc>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
-}
-
-pin_project! {
-    #[derive(Clone, Debug)]
-    pub struct ScanInPlaceWith<R, Sc> {
-        #[pin]
-        inner: R,
-        pub scanner: Sc,
-    }
-}
-
-impl<R, S, Sc> AsyncReadSamples<S> for ScanInPlaceWith<R, Sc>
-where
-    R: AsyncReadSamples<S>,
-    Sc: Scanner<S, Output = S>,
-{
-    type Error = R::Error;
-
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-
-        let buffer_start = buffer.filled().len();
-
-        match this.inner.poll_read_samples(cx, buffer) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-            Poll::Ready(Ok(())) => {
-                let buffer_end = buffer.filled().len();
-                let filled = &mut buffer.inner_mut()[buffer_start..buffer_end];
-
-                for index in 0..filled.len() {
-                    let sample_in = unsafe {
-                        // SAFETY: we're basically taking samples out of the buffer and
-                        // replacing them.
-                        filled[index].assume_init_read()
-                    };
-
-                    // todo: handle panic in this.map.
-                    // so if a panic occurs here the following ranges are initialized
-                    // ..index
-                    // (index + 1)..buffer.initialized
-                    let sample_out = this.scanner.scan(sample_in);
-
-                    filled.write_sample(index, sample_out);
-                }
-
-                Poll::Ready(Ok(()))
-            }
-        }
-    }
-}
-
-impl<R, F> GetSampleRate for ScanInPlaceWith<R, F>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
-}
-
-pin_project! {
-    /// Stream wrapper that maps the samples using an intermediate buffer.
-    #[derive(Debug)]
-    pub struct Map<R, S, F> {
-        #[pin]
-        inner: ScanWith<R, S, MapScanner<F>>,
-    }
-}
-
-impl<R, S, F> Map<R, S, F> {
-    #[inline]
-    pub fn with_max_buffer_size(self, max_buffer_size: usize) -> Self {
-        Self {
-            inner: self.inner.with_max_buffer_size(max_buffer_size),
-        }
-    }
-}
-
-impl<R, S, Q, F> AsyncReadSamples<Q> for Map<R, S, F>
-where
-    R: AsyncReadSamples<S>,
-    F: FnMut(S) -> Q,
-{
-    type Error = R::Error;
-
-    #[inline]
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<Q>,
-    ) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_read_samples(cx, buffer)
-    }
-}
-
-impl<R, S, F> GetSampleRate for Map<R, S, F>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
-}
-
-pin_project! {
-    /// Stream wrapper that maps the samples using an intermediate buffer.
-    #[derive(Debug)]
-    pub struct MapInPlace<R, F> {
-        #[pin]
-        inner: ScanInPlaceWith<R, MapScanner<F>>,
-    }
-}
-
-impl<R, S, F> AsyncReadSamples<S> for MapInPlace<R, F>
-where
-    R: AsyncReadSamples<S>,
-    F: FnMut(S) -> S,
-{
-    type Error = R::Error;
-
-    #[inline]
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_read_samples(cx, buffer)
-    }
-}
-
-impl<R, F> GetSampleRate for MapInPlace<R, F>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
-}
-
-pin_project! {
-    /// Stream wrapper that maps the error type.
-    #[derive(Clone, Copy, Debug)]
-    pub struct MapInPlacePod<R, S, F> {
-        #[pin]
-        inner: R,
-        map: F,
-        _phantom: PhantomData<fn(S)>,
-    }
-}
-
-impl<R, S, Q, F> AsyncReadSamples<Q> for MapInPlacePod<R, S, F>
-where
-    S: Pod,
-    Q: Pod,
-    R: AsyncReadSamples<S>,
-    F: FnMut(S) -> Q,
-{
-    type Error = R::Error;
-
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<Q>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-        let num_samples_out = buffer.remaining();
-        const MIN_BUFFER: usize = 32;
-
-        if num_samples_out == 0 {
-            Poll::Ready(Ok(()))
-        }
-        else if num_samples_out < MIN_BUFFER {
-            // fall back to using stack-allocated intermediate buffer
-            // otherwise a caller like read_exact will provide smaller and smaller buffers,
-            // until this can't use it as an intermediate buffer anymore.
-            //
-            // however this is only a problem if the input samples are larger than the
-            // output samples. we do it in either case here though.
-            //
-            // and furthermore MIN_BUFFER should not be constant, as this edge case really
-            // depends on the size difference and alignment. so this needs fixing someway.
-            let mut intermediate_buffer = [S::zeroed(); MIN_BUFFER];
-            let mut read_buf = ReadBuf::new(&mut intermediate_buffer[..num_samples_out]);
-
-            match this.inner.poll_read_samples(cx, &mut read_buf) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-                Poll::Ready(Ok(())) => {
-                    let num_samples_read_in = read_buf.filled().len();
-
-                    for i in 0..num_samples_read_in {
-                        let sample = (this.map)(intermediate_buffer[i]);
-                        buffer.unfilled_mut().write_sample(i, sample);
-                    }
-
-                    unsafe {
-                        buffer.assume_init(num_samples_read_in);
-                        buffer.set_filled(buffer.filled().len() + num_samples_read_in);
-                    }
-
-                    Poll::Ready(Ok(()))
-                }
-            }
-        }
-        else {
-            let buffer_initialized = buffer.initialize_unfilled(|| Q::zeroed());
-            let (_, buffer_in, _) = bytemuck::pod_align_to_mut::<Q, S>(buffer_initialized);
-
-            let num_samples_in = buffer_in.len();
-            let num_samples = num_samples_out.min(num_samples_in);
-            let buffer_in = &mut buffer_in[..num_samples];
-
-            assert!(
-                buffer_in.len() > 0,
-                "bug: not a single input sample fits into the provided output buffer"
-            );
-
-            let mut read_buf = ReadBuf::new(buffer_in);
-
-            match this.inner.poll_read_samples(cx, &mut read_buf) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
-                Poll::Ready(Ok(())) => {
-                    let num_samples_read_in = read_buf.filled().len();
-
-                    if num_samples_out < num_samples_in {
-                        // num_samples_out < num_samples_in
-                        // sizeof(sample_out) > sizeof(sample_in)
-                        // map reverse
-                        for i in (0..num_samples_read_in).rev() {
-                            let (_, buffer_in, _) =
-                                bytemuck::pod_align_to::<Q, S>(buffer_initialized);
-                            let sample = buffer_in[i];
-                            buffer_initialized[i] = (this.map)(sample);
-                        }
-                    }
-                    else {
-                        // num_samples_out >= num_samples_in
-                        // sizeof(sample_out) =< sizeof(sample_in)
-                        // map forward
-                        for i in 0..num_samples_read_in {
-                            let (_, buffer_in, _) =
-                                bytemuck::pod_align_to::<Q, S>(buffer_initialized);
-                            let sample = buffer_in[i];
-                            buffer_initialized[i] = (this.map)(sample);
-                        }
-                    }
-
-                    buffer.set_filled(buffer.filled().len() + num_samples_read_in);
-
-                    Poll::Ready(Ok(()))
-                }
-            }
-        }
-    }
-}
-
-impl<R, S, F> GetSampleRate for MapInPlacePod<R, S, F>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
-}
-
-pin_project! {
-    /// Stream wrapper that maps the error type.
-    #[derive(Clone, Copy, Debug)]
-    pub struct InspectWith<R, I> {
-        #[pin]
-        inner: R,
-        inspector: I,
-    }
-}
-
-impl<R, I, S> AsyncReadSamples<S> for InspectWith<R, I>
-where
-    R: AsyncReadSamples<S>,
-    I: Inspector<S>,
-{
-    type Error = R::Error;
-
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-
-        this.inner
-            .poll_read_samples(cx, buffer)
-            .map_ok(|()| this.inspector.inspect(buffer.filled()))
-    }
-}
-
-impl<R, I> GetSampleRate for InspectWith<R, I>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
-}
-
-pin_project! {
-    /// Stream wrapper that maps the error type.
-    #[derive(Clone, Debug)]
-    pub struct Inspect<R, F> {
-        #[pin]
-        inner: InspectWith<R, FuncInspector<F>>,
-    }
-}
-
-impl<R, S, F> AsyncReadSamples<S> for Inspect<R, F>
-where
-    R: AsyncReadSamples<S>,
-    F: FnMut(&[S]),
-{
-    type Error = R::Error;
-
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        self.project().inner.poll_read_samples(cx, buffer)
-    }
-}
-
-impl<R, F> GetSampleRate for Inspect<R, F>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
-}
-
-pin_project! {
-    /// Stream wrapper that maps the error type.
-    #[derive(Clone, Debug)]
-    pub struct Buffered<R, S> {
-        #[pin]
-        inner: R,
-        buffer: Buffer<S>,
-    }
-}
-
-impl<R, S> AsyncReadSamples<S> for Buffered<R, S>
-where
-    R: AsyncReadSamples<S>,
-{
-    type Error = R::Error;
-
-    fn poll_read_samples(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let mut inner_is_pending = false;
-        let mut have_filled_buf = false;
-
-        while buffer.remaining() > 0 {
-            let mut this = self.as_mut().project();
-
-            if this.buffer.read_pos < this.buffer.write_pos {
-                // we still have data buffered, so lets cosume that first.
-
-                let n = buffer
-                    .remaining()
-                    .min(this.buffer.write_pos - this.buffer.read_pos);
-
-                buffer
-                    .unfilled_mut()
-                    .copy_from_uninit(&this.buffer.buffer[this.buffer.read_pos..][..n]);
-
-                unsafe {
-                    buffer.assume_init(n);
-                }
-                buffer.set_filled(buffer.filled().len() + n);
-                have_filled_buf = true;
-
-                this.buffer.read_pos += n;
-                if this.buffer.read_pos == this.buffer.write_pos {
-                    this.buffer.read_pos = 0;
-                    this.buffer.write_pos = 0;
-                }
-            }
-            else {
-                if inner_is_pending {
-                    break;
-                }
-
-                if this.buffer.buffer.len() > buffer.remaining() {
-                    // our buffer size is larger than the remaining space in the destination buffer,
-                    // so we'll read to our buffer.
-                    assert_eq!(this.buffer.read_pos, 0);
-                    assert_eq!(this.buffer.write_pos, 0);
-
-                    let mut read_buf = ReadBuf::uninit(&mut this.buffer.buffer);
-
-                    while read_buf.remaining() > read_buf.capacity() / 2 {
-                        match this.inner.as_mut().poll_read_samples(cx, &mut read_buf) {
-                            Poll::Pending => {
-                                inner_is_pending = true;
-                                break;
-                            }
-                            Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-                            Poll::Ready(Ok(())) => {
-                                this.buffer.write_pos = read_buf.filled;
-                                unsafe {
-                                    read_buf.drop_unfilled_initialized();
-                                }
-
-                                if this.buffer.write_pos == 0 {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                else {
-                    // the destination buffer is larger than our buffer. instead of first reading to
-                    // our buffer and then copying to the destination buffer, we can read directly
-                    // to the destination buffer
-
-                    let filled_before = buffer.filled().len();
-                    match this.inner.poll_read_samples(cx, buffer) {
-                        Poll::Pending => {
-                            inner_is_pending = true;
-                            break;
-                        }
-                        Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-                        Poll::Ready(Ok(())) => {
-                            if buffer.filled().len() == filled_before {
-                                // eof
-                                break;
-                            }
-
-                            // directly read to destination buffer, so nothing
-                            // to do here.
-                            have_filled_buf = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if inner_is_pending && !have_filled_buf {
-            Poll::Pending
-        }
-        else {
-            Poll::Ready(Ok(()))
-        }
-    }
-}
-
-impl<R, S> GetSampleRate for Buffered<R, S>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
-}
-
-pin_project! {
-    /// Stream wrapper that maps the error type.
-    #[derive(Debug)]
-    pub struct Throttled<R> {
-        #[pin]
-        inner: R,
-        sample_duration: Duration,
-        delay: Pin<Box<Fuse<tokio::time::Sleep>>>,
-    }
-}
-
-impl<R> Throttled<R> {
-    pub fn new(inner: R, sample_duration: Duration) -> Self {
-        Self {
-            inner,
-            sample_duration,
-            delay: Box::pin(Fuse::terminated()),
-        }
-    }
-}
-
-impl<R, S> AsyncReadSamples<S> for Throttled<R>
-where
-    R: AsyncReadSamples<S>,
-{
-    type Error = R::Error;
-
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-
-        loop {
-            if this.delay.is_terminated() {
-                // this branch always returns
-
-                let num_samples_before = buffer.filled().len();
-                match this.inner.poll_read_samples(cx, buffer) {
-                    Poll::Pending => return Poll::Pending,
-                    Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-                    Poll::Ready(Ok(())) => {
-                        let num_samples = buffer.filled().len() - num_samples_before;
-
-                        // 32bit at 2.4 MHz is exhausted in about 30 minutes
-                        let num_samples = u32::try_from(num_samples).unwrap_or_else(|_| {
-                            tracing::warn!("samples per read is overflowing u32 in Throttled");
-                            u32::MAX
-                        });
-
-                        // well, we'll just wait 1 second... close enough :D
-                        let delay = this
-                            .sample_duration
-                            .checked_mul(num_samples)
-                            .unwrap_or_else(|| Duration::from_secs(1));
-
-                        this.delay.set(tokio::time::sleep(delay).fuse());
-
-                        return Poll::Ready(Ok(()));
-                    }
-                }
-            }
-            else {
-                // either we return Poll::Pending or the future will be terminated in the next
-                // loop iteration
-
-                ready!(this.delay.poll_unpin(cx));
-            }
-        }
-    }
-}
-
-impl<R> GetSampleRate for Throttled<R>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1344,9 +755,14 @@ pub fn null_source() -> NullSource {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct Silence;
+pub struct Silence<S> {
+    _phantom: PhantomData<fn() -> S>,
+}
 
-impl<S: Sample> AsyncReadSamples<S> for Silence {
+impl<S> AsyncReadSamples<S> for Silence<S>
+where
+    S: Sample,
+{
     type Error = Infallible;
 
     fn poll_read_samples(
@@ -1360,174 +776,20 @@ impl<S: Sample> AsyncReadSamples<S> for Silence {
 }
 
 #[inline]
-pub fn silence() -> Silence {
-    Silence
-}
-
-pub trait Scanner<S> {
-    type Output;
-
-    fn scan(&mut self, sample: S) -> Self::Output;
-}
-
-impl<T, S> Scanner<S> for &mut T
+pub fn silence<S>() -> Silence<S>
 where
-    T: Scanner<S> + ?Sized,
+    S: Sample,
 {
-    type Output = T::Output;
-
-    #[inline]
-    fn scan(&mut self, sample: S) -> Self::Output {
-        (&mut **self).scan(sample)
+    Silence {
+        _phantom: PhantomData,
     }
 }
 
-impl<T, S> Scanner<S> for Box<T>
+/// Helper to check if a value implements [`AsyncReadSamples`]
+pub fn assert_async_read<T, S>(_: &T)
 where
-    T: Scanner<S> + ?Sized,
+    T: AsyncReadSamples<S>,
 {
-    type Output = T::Output;
-
-    #[inline]
-    fn scan(&mut self, sample: S) -> Self::Output {
-        (&mut **self).scan(sample)
-    }
-}
-
-impl<S> Scanner<S> for () {
-    type Output = S;
-
-    #[inline]
-    fn scan(&mut self, sample: S) -> Self::Output {
-        sample
-    }
-}
-
-#[derive(Debug)]
-struct MapScanner<F> {
-    f: F,
-}
-
-impl<S, Q, F> Scanner<S> for MapScanner<F>
-where
-    F: FnMut(S) -> Q,
-{
-    type Output = Q;
-
-    #[inline]
-    fn scan(&mut self, sample: S) -> Self::Output {
-        (self.f)(sample)
-    }
-}
-
-pub trait Inspector<S> {
-    fn inspect(&mut self, samples: &[S]);
-}
-
-#[derive(Clone, Debug)]
-struct FuncInspector<F> {
-    f: F,
-}
-
-impl<F, S> Inspector<S> for FuncInspector<F>
-where
-    F: FnMut(&[S]),
-{
-    fn inspect(&mut self, samples: &[S]) {
-        (self.f)(samples)
-    }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct LogSampleRateInspector {
-    start_time: Option<Instant>,
-    reset_time: Option<Duration>,
-    num_samples: usize,
-    span: Option<Span>,
-}
-
-impl LogSampleRateInspector {
-    #[inline]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    #[inline]
-    pub fn with_reset_time(mut self, reset_time: Duration) -> Self {
-        self.reset_time = Some(reset_time);
-        self
-    }
-
-    #[inline]
-    pub fn with_span(mut self, span: Span) -> Self {
-        self.span = Some(span);
-        self
-    }
-}
-
-impl<S> Inspector<S> for LogSampleRateInspector {
-    fn inspect(&mut self, samples: &[S]) {
-        if let Some(start_time) = self.start_time {
-            self.num_samples += samples.len();
-            let now = Instant::now();
-            let elapsed = now.duration_since(start_time);
-            let sample_rate = self.num_samples as f32 / elapsed.as_secs_f32();
-
-            let _guard = self.span.as_ref().map(|span| span.enter());
-            tracing::info!("sample rate: {sample_rate:.2} Hz");
-
-            if self
-                .reset_time
-                .map_or(false, |reset_time| elapsed >= reset_time)
-            {
-                self.start_time = Some(now);
-                self.num_samples = 0;
-            }
-        }
-        else {
-            self.start_time = Some(Instant::now());
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct LogSamplesInspector {
-    next_sample: usize,
-    interval: usize,
-    span: Option<Span>,
-}
-
-impl LogSamplesInspector {
-    #[inline]
-    pub fn new(interval: usize) -> Self {
-        Self {
-            next_sample: 0,
-            interval,
-            span: None,
-        }
-    }
-
-    #[inline]
-    pub fn with_span(mut self, span: Span) -> Self {
-        self.span = Some(span);
-        self
-    }
-}
-
-impl<S: Debug> Inspector<S> for LogSamplesInspector {
-    fn inspect(&mut self, mut samples: &[S]) {
-        let _guard = self.span.as_ref().map(|span| span.enter());
-
-        while self.next_sample < samples.len() {
-            samples = &samples[self.next_sample..];
-
-            let sample = &samples[0];
-            tracing::debug!(?sample);
-
-            self.next_sample = self.interval;
-        }
-        self.next_sample -= samples.len();
-    }
 }
 
 #[cfg(test)]

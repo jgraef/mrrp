@@ -16,14 +16,12 @@ use std::{
 
 use num_complex::Complex;
 
-use crate::{
+use crate::io::{
+    AsyncReadSamples,
+    AsyncReadSamplesExt,
+    AsyncWriteSamples,
+    ForwardError,
     GetSampleRate,
-    io::{
-        AsyncReadSamples,
-        AsyncReadSamplesExt,
-        AsyncWriteSamples,
-        ForwardError,
-    },
 };
 
 #[derive(Debug, thiserror::Error)]

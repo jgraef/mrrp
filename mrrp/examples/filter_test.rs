@@ -21,7 +21,7 @@ use mrrp::{
     },
     io::{
         AsyncReadSamplesExt,
-        Scanner,
+        combinators::Scanner,
     },
     sink::{
         file::write_stream_to_wav,

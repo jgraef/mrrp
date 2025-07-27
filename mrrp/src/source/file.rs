@@ -13,11 +13,12 @@ use std::{
 use num_complex::Complex;
 
 use crate::{
-    GetSampleRate,
     buf::SampleBufMut,
     io::{
         AsyncReadSamples,
+        GetSampleRate,
         ReadBuf,
+        StreamLength,
     },
 };
 
@@ -44,6 +45,7 @@ pub struct WavSource<R, S> {
     #[debug(skip)]
     inner: hound::WavReader<R>,
     spec: hound::WavSpec,
+    num_samples_read: usize,
     _phantom: PhantomData<fn() -> S>,
 }
 
@@ -58,6 +60,7 @@ where
         Ok(Self {
             inner,
             spec,
+            num_samples_read: 0,
             _phantom: PhantomData,
         })
     }
@@ -90,7 +93,8 @@ where
         _cx: &mut Context<'_>,
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
-        let mut samples = self.inner.samples();
+        let this = &mut *self;
+        let mut samples = this.inner.samples();
 
         while buffer.has_remaining_mut() {
             let Some(sample) = S::from_samples(&mut samples)?
@@ -98,6 +102,7 @@ where
                 break;
             };
             buffer.put_sample(sample);
+            this.num_samples_read += 1;
         }
 
         Poll::Ready(Ok(()))
@@ -108,6 +113,16 @@ impl<R, S> GetSampleRate for WavSource<R, S> {
     #[inline]
     fn sample_rate(&self) -> f32 {
         self.spec.sample_rate as f32
+    }
+}
+
+impl<R, S> StreamLength for WavSource<R, S>
+where
+    R: std::io::Read,
+{
+    fn remaining(&self) -> usize {
+        usize::try_from(self.inner.len()).unwrap() / usize::from(self.spec.channels)
+            - self.num_samples_read
     }
 }
 

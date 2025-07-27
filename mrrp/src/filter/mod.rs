@@ -4,30 +4,26 @@ pub mod fir;
 pub mod resampling;
 
 use std::{
+    f32::consts::{
+        PI,
+        TAU,
+    },
     fmt::Debug,
-    ops::{
-        AddAssign,
-        Div,
-    },
-    pin::Pin,
-    task::{
-        Context,
-        Poll,
-    },
 };
 
-use num_traits::{
-    FromPrimitive,
-    Zero,
-};
+use num_complex::Complex;
 
 use crate::{
-    GetSampleRate,
-    io::{
-        AsyncReadSamples,
-        ReadBuf,
+    filter::{
+        design::{
+            FilterDesign,
+            Hilbert,
+            Normalize,
+            pm_remez::pm_remez,
+        },
+        fir::FirFilter,
     },
-    sample::Sample,
+    io::combinators::Scanner,
     util::dim::{
         Const,
         DequeLike,
@@ -82,95 +78,80 @@ impl<D: Dim, S> DelayLine<D, S> {
     }
 }
 
-/// A simple averaging low-pass filter for decimation.
-///
-/// This takes the average of N samples to produce one sample. It is equivalent
-/// to a FIR filter with N coefficients of 1/N followed by a decimation of N
-/// samples to 1.
-///
-/// <https://en.wikipedia.org/wiki/Finite_impulse_response#Moving_average_example>
-#[derive(Clone, Debug)]
-pub struct AverageDecimate<T, S> {
-    input: T,
-    decimate: usize,
-    accumulator: (S, usize),
-}
-
-impl<T, S> AverageDecimate<T, S>
-where
-    S: Zero,
-{
-    #[inline]
-    pub fn new(input: T, decimate: usize) -> Self {
-        Self {
-            input,
-            decimate,
-            accumulator: (S::zero(), 0),
-        }
-    }
-}
-
-impl<T, S> GetSampleRate for AverageDecimate<T, S>
-where
-    T: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.input.sample_rate() / self.decimate as f32
-    }
-}
-
-impl<T, S> AsyncReadSamples<S> for AverageDecimate<T, S>
-where
-    T: AsyncReadSamples<S> + Unpin,
-    S: Sample + Clone + Zero + AddAssign + Div<Output = S> + Unpin + Div<S::Scalar, Output = S>,
-    S::Scalar: FromPrimitive,
-{
-    type Error = T::Error;
-
-    fn poll_read_samples(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = &mut *self;
-
-        if buffer.remaining() == 0 {
-            return Poll::Ready(Ok(()));
-        }
-
-        loop {
-            match Pin::new(&mut this.input).poll_read_samples(cx, buffer) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-                Poll::Ready(Ok(())) => {
-                    let mut write_pos = 0;
-
-                    for read_pos in 0..buffer.filled().len() {
-                        this.accumulator.0 += buffer.filled()[read_pos].clone();
-                        this.accumulator.1 += 1;
-                        if this.accumulator.1 == this.decimate {
-                            let average = std::mem::replace(&mut this.accumulator.0, S::zero())
-                                / <S::Scalar>::from_usize(this.decimate).unwrap();
-                            buffer.filled_mut()[write_pos] = average;
-                            write_pos += 1;
-                            this.accumulator.1 = 0;
-                        }
-                    }
-
-                    buffer.set_filled(write_pos);
-
-                    if write_pos > 0 {
-                        return Poll::Ready(Ok(()));
-                    }
-                }
-            }
-        }
-    }
-}
-
 pub trait MakeFilter<R> {
     type Filter;
 
     fn make_filter(&self, input: &R) -> Self::Filter;
+}
+
+/// Hilbert filter to recover an IQ signal from a real-valued signal
+#[derive(Clone, Debug)]
+pub struct HilbertFilter {
+    hilbert: FirFilter<f32, f32>,
+}
+
+impl HilbertFilter {
+    pub fn new(transition_bandwidth: f32, filter_length: usize) -> Self {
+        assert!(filter_length % 2 == 1, "filter length must be odd");
+        let hilbert = pm_remez(
+            Hilbert::new(transition_bandwidth).assert_normalized(),
+            filter_length,
+        )
+        .expect("failed to design hilbert filter");
+        Self {
+            hilbert: hilbert.fir_filter(),
+        }
+    }
+}
+
+impl Scanner<f32> for HilbertFilter {
+    type Output = Complex<f32>;
+
+    fn scan(&mut self, sample: f32) -> Self::Output {
+        let q = self.hilbert.scan(sample);
+        Complex { re: sample, im: q }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct GoertzelFilter {
+    exp_filter_frequency: Complex<f32>,
+    s: [Complex<f32>; 2],
+    i: usize,
+    n: usize,
+    y: Complex<f32>,
+    norm: f32,
+}
+
+impl GoertzelFilter {
+    pub fn new(sample_rate: f32, filter_frequency: f32, filter_bandwidth: f32) -> Self {
+        let n = (sample_rate / filter_bandwidth) as usize;
+        Self {
+            exp_filter_frequency: (-Complex::i() * filter_frequency / sample_rate * TAU).exp(),
+            s: Default::default(),
+            i: 0,
+            n,
+            y: Default::default(),
+            norm: 1.0 / PI, //TAU * filter_bandwidth / filter_frequency,
+        }
+    }
+}
+
+impl Scanner<Complex<f32>> for GoertzelFilter {
+    type Output = Complex<f32>;
+
+    fn scan(&mut self, sample: Complex<f32>) -> Self::Output {
+        let s = sample + 2.0 * self.exp_filter_frequency.re * self.s[0] - self.s[1];
+        let y = s - self.exp_filter_frequency * self.s[0];
+        self.s[1] = self.s[0];
+        self.s[0] = s;
+
+        self.i += 1;
+        if self.i == self.n {
+            self.i = 0;
+            self.y = y;
+            self.s = Default::default();
+        }
+        self.y * self.norm
+    }
 }

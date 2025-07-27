@@ -1,9 +1,12 @@
-use std::f32::consts::TAU;
+use std::f32::consts::{
+    PI,
+    TAU,
+};
 
 use num_complex::Complex;
 use num_traits::Zero;
 
-use crate::io::Scanner;
+use crate::io::combinators::Scanner;
 
 /// https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/
 #[derive(Clone, Copy, Debug)]
@@ -53,8 +56,17 @@ impl Scanner<Complex<f32>> for AccessPhaseAndDifferentiate {
 
     fn scan(&mut self, sample: Complex<f32>) -> Self::Output {
         let phase = sample.arg();
-        let phase_difference = phase - self.delayed;
+        let mut phase_difference = phase - self.delayed;
         self.delayed = phase;
+
+        // unwrap phase difference
+        if phase_difference > PI {
+            phase_difference = -TAU + phase_difference;
+        }
+        else if phase_difference < -PI {
+            phase_difference = TAU + phase_difference;
+        }
+
         phase_difference * self.norm_factor
     }
 }

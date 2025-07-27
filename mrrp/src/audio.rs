@@ -5,13 +5,11 @@ use futures_util::FutureExt;
 use parking_lot::Mutex;
 use rodio::Source as _;
 
-use crate::{
+use crate::io::{
+    AsyncReadSamples,
+    AsyncReadSamplesExt,
     GetSampleRate,
-    io::{
-        AsyncReadSamples,
-        AsyncReadSamplesExt,
-        Buffered,
-    },
+    combinators::Buffered,
 };
 
 #[derive(Clone, Debug)]

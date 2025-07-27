@@ -20,8 +20,8 @@ use pin_project_lite::pin_project;
 use crate::io::{
     AsyncReadSamples,
     AsyncReadSamplesExt,
-    MapInPlacePod,
     ReadBuf,
+    combinators::MapInPlacePod,
 };
 
 /// Preamble: 8 µs / 16 samples

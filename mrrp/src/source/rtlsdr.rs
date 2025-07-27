@@ -21,8 +21,6 @@ use rtlsdr_async::{
 };
 
 use crate::{
-    GetCenterFrequency,
-    GetSampleRate,
     buf::{
         SampleBuf,
         SampleBufMut,
@@ -30,6 +28,8 @@ use crate::{
     },
     io::{
         AsyncReadSamples,
+        GetCenterFrequency,
+        GetSampleRate,
         ReadBuf,
     },
     sample::IntoSample,

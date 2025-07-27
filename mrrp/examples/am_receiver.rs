@@ -12,10 +12,12 @@ use std::{
 use clap::Parser;
 use color_eyre::eyre::Error;
 use mrrp::{
-    GetSampleRate,
     audio::play_audio,
-    filter::AverageDecimate,
-    io::AsyncReadSamplesExt,
+    filter::resampling::AverageDecimate,
+    io::{
+        AsyncReadSamplesExt,
+        GetSampleRate,
+    },
     source::rtlsdr::RtlSdrSource,
 };
 use tokio::signal::ctrl_c;

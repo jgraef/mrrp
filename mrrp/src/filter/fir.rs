@@ -15,7 +15,7 @@ use num_traits::{
 };
 
 use crate::{
-    io::{
+    io::combinators::{
         ScanInPlaceWith,
         Scanner,
     },

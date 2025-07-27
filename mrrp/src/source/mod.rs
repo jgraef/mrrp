@@ -18,10 +18,10 @@ pub use noise::*;
 pub use sine::*;
 
 use crate::{
-    GetSampleRate,
     buf::SamplesMut,
     io::{
         AsyncReadSamples,
+        GetSampleRate,
         ReadBuf,
     },
 };

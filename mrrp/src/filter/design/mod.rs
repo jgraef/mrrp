@@ -1,6 +1,6 @@
 use crate::{
-    GetSampleRate,
     filter::fir::FirFilter,
+    io::GetSampleRate,
 };
 
 pub mod argmin;
@@ -303,16 +303,57 @@ impl IsSymmetric for Lowpass {
     }
 }
 
-/*
-impl<R> MakeFilter<R> for Lowpass where R: GetSampleRate {
-    type Filter = FirFiltered<R>;
+#[derive(Clone, Copy, Debug)]
+pub struct Hilbert {
+    pub allpass_begin: f32,
+    pub allpass_end: f32,
+}
 
-    fn make_filter(&self, input: &R) -> Self::Filter {
-        //self.normalize_with(input).make_filter(input)
-        todo!();
+impl Hilbert {
+    pub fn new(transition_bandwidth: f32) -> Self {
+        Self {
+            allpass_begin: 0.25 * transition_bandwidth,
+            allpass_end: 0.5 - 0.25 * transition_bandwidth,
+        }
     }
 }
-     */
+
+impl Normalize for Hilbert {
+    type Normalized = Normalized<Self>;
+
+    fn normalize(self, reference: f32) -> Self::Normalized {
+        Normalized(Self {
+            allpass_begin: self.allpass_begin / reference,
+            allpass_end: self.allpass_end / reference,
+        })
+    }
+}
+
+impl DesiredFrequencyResponse for Hilbert {
+    fn defined_on(&self) -> impl IntoIterator<Item = Band> {
+        [Band {
+            start: self.allpass_begin,
+            end: self.allpass_end,
+        }]
+        .into_iter()
+    }
+
+    fn frequency_response_at(&self, frequency: f32) -> Option<FrequencyResponseAt> {
+        let amplitude = if frequency > 0.0 { 1.0 } else { 0.0 };
+
+        Some(FrequencyResponseAt {
+            amplitude,
+            // todo: we should handle this better, as pm-remez uses weights not tolerances
+            tolerance: 0.1,
+        })
+    }
+}
+
+impl IsSymmetric for Hilbert {
+    fn symmetry(&self) -> Symmetry {
+        Symmetry::Negative
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct SampledIdealFrequencyResponse<S> {

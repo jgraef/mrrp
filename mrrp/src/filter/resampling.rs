@@ -1,4 +1,8 @@
 use std::{
+    ops::{
+        AddAssign,
+        Div,
+    },
     pin::Pin,
     task::{
         Context,
@@ -6,16 +10,21 @@ use std::{
     },
 };
 
-use num_traits::Zero;
+use num_traits::{
+    FromPrimitive,
+    Zero,
+};
 use pin_project_lite::pin_project;
 
 use crate::{
-    GetSampleRate,
     buf::SampleBufMut,
     io::{
         AsyncReadSamples,
+        GetSampleRate,
         ReadBuf,
+        StreamLength,
     },
+    sample::Sample,
 };
 
 pin_project! {
@@ -99,6 +108,15 @@ where
     #[inline]
     fn sample_rate(&self) -> f32 {
         self.input.sample_rate() / self.factor as f32
+    }
+}
+
+impl<R> StreamLength for Decimate<R>
+where
+    R: StreamLength,
+{
+    fn remaining(&self) -> usize {
+        (self.input.remaining() + self.counter) / self.factor
     }
 }
 
@@ -198,5 +216,124 @@ where
     #[inline]
     fn sample_rate(&self) -> f32 {
         self.input.sample_rate() * self.factor as f32
+    }
+}
+
+impl<R> StreamLength for Interpolate<R>
+where
+    R: StreamLength,
+{
+    fn remaining(&self) -> usize {
+        self.input.remaining() * self.factor - self.counter
+    }
+}
+
+/// A simple averaging low-pass filter for decimation.
+///
+/// This takes the average of N samples to produce one sample. It is equivalent
+/// to a FIR filter with N coefficients of 1/N followed by a decimation of N
+/// samples to 1.
+///
+/// <https://en.wikipedia.org/wiki/Finite_impulse_response#Moving_average_example>
+#[derive(Clone, Debug)]
+pub struct AverageDecimate<T, S> {
+    input: T,
+    decimate: usize,
+    accumulator: (S, usize),
+}
+
+impl<T, S> AverageDecimate<T, S>
+where
+    S: Zero,
+{
+    #[inline]
+    pub fn new(input: T, decimate: usize) -> Self {
+        Self {
+            input,
+            decimate,
+            accumulator: (S::zero(), 0),
+        }
+    }
+}
+
+impl<T, S> GetSampleRate for AverageDecimate<T, S>
+where
+    T: GetSampleRate,
+{
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.input.sample_rate() / self.decimate as f32
+    }
+}
+
+impl<T, S> StreamLength for AverageDecimate<T, S>
+where
+    T: StreamLength,
+{
+    fn remaining(&self) -> usize {
+        (self.input.remaining() + self.accumulator.1) / self.decimate
+    }
+}
+
+impl<T, S> AsyncReadSamples<S> for AverageDecimate<T, S>
+where
+    T: AsyncReadSamples<S> + Unpin,
+    S: Sample + Clone + Zero + AddAssign + Div<Output = S> + Unpin + Div<S::Scalar, Output = S>,
+    S::Scalar: FromPrimitive,
+{
+    type Error = T::Error;
+
+    fn poll_read_samples(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<S>,
+    ) -> Poll<Result<(), Self::Error>> {
+        let this = &mut *self;
+
+        if buffer.remaining() == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
+        loop {
+            let filled_before = buffer.filled().len();
+
+            match Pin::new(&mut this.input).poll_read_samples(cx, buffer) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Ready(Ok(())) => {
+                    // note: we start overwriting from the beginning of the **newly** filled buffer,
+                    // since that's what we just read. even though this runs in
+                    // a loop, we exit the loop as soon as we have filled the
+                    // buffer with any number of decimated samples.
+
+                    let mut write_pos = filled_before;
+                    let filled = buffer.filled().len();
+
+                    if filled == filled_before {
+                        // nothing was read, so this is an eof
+                        return Poll::Ready(Ok(()));
+                    }
+
+                    for read_pos in filled_before..filled {
+                        this.accumulator.0 += buffer.filled()[read_pos].clone();
+                        this.accumulator.1 += 1;
+                        if this.accumulator.1 == this.decimate {
+                            let average = std::mem::replace(&mut this.accumulator.0, S::zero())
+                                / <S::Scalar>::from_usize(this.decimate).unwrap();
+                            buffer.filled_mut()[write_pos] = average;
+                            write_pos += 1;
+                            this.accumulator.1 = 0;
+                        }
+                    }
+
+                    buffer.set_filled(write_pos);
+
+                    if write_pos > 0 {
+                        // we produced at least one decimated sample, so we can return
+                        return Poll::Ready(Ok(()));
+                    }
+                }
+            }
+        }
     }
 }

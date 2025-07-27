@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use clap::Parser;
 use color_eyre::eyre::Error;
 use mrrp::{
-    GetSampleRate,
     filter::{
         biquad,
         design::{
@@ -13,7 +12,10 @@ use mrrp::{
             pm_remez::pm_remez,
         },
     },
-    io::AsyncReadSamplesExt,
+    io::{
+        AsyncReadSamplesExt,
+        GetSampleRate,
+    },
     modem::fm::FmModulator,
     sink::{
         file::write_stream_to_wav,
