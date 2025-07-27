@@ -135,3 +135,55 @@ where
     let n_t = T::from_usize(n).unwrap();
     (0..=n).map(move |i| (T::PI() * T::from_usize(i).unwrap() / n_t).sin().powi(2))
 }
+
+#[cfg(test)]
+mod tests {
+    use futures_util::FutureExt;
+
+    use crate::{
+        filter::fir::{
+            FirFilter,
+            hann_window,
+        },
+        io::{
+            AsyncReadSamplesExt,
+            Cursor,
+        },
+        source::white_noise,
+    };
+
+    fn convolve(x: &[f32], h: &[f32]) -> Vec<f32> {
+        let mut y = vec![0.0; x.len()];
+        for i in 0..x.len() {
+            for j in 0..h.len() {
+                y[i] += x.get(i - j).copied().unwrap_or_default() * h[j]
+            }
+        }
+        y
+    }
+
+    #[test]
+    fn test_fir_filter_against_reference_convolution() {
+        let mut x = vec![];
+        white_noise::<f32>()
+            .limit(20)
+            .read_to_end(&mut x)
+            .now_or_never()
+            .expect("pending")
+            .unwrap();
+
+        let h = hann_window(5).collect::<Vec<f32>>();
+
+        let expected = convolve(&x, &h);
+
+        let mut y = vec![];
+        Cursor::new(&x[..])
+            .scan_in_place_with(FirFilter::new(h))
+            .read_to_end(&mut y)
+            .now_or_never()
+            .expect("pending")
+            .unwrap();
+
+        assert_eq!(expected, y);
+    }
+}

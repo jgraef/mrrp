@@ -60,8 +60,7 @@ where
                     .remaining()
                     .min(this.buffer.write_pos - this.buffer.read_pos);
 
-                buffer
-                    .unfilled_mut()
+                buffer.unfilled_mut()[..n]
                     .copy_from_uninit(&this.buffer.buffer[this.buffer.read_pos..][..n]);
 
                 unsafe {

@@ -1,5 +1,6 @@
 pub mod combinators;
 mod read;
+pub mod test;
 mod write;
 
 use std::{
