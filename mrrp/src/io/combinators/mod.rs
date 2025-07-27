@@ -5,6 +5,7 @@ mod inspect;
 mod limited;
 mod map;
 mod map_err;
+mod repeated;
 mod scan;
 mod throttled;
 mod with_samplerate;
@@ -31,6 +32,7 @@ pub use map::{
     MapInPlacePod,
 };
 pub use map_err::MapErr;
+pub use repeated::Repeated;
 pub use scan::{
     Chain,
     ConvertScanner,

@@ -11,8 +11,11 @@ use pin_project_lite::pin_project;
 
 use crate::io::{
     AsyncReadSamples,
+    FiniteStream,
     GetSampleRate,
     ReadBuf,
+    Remaining,
+    StreamLength,
 };
 
 pin_project! {
@@ -25,6 +28,7 @@ pin_project! {
 }
 
 impl<T> WithSampleRate<T> {
+    #[inline]
     pub fn new(inner: T, sample_rate: f32) -> Self {
         Self { inner, sample_rate }
     }
@@ -36,6 +40,18 @@ impl<T> GetSampleRate for WithSampleRate<T> {
         self.sample_rate
     }
 }
+
+impl<T> StreamLength for WithSampleRate<T>
+where
+    T: StreamLength,
+{
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        self.inner.remaining()
+    }
+}
+
+impl<T> FiniteStream for WithSampleRate<T> where T: FiniteStream {}
 
 impl<T, S> AsyncReadSamples<S> for WithSampleRate<T>
 where

@@ -12,8 +12,10 @@ use tracing::Span;
 use crate::io::{
     AsyncReadSamples,
     AsyncWriteSamples,
+    FiniteStream,
     GetSampleRate,
     ReadBuf,
+    Remaining,
     StreamLength,
 };
 
@@ -87,6 +89,7 @@ impl<T> GetSampleRate for WithSpan<T>
 where
     T: GetSampleRate,
 {
+    #[inline]
     fn sample_rate(&self) -> f32 {
         self.inner.sample_rate()
     }
@@ -96,7 +99,10 @@ impl<T> StreamLength for WithSpan<T>
 where
     T: StreamLength,
 {
-    fn remaining(&self) -> usize {
+    #[inline]
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<T> FiniteStream for WithSpan<T> where T: FiniteStream {}

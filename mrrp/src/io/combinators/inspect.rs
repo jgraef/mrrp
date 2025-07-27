@@ -16,8 +16,10 @@ use tracing::Span;
 
 use crate::io::{
     AsyncReadSamples,
+    FiniteStream,
     GetSampleRate,
     ReadBuf,
+    Remaining,
     StreamLength,
 };
 
@@ -72,10 +74,12 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, I> FiniteStream for InspectWith<R, I> where R: FiniteStream {}
 
 pin_project! {
     #[derive(Clone, Debug)]
@@ -125,10 +129,12 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, F> FiniteStream for Inspect<R, F> where R: FiniteStream {}
 
 pub trait Inspector<S> {
     fn inspect(&mut self, samples: &[S]);

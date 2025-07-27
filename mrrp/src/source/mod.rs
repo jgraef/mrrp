@@ -23,6 +23,8 @@ use crate::{
         AsyncReadSamples,
         GetSampleRate,
         ReadBuf,
+        Remaining,
+        StreamLength,
     },
 };
 
@@ -114,6 +116,7 @@ pub struct SignalGeneratorReadSamples<G> {
 }
 
 impl<G> SignalGeneratorReadSamples<G> {
+    #[inline]
     pub fn new(signal_generator: G) -> Self {
         Self { signal_generator }
     }
@@ -125,6 +128,7 @@ where
 {
     type Error = Infallible;
 
+    #[inline]
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
         _cx: &mut Context<'_>,
@@ -142,5 +146,12 @@ where
     #[inline]
     fn sample_rate(&self) -> f32 {
         self.signal_generator.sample_rate()
+    }
+}
+
+impl<G> StreamLength for SignalGeneratorReadSamples<G> {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Infinite
     }
 }

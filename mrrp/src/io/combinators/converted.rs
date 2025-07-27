@@ -11,8 +11,10 @@ use pin_project_lite::pin_project;
 use crate::{
     io::{
         AsyncReadSamples,
+        FiniteStream,
         GetSampleRate,
         ReadBuf,
+        Remaining,
         StreamLength,
         combinators::{
             ConvertScanner,
@@ -70,7 +72,9 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, S, Q> FiniteStream for Converted<R, S, Q> where R: FiniteStream {}

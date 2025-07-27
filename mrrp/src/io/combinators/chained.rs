@@ -12,14 +12,17 @@ use crate::{
     buf::SampleBufMut,
     io::{
         AsyncReadSamples,
+        FiniteStream,
         GetSampleRate,
         ReadBuf,
+        Remaining,
+        SizeHint,
         StreamLength,
     },
 };
 
 pin_project! {
-    #[derive(Debug)]
+    #[derive(Clone, Copy, Debug)]
     pub struct Chained<H, T> {
         #[pin]
         head: H,
@@ -109,15 +112,31 @@ where
     T: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
-        let head = if self.head_exhausted {
-            0
+    fn remaining(&self) -> Remaining {
+        if self.head_exhausted {
+            self.tail.remaining()
         }
         else {
-            self.head.remaining()
-        };
-        head + self.tail.remaining()
+            self.head.remaining() + self.tail.remaining()
+        }
     }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        if self.head_exhausted {
+            self.tail.size_hint()
+        }
+        else {
+            self.head.size_hint() + self.tail.size_hint()
+        }
+    }
+}
+
+impl<H, T> FiniteStream for Chained<H, T>
+where
+    H: FiniteStream,
+    T: FiniteStream,
+{
 }
 
 #[derive(Clone, Debug, thiserror::Error)]

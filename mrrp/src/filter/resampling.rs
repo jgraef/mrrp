@@ -22,6 +22,7 @@ use crate::{
         AsyncReadSamples,
         GetSampleRate,
         ReadBuf,
+        Remaining,
         StreamLength,
     },
     sample::Sample,
@@ -115,8 +116,11 @@ impl<R> StreamLength for Decimate<R>
 where
     R: StreamLength,
 {
-    fn remaining(&self) -> usize {
-        (self.input.remaining() + self.counter) / self.factor
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        self.input
+            .remaining()
+            .map(|num_samples| (num_samples + self.counter) / self.factor)
     }
 }
 
@@ -223,8 +227,11 @@ impl<R> StreamLength for Interpolate<R>
 where
     R: StreamLength,
 {
-    fn remaining(&self) -> usize {
-        self.input.remaining() * self.factor - self.counter
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        self.input
+            .remaining()
+            .map(|num_samples| num_samples * self.factor - self.counter)
     }
 }
 
@@ -270,8 +277,11 @@ impl<T, S> StreamLength for AverageDecimate<T, S>
 where
     T: StreamLength,
 {
-    fn remaining(&self) -> usize {
-        (self.input.remaining() + self.accumulator.1) / self.decimate
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        self.input
+            .remaining()
+            .map(|num_samples| (num_samples + self.accumulator.1) / self.decimate)
     }
 }
 

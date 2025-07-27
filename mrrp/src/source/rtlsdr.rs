@@ -31,6 +31,9 @@ use crate::{
         GetCenterFrequency,
         GetSampleRate,
         ReadBuf,
+        Remaining,
+        SizeHint,
+        StreamLength,
     },
     sample::IntoSample,
 };
@@ -188,5 +191,23 @@ impl GetCenterFrequency for RtlSdrSource {
     #[inline]
     fn center_frequency(&self) -> f32 {
         self.tuner_frequency as f32
+    }
+}
+
+impl StreamLength for RtlSdrSource {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Infinite
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        // note: this is a bit hacky, but rtlsdr-async only ever returns chunks of
+        // 0x4000 bytes. Of course it could just never return anything, but I guess this
+        // is a good lower bound for the size hint.
+        SizeHint {
+            lower_bound: 0x4000,
+            upper_bound: None,
+        }
     }
 }

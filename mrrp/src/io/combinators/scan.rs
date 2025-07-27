@@ -13,9 +13,11 @@ use crate::{
     buf::SampleBufMut,
     io::{
         AsyncReadSamples,
-        Buffer,
+        FiniteStream,
         GetSampleRate,
         ReadBuf,
+        Remaining,
+        ScratchBuffer,
         StreamLength,
     },
     sample::FromSample,
@@ -30,7 +32,7 @@ pin_project! {
         scanner: Sc,
         // would be nicer to use SamplesMut, but we need a SamplesMut::drain for that
         // we use super::Buffer here, because it is Clone, we don't need the pointers it keeps track of.
-        intermediate_buffer: Buffer<S>,
+        intermediate_buffer: ScratchBuffer<S>,
         max_buffer_size: usize,
     }
 }
@@ -41,7 +43,7 @@ impl<R, S, Sc> ScanWith<R, S, Sc> {
         Self {
             inner,
             scanner,
-            intermediate_buffer: Buffer::new(0),
+            intermediate_buffer: ScratchBuffer::new(0),
             max_buffer_size: usize::MAX,
         }
     }
@@ -68,10 +70,7 @@ where
         let this = self.project();
 
         let read_length = (*this.max_buffer_size).min(buffer.remaining());
-
-        if read_length > this.intermediate_buffer.buffer.len() {
-            *this.intermediate_buffer = Buffer::new(read_length);
-        }
+        this.intermediate_buffer.reserve(read_length);
 
         let mut read_buf = ReadBuf::uninit(&mut this.intermediate_buffer.buffer[..read_length]);
 
@@ -109,10 +108,12 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, S, Sc> FiniteStream for ScanWith<R, S, Sc> where R: FiniteStream {}
 
 pin_project! {
     #[derive(Clone, Debug)]
@@ -190,10 +191,12 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, Sc> FiniteStream for ScanInPlaceWith<R, Sc> where R: FiniteStream {}
 
 pub trait Scanner<S> {
     type Output;

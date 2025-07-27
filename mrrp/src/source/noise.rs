@@ -26,6 +26,8 @@ use rand::{
 use crate::io::{
     AsyncReadSamples,
     ReadBuf,
+    Remaining,
+    StreamLength,
 };
 
 pin_project! {
@@ -59,6 +61,13 @@ where
         let this = self.project();
         buffer.fill_with(|| this.rng.sample(&*this.distribution));
         Poll::Ready(Ok(()))
+    }
+}
+
+impl<R, D> StreamLength for Noise<R, D> {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Infinite
     }
 }
 

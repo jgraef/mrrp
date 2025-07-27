@@ -19,6 +19,8 @@ use crate::{
         AsyncReadSamples,
         GetSampleRate,
         ReadBuf,
+        Remaining,
+        StreamLength,
     },
     source::{
         ComplexSinusoid,
@@ -203,5 +205,12 @@ impl GetSampleRate for SstvEncoder {
     #[inline]
     fn sample_rate(&self) -> f32 {
         self.sample_rate
+    }
+}
+
+impl StreamLength for SstvEncoder {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Unknown
     }
 }

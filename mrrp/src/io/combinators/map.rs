@@ -12,8 +12,10 @@ use pin_project_lite::pin_project;
 
 use crate::io::{
     AsyncReadSamples,
+    FiniteStream,
     GetSampleRate,
     ReadBuf,
+    Remaining,
     StreamLength,
     combinators::scan::{
         FuncScanner,
@@ -79,10 +81,12 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, S, F> FiniteStream for Map<R, S, F> where R: FiniteStream {}
 
 pin_project! {
     /// Stream wrapper that maps the samples using an intermediate buffer.
@@ -134,10 +138,12 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, F> FiniteStream for MapInPlace<R, F> where R: FiniteStream {}
 
 pin_project! {
     #[derive(Clone, Copy, Debug)]
@@ -282,7 +288,9 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, S, F> FiniteStream for MapInPlacePod<R, S, F> where R: FiniteStream {}

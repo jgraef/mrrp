@@ -16,6 +16,7 @@ use tracing::Span;
 
 use crate::{
     buf::{
+        SampleBuf,
         SampleBufMut,
         UninitSlice,
     },
@@ -25,8 +26,11 @@ use crate::{
     },
     io::{
         AsyncWriteSamples,
+        FiniteStream,
         Forward,
         GetSampleRate,
+        Remaining,
+        StreamLength,
         combinators::{
             Buffered,
             Chained,
@@ -38,6 +42,7 @@ use crate::{
             MapErr,
             MapInPlace,
             MapInPlacePod,
+            Repeated,
             ScanInPlaceWith,
             ScanWith,
             Scanner,
@@ -176,6 +181,8 @@ impl<'a, S> ReadBuf<'a, S> {
     where
         S: Clone,
     {
+        assert!(samples.len() + self.filled <= self.buffer.len());
+
         unsafe {
             self.buffer[self.filled..(self.filled + samples.len()).min(self.initialized)]
                 .assume_init_drop();
@@ -218,7 +225,7 @@ impl<'a, S> SampleBufMut<S> for ReadBuf<'a, S> {
 /// except it works with arbitrary sample types instead of single bytes.
 ///
 /// [1]: https://docs.rs/futures/latest/futures/io/trait.AsyncRead.html
-pub trait AsyncReadSamples<S> {
+pub trait AsyncReadSamples<S>: StreamLength {
     /// Error that might occur when reading the IQ stream.
     type Error: std::error::Error;
 
@@ -310,7 +317,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     #[inline]
     fn read_to_end<'a>(&'a mut self, buffer: &'a mut Vec<S>) -> ReadToEnd<'a, Self, S>
     where
-        Self: Unpin,
+        Self: Unpin + FiniteStream,
     {
         ReadToEnd {
             read_samples: self,
@@ -535,6 +542,21 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     {
         ZipWith::new(self, other, scanner)
     }
+
+    /// Repeats a stream indefinitely.
+    ///
+    /// Refer to [`Repeated`] about memory usage.
+    ///
+    /// In order to avoid memory exhaustion, this is only implemented for finite
+    /// streams. You can work around this by creating the [`Repeated`] yourself
+    /// though.
+    #[inline]
+    fn repeat(self) -> Repeated<Self, S>
+    where
+        Self: Sized + FiniteStream,
+    {
+        Repeated::new(self)
+    }
 }
 
 impl<R, S> AsyncReadSamplesExt<S> for R where R: AsyncReadSamples<S> + ?Sized {}
@@ -552,8 +574,6 @@ where
 impl<'a, R, S> Future for ReadSample<'a, R, S>
 where
     R: AsyncReadSamples<S> + Unpin + ?Sized,
-    // todo: remove this bound
-    S: Default,
 {
     type Output = Result<S, EofError<R::Error>>;
 
@@ -671,19 +691,27 @@ impl<'a, 'b, R, S> Future for ReadToEnd<'a, R, S>
 where
     R: AsyncReadSamples<S> + Unpin + ?Sized,
 {
-    type Output = Result<(), EofError<R::Error>>;
+    type Output = Result<(), R::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
             let this = &mut *self;
             let filled_before = this.buffer.len();
 
+            let size_hint = this.read_samples.size_hint();
+            if let Some(upper_bound) = size_hint.upper_bound {
+                this.buffer.reserve_exact(upper_bound);
+            }
+            else {
+                this.buffer.reserve(size_hint.lower_bound);
+            }
+
             match this.buffer.with_read_buf(|read_buf| {
                 Pin::new(&mut this.read_samples).poll_read_samples(cx, read_buf)
             }) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(error)) => {
-                    return Poll::Ready(Err(EofError::Other(error)));
+                    return Poll::Ready(Err(error));
                 }
                 Poll::Ready(Ok(())) => {
                     if this.buffer.len() == filled_before {
@@ -729,6 +757,13 @@ where
     }
 }
 
+impl<S> StreamLength for Repeat<S> {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Infinite
+    }
+}
+
 #[inline]
 pub fn repeat<S>(sample: S) -> Repeat<S> {
     Repeat { sample }
@@ -746,6 +781,13 @@ impl<S> AsyncReadSamples<S> for NullSource {
         _buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
         Poll::Pending
+    }
+}
+
+impl StreamLength for NullSource {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Finite { num_samples: 0 }
     }
 }
 
@@ -775,6 +817,13 @@ where
     }
 }
 
+impl<S> StreamLength for Silence<S> {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Infinite
+    }
+}
+
 #[inline]
 pub fn silence<S>() -> Silence<S>
 where
@@ -784,6 +833,58 @@ where
         _phantom: PhantomData,
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+pub struct Cursor<B, S> {
+    buffer: B,
+    _phantom: PhantomData<fn() -> S>,
+}
+
+impl<B, S> Cursor<B, S>
+where
+    B: SampleBuf<S>,
+{
+    pub fn new(buffer: B) -> Self {
+        Self {
+            buffer,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<B, S> AsyncReadSamples<S> for Cursor<B, S>
+where
+    B: SampleBuf<S> + Unpin,
+    S: Clone,
+{
+    type Error = Infallible;
+
+    fn poll_read_samples(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<S>,
+    ) -> Poll<Result<(), Self::Error>> {
+        let chunk = self.buffer.chunk();
+        let n = buffer.remaining_mut().min(chunk.len());
+        buffer.put_slice(&chunk[..n]);
+        self.buffer.advance(n);
+
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<B, S> StreamLength for Cursor<B, S>
+where
+    B: SampleBuf<S>,
+{
+    fn remaining(&self) -> Remaining {
+        Remaining::Finite {
+            num_samples: self.buffer.remaining(),
+        }
+    }
+}
+
+impl<B, S> FiniteStream for Cursor<B, S> {}
 
 /// Helper to check if a value implements [`AsyncReadSamples`]
 pub fn assert_async_read<T, S>(_: &T)

@@ -16,8 +16,10 @@ use crate::{
     buf::SampleBufMut,
     io::{
         AsyncReadSamples,
+        FiniteStream,
         GetSampleRate,
         ReadBuf,
+        Remaining,
         StreamLength,
     },
 };
@@ -120,11 +122,16 @@ impl<R, S> StreamLength for WavSource<R, S>
 where
     R: std::io::Read,
 {
-    fn remaining(&self) -> usize {
-        usize::try_from(self.inner.len()).unwrap() / usize::from(self.spec.channels)
-            - self.num_samples_read
+    fn remaining(&self) -> Remaining {
+        Remaining::Finite {
+            num_samples: usize::try_from(self.inner.len()).unwrap()
+                / usize::from(self.spec.channels)
+                - self.num_samples_read,
+        }
     }
 }
+
+impl<R, S> FiniteStream for WavSource<R, S> where R: std::io::Read {}
 
 pub trait FromWavSamples: Sized {
     type WavSample: hound::Sample;

@@ -25,6 +25,8 @@ use crate::{
         AsyncWriteSamplesExt,
         GetSampleRate,
         ReadBuf,
+        Remaining,
+        StreamLength,
     },
 };
 
@@ -110,6 +112,13 @@ where
     #[inline]
     fn sample_rate(&self) -> f32 {
         self.stream.sample_rate()
+    }
+}
+
+impl<T, C, S, E> StreamLength for ChunkStreamReadSamples<T, C, S, E> {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Unknown
     }
 }
 

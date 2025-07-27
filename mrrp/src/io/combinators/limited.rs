@@ -10,13 +10,16 @@ use pin_project_lite::pin_project;
 
 use crate::io::{
     AsyncReadSamples,
+    FiniteStream,
     GetSampleRate,
     ReadBuf,
+    Remaining,
+    SizeHint,
     StreamLength,
 };
 
 pin_project! {
-    #[derive(Debug)]
+    #[derive(Clone, Copy, Debug)]
     pub struct Limited<R> {
         #[pin]
         inner: R,
@@ -83,8 +86,24 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
-        let inner = self.inner.remaining();
-        inner.min(self.remaining)
+    fn remaining(&self) -> Remaining {
+        self.inner.remaining().min(Remaining::Finite {
+            num_samples: self.remaining,
+        })
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        let inner = self.inner.size_hint();
+        SizeHint {
+            lower_bound: inner.lower_bound.min(self.remaining),
+            upper_bound: Some(
+                inner
+                    .upper_bound
+                    .map_or(self.remaining, |inner| inner.min(self.remaining)),
+            ),
+        }
     }
 }
+
+impl<R> FiniteStream for Limited<R> {}

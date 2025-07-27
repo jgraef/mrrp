@@ -10,8 +10,10 @@ use pin_project_lite::pin_project;
 
 use crate::io::{
     AsyncReadSamples,
+    FiniteStream,
     GetSampleRate,
     ReadBuf,
+    Remaining,
     StreamLength,
 };
 
@@ -68,7 +70,9 @@ where
     R: StreamLength,
 {
     #[inline]
-    fn remaining(&self) -> usize {
+    fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
 }
+
+impl<R, F> FiniteStream for MapErr<R, F> where R: FiniteStream {}

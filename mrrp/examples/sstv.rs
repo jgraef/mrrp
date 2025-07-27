@@ -112,7 +112,7 @@ async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Resu
     //let source = WavSource::<_, f32>::from_path("tmp/Martin_1.wav")?;
     let source = WavSource::<_, Complex<f32>>::from_path(input)?;
     let sample_rate = source.sample_rate();
-    let num_samples = source.remaining();
+    let num_samples = source.len();
 
     println!("source sample rate: {sample_rate}");
     println!("source num samples: {num_samples}");
