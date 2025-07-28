@@ -11,10 +11,17 @@ use color_eyre::eyre::Error;
 use image::{
     ImageReader,
     RgbImage,
+    imageops::FilterType,
 };
 use mrrp::{
     filter::{
         GoertzelFilter,
+        design::{
+            FilterDesign,
+            Lowpass,
+            Normalize,
+            pm_remez::pm_remez,
+        },
         resampling::AverageDecimate,
     },
     io::{
@@ -28,6 +35,7 @@ use mrrp::{
             Scanner,
             ScannerExt,
         },
+        silence,
     },
     modem::{
         fm,
@@ -36,6 +44,8 @@ use mrrp::{
             HEADER_LEADER_TONE,
             HEADER_VIS_HIGH_TONE,
             HEADER_VIS_LOW_TONE,
+            LINE_PORCH_TONE,
+            LINE_SYNC_TONE,
             ModeSpecification,
             SstvEncoder,
         },
@@ -56,6 +66,7 @@ use plotters::{
     series::LineSeries,
     style::{
         BLUE,
+        GREEN,
         RED,
         RGBColor,
         WHITE,
@@ -102,13 +113,32 @@ async fn encode_image(
     output: impl AsRef<Path>,
     sample_rate: f32,
 ) -> Result<(), Error> {
-    let image = ImageReader::open(image)?.decode()?.into_rgb8();
-    let stream = SstvEncoder::new(image, ModeSpecification::M2, sample_rate);
-    write_stream_to_wav(output, stream).await?;
+    let mut mode = ModeSpecification::M2;
+    mode.num_lines = 8;
+    mode.pixels_per_line = 8;
+
+    let image = ImageReader::open(image)?.decode()?;
+    let image = image.resize_exact(8, 8, FilterType::Gaussian);
+    let image = image.into_rgb8();
+
+    // encode the image
+    let stream = SstvEncoder::new(image, mode, sample_rate);
+
+    // prepend and append 1s of silence
+    let silence = silence().with_sample_rate(sample_rate).limit_by_time(0.2);
+    let stream = silence.clone().chain(stream).chain(silence);
+
+    let lowpass = pm_remez(
+        Lowpass::new(2000.0, 100.0, 0.05, 0.01).normalize(sample_rate),
+        31,
+    )?
+    .fir_filter();
+
+    write_stream_to_wav(output, stream.scan_in_place_with(lowpass)).await?;
     Ok(())
 }
 
-async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<(), Error> {
+async fn decode_image(input: impl AsRef<Path>, _output: impl AsRef<Path>) -> Result<(), Error> {
     //let source = WavSource::<_, f32>::from_path("tmp/Martin_1.wav")?;
     let source = WavSource::<_, Complex<f32>>::from_path(input)?;
     let sample_rate = source.sample_rate();
@@ -155,13 +185,15 @@ async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Resu
         GoertzelFilter::new(sample_rate, HEADER_LEADER_TONE - frequency_shift, 100.0).map(norm);
     let mut sync_detect =
         GoertzelFilter::new(sample_rate, LINE_SYNC_TONE - frequency_shift, 100.0).map(norm);
+    let mut porch_detect =
+        GoertzelFilter::new(sample_rate, LINE_PORCH_TONE - frequency_shift, 100.0).map(norm);
     let mut vis_low =
         GoertzelFilter::new(sample_rate, HEADER_VIS_LOW_TONE - frequency_shift, 100.0).map(norm);
     let mut vis_high =
         GoertzelFilter::new(sample_rate, HEADER_VIS_HIGH_TONE - frequency_shift, 100.0).map(norm);
-    let mut fm_demod = fm::DifferentiateAndAccessPhase::new(sample_rate, 2000.0);
+    let mut fm_demod = fm::DifferentiateAndAccessPhase::new(sample_rate, 1.0);
 
-    let mut max_detect = 0.0f32;
+    let mut max_detect = [0.0f32; 6];
     let mut tone_detect = source
         //.convert::<Complex<f32>>()
         //.scan_with(lowpass.chain(fm::AccessPhaseAndDifferentiate::new(sample_rate, 1.0)));
@@ -170,13 +202,14 @@ async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Resu
             let detect = [
                 leader_detect.scan(sample),
                 sync_detect.scan(sample),
+                porch_detect.scan(sample),
                 vis_low.scan(sample),
                 vis_high.scan(sample),
                 fm_demod.scan(sample),
             ];
-            for x in &detect {
-                if *x > max_detect {
-                    max_detect = *x;
+            for (x, max) in detect.iter().zip(max_detect.iter_mut()) {
+                if *x > *max {
+                    *max = *x;
                 }
             }
             detect
@@ -186,10 +219,11 @@ async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Resu
     tone_detect.read_to_end(&mut tones).await?;
     let t_start = -0.05f32;
     let t_end = num_samples as f32 / sample_rate + 0.05;
+    max_detect[5] = 2000.0;
 
     let root = BitMapBackend::new("sstv_freq.png", (1080, 1080)).into_drawing_area();
     root.fill(&WHITE)?;
-    let drawing_areas = root.split_evenly((5, 1));
+    let drawing_areas = root.split_evenly((6, 1));
 
     let draw_series = |label, color, index| {
         let mut chart = ChartBuilder::on(&drawing_areas[index])
@@ -197,7 +231,7 @@ async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Resu
             .caption(label, ("sans-serif", 20))
             .set_label_area_size(LabelAreaPosition::Left, 60)
             .set_label_area_size(LabelAreaPosition::Bottom, 40)
-            .build_cartesian_2d(t_start..t_end, -0.2f32..max_detect * 1.2)?;
+            .build_cartesian_2d(t_start..t_end, -0.2f32..max_detect[index] * 1.2)?;
         chart
             .configure_mesh()
             .disable_mesh()
@@ -214,11 +248,12 @@ async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Resu
         Ok::<(), color_eyre::eyre::Error>(())
     };
 
-    draw_series("Frequency", RED, 4)?;
-    draw_series("Leader", RED, 0)?;
-    draw_series("Sync", BLUE, 1)?;
-    draw_series("Vis Low", RGBColor(0, 128, 0), 2)?;
-    draw_series("Vis High", RGBColor(0, 255, 0), 3)?;
+    draw_series("Leader (1900 Hz)", RED, 0)?;
+    draw_series("Sync (1200 Hz)", BLUE, 1)?;
+    draw_series("Porch (1500 Hz)", RGBColor(0, 0, 128), 2)?;
+    draw_series("Vis Low (1300 Hz)", RGBColor(0, 128, 0), 3)?;
+    draw_series("Vis High (1100 Hz)", GREEN, 4)?;
+    draw_series("Frequency", RED, 5)?;
 
     root.present()?;
     Ok(())
@@ -384,9 +419,8 @@ fn is_tone(frequency: f32, tone: f32) -> bool {
 
 const TONE_TOLERANCE: f32 = 50.0;
 
-const LINE_SYNC_TONE: f32 = 1200.0;
 const LINE_SYNC_TIME: f32 = 0.004862;
-const LINE_BREAK_TONE: f32 = 1500.0;
+
 const LINE_BREAK_TIME: f32 = 0.000572;
 const LINE_LUM_LOW_TONE: f32 = 1500.0;
 const LINE_LUM_HIGH_TONE: f32 = 2300.0;

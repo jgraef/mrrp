@@ -4,10 +4,7 @@ pub mod fir;
 pub mod resampling;
 
 use std::{
-    f32::consts::{
-        PI,
-        TAU,
-    },
+    f32::consts::TAU,
     fmt::Debug,
 };
 
@@ -132,7 +129,7 @@ impl GoertzelFilter {
             i: 0,
             n,
             y: Default::default(),
-            norm: 1.0 / PI, //TAU * filter_bandwidth / filter_frequency,
+            norm: 1.0, //TAU * filter_bandwidth / filter_frequency,
         }
     }
 }

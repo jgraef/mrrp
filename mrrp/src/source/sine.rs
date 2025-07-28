@@ -21,6 +21,7 @@ pub struct SineWave {
 }
 
 impl SineWave {
+    #[inline]
     pub fn new(frequency: f32, sample_rate: f32) -> Self {
         Self {
             frequency,
@@ -30,11 +31,23 @@ impl SineWave {
         }
     }
 
+    #[inline]
     pub fn with_phase(mut self, phase: f32) -> Self {
         self.phase = phase;
         self
     }
 
+    #[inline]
+    pub fn phase(&self) -> f32 {
+        self.phase
+    }
+
+    #[inline]
+    pub fn set_phase(&mut self, phase: f32) {
+        self.phase = phase
+    }
+
+    #[inline]
     pub fn set_frequency(&mut self, frequency: f32) {
         self.step = step_from_frequency_and_sample_rate(frequency, self.sample_rate);
     }
@@ -43,6 +56,7 @@ impl SineWave {
 impl SignalGenerator for SineWave {
     type Sample = f32;
 
+    #[inline]
     fn set_sample_rate(&mut self, sample_rate: f32) {
         self.step = step_from_frequency_and_sample_rate(self.frequency, sample_rate);
     }
@@ -73,6 +87,7 @@ pub struct ComplexSinusoid {
 }
 
 impl ComplexSinusoid {
+    #[inline]
     pub fn new(frequency: f32, sample_rate: f32) -> Self {
         Self {
             frequency,
@@ -82,11 +97,23 @@ impl ComplexSinusoid {
         }
     }
 
+    #[inline]
     pub fn with_phase(mut self, phase: f32) -> Self {
-        self.phase = phase;
+        self.set_phase(phase);
         self
     }
 
+    #[inline]
+    pub fn phase(&self) -> f32 {
+        self.phase
+    }
+
+    #[inline]
+    pub fn set_phase(&mut self, phase: f32) {
+        self.phase = phase
+    }
+
+    #[inline]
     pub fn set_frequency(&mut self, frequency: f32) {
         self.step = step_from_frequency_and_sample_rate(frequency, self.sample_rate);
     }
@@ -95,6 +122,7 @@ impl ComplexSinusoid {
 impl SignalGenerator for ComplexSinusoid {
     type Sample = Complex<f32>;
 
+    #[inline]
     fn set_sample_rate(&mut self, sample_rate: f32) {
         self.step = step_from_frequency_and_sample_rate(self.frequency, sample_rate);
     }
