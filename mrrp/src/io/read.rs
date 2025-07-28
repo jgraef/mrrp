@@ -198,6 +198,7 @@ impl<'a, S> ReadBuf<'a, S> {
         unsafe {
             self.buffer[self.filled..self.initialized].assume_init_drop();
         }
+        self.initialized = self.filled;
     }
 }
 
@@ -534,11 +535,11 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     }
 
     #[inline]
-    fn zip_with<T, Q, Sc>(self, other: T, scanner: Sc) -> ZipWith<Self, T, Sc>
+    fn zip_with<R, T, Sc>(self, other: R, scanner: Sc) -> ZipWith<Self, R, S, T, Sc>
     where
         Self: Sized,
-        T: AsyncReadSamples<Q> + Sized,
-        Sc: Scanner<(S, Q)>,
+        R: AsyncReadSamples<T> + Sized,
+        Sc: Scanner<(S, T)>,
     {
         ZipWith::new(self, other, scanner)
     }
@@ -837,10 +838,80 @@ where
 #[derive(Clone, Copy, Debug)]
 pub struct Cursor<B, S> {
     buffer: B,
+    position: usize,
     _phantom: PhantomData<fn() -> S>,
 }
 
 impl<B, S> Cursor<B, S>
+where
+    B: AsRef<[S]>,
+{
+    pub fn new(buffer: B) -> Self {
+        Self {
+            buffer,
+            position: 0,
+            _phantom: PhantomData,
+        }
+    }
+
+    pub fn position(&self) -> usize {
+        self.position
+    }
+
+    pub fn set_position(&mut self, position: usize) {
+        assert!(position <= self.buffer.as_ref().len());
+    }
+
+    pub fn data(&self) -> &B {
+        &self.buffer
+    }
+
+    pub fn data_mut(&mut self) -> &mut B {
+        &mut self.buffer
+    }
+}
+
+impl<B, S> AsyncReadSamples<S> for Cursor<B, S>
+where
+    B: AsRef<[S]> + Unpin,
+    S: Clone,
+{
+    type Error = Infallible;
+
+    fn poll_read_samples(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<S>,
+    ) -> Poll<Result<(), Self::Error>> {
+        let chunk = &self.buffer.as_ref()[self.position..];
+        let n = buffer.remaining_mut().min(chunk.len());
+        buffer.put_slice(&chunk[..n]);
+        self.position += n;
+
+        Poll::Ready(Ok(()))
+    }
+}
+
+impl<B, S> StreamLength for Cursor<B, S>
+where
+    B: AsRef<[S]>,
+{
+    fn remaining(&self) -> Remaining {
+        Remaining::Finite {
+            num_samples: self.buffer.as_ref().len() - self.position,
+        }
+    }
+}
+
+impl<B, S> FiniteStream for Cursor<B, S> {}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BufSource<B, S> {
+    buffer: B,
+    _phantom: PhantomData<fn() -> S>,
+}
+
+impl<B, S> BufSource<B, S>
 where
     B: SampleBuf<S>,
 {
@@ -852,7 +923,7 @@ where
     }
 }
 
-impl<B, S> AsyncReadSamples<S> for Cursor<B, S>
+impl<B, S> AsyncReadSamples<S> for BufSource<B, S>
 where
     B: SampleBuf<S> + Unpin,
     S: Clone,
@@ -873,7 +944,7 @@ where
     }
 }
 
-impl<B, S> StreamLength for Cursor<B, S>
+impl<B, S> StreamLength for BufSource<B, S>
 where
     B: SampleBuf<S>,
 {
@@ -884,7 +955,7 @@ where
     }
 }
 
-impl<B, S> FiniteStream for Cursor<B, S> {}
+impl<B, S> FiniteStream for BufSource<B, S> {}
 
 /// Helper to check if a value implements [`AsyncReadSamples`]
 pub fn assert_async_read<T, S>(_: &T)

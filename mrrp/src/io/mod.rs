@@ -4,11 +4,15 @@ pub mod test;
 mod write;
 
 use std::{
-    ops::Add,
+    ops::{
+        Add,
+        RangeBounds,
+    },
     pin::Pin,
     task::{
         Context,
         Poll,
+        ready,
     },
 };
 
@@ -18,7 +22,10 @@ pub use self::{
     read::*,
     write::*,
 };
-use crate::buf::UninitSlice;
+use crate::{
+    buf::UninitSlice,
+    util::slice_bounds,
+};
 
 pub trait GetSampleRate {
     fn sample_rate(&self) -> f32;
@@ -180,6 +187,18 @@ impl Add<Self> for Remaining {
     }
 }
 
+impl PartialEq<Self> for Remaining {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Infinite, Self::Infinite) => true,
+            (Self::Finite { num_samples: left }, Self::Finite { num_samples: right }) => {
+                left == right
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct SizeHint {
     pub lower_bound: usize,
@@ -313,12 +332,106 @@ struct Buffer<S> {
     write_pos: usize,
 }
 
+impl<S> Default for Buffer<S> {
+    #[inline]
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
 impl<S> Buffer<S> {
+    #[inline]
     pub fn new(buffer_size: usize) -> Self {
         Self {
             buffer: UninitSlice::box_new(buffer_size),
             read_pos: 0,
             write_pos: 0,
+        }
+    }
+
+    #[inline]
+    pub fn grow(&mut self, new_size: usize) {
+        if new_size > self.buffer.len() {
+            self.resize(new_size);
+        }
+    }
+
+    pub fn resize(&mut self, new_size: usize) {
+        let mut buffer = UninitSlice::box_new(new_size);
+
+        let mut read_pos = self.read_pos.min(new_size);
+        let mut write_pos = self.write_pos.min(new_size);
+
+        buffer[self.read_pos..self.write_pos].copy_from_uninit(&self.buffer[read_pos..write_pos]);
+
+        unsafe {
+            self.buffer[write_pos..self.write_pos].assume_init_drop();
+        }
+
+        if read_pos == write_pos {
+            read_pos = 0;
+            write_pos = 0;
+        }
+
+        self.read_pos = read_pos;
+        self.write_pos = write_pos;
+        self.buffer = buffer;
+    }
+
+    pub fn read(&mut self, buffer: &mut ReadBuf<S>) -> usize {
+        let n = buffer.remaining().min(self.write_pos - self.read_pos);
+
+        buffer.unfilled_mut()[..n].copy_from_uninit(&self.buffer[self.read_pos..][..n]);
+
+        unsafe {
+            buffer.assume_init(n);
+        }
+        buffer.set_filled(buffer.filled().len() + n);
+
+        self.read_pos += n;
+        if self.read_pos == self.write_pos {
+            self.read_pos = 0;
+            self.write_pos = 0;
+        }
+
+        n
+    }
+
+    #[inline]
+    pub fn remaining(&self) -> usize {
+        self.write_pos - self.read_pos
+    }
+
+    pub fn poll_fill<R>(
+        &mut self,
+        cx: &mut Context<'_>,
+        stream: Pin<&mut R>,
+    ) -> Poll<Result<usize, R::Error>>
+    where
+        R: AsyncReadSamples<S>,
+    {
+        if self.read_pos == 0 && self.write_pos == 0 {
+            let mut read_buf = ReadBuf::uninit(&mut self.buffer);
+
+            ready!(stream.poll_read_samples(cx, &mut read_buf))?;
+            self.write_pos = read_buf.filled().len();
+            unsafe {
+                read_buf.drop_unfilled_initialized();
+            }
+
+            Poll::Ready(Ok(self.write_pos))
+        }
+        else {
+            debug_assert!(self.read_pos < self.write_pos);
+            Poll::Ready(Ok(self.write_pos - self.read_pos))
+        }
+    }
+
+    pub fn drain(&mut self, num_samples: usize) -> BufferDrain<'_, S> {
+        let remaining = num_samples.min(self.write_pos - self.read_pos);
+        BufferDrain {
+            buffer: self,
+            remaining,
         }
     }
 }
@@ -346,6 +459,41 @@ impl<S> Drop for Buffer<S> {
         // everything in read_pos..write_pos is initialized, so we need to drop it
         unsafe {
             self.buffer[self.read_pos..self.write_pos].assume_init_drop();
+        }
+    }
+}
+
+struct BufferDrain<'a, S> {
+    buffer: &'a mut Buffer<S>,
+    remaining: usize,
+}
+
+impl<'a, S> Drop for BufferDrain<'a, S> {
+    fn drop(&mut self) {
+        unsafe {
+            self.buffer.buffer[self.buffer.read_pos..][..self.remaining].assume_init_drop();
+        }
+        self.buffer.read_pos += self.remaining;
+        if self.buffer.read_pos == self.buffer.write_pos {
+            self.buffer.read_pos = 0;
+            self.buffer.write_pos = 0;
+        }
+    }
+}
+
+impl<'a, S> Iterator for BufferDrain<'a, S> {
+    type Item = S;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.remaining > 0 {
+            debug_assert!(self.buffer.read_pos < self.buffer.write_pos);
+            let sample = unsafe { self.buffer.buffer[self.buffer.read_pos].assume_init_read() };
+            self.buffer.read_pos += 1;
+            self.remaining -= 1;
+            Some(sample)
+        }
+        else {
+            None
         }
     }
 }

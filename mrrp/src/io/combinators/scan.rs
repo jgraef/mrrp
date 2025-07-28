@@ -55,17 +55,17 @@ impl<R, S, Sc> ScanWith<R, S, Sc> {
     }
 }
 
-impl<R, S, Q, Sc> AsyncReadSamples<Q> for ScanWith<R, S, Sc>
+impl<R, S, Sc> AsyncReadSamples<Sc::Output> for ScanWith<R, S, Sc>
 where
     R: AsyncReadSamples<S>,
-    Sc: Scanner<S, Output = Q>,
+    Sc: Scanner<S>,
 {
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<Q>,
+        buffer: &mut ReadBuf<Sc::Output>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
 

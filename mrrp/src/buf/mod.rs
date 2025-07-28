@@ -450,20 +450,7 @@ fn slice_bounds(
     range: impl RangeBounds<usize>,
     length: usize,
 ) -> Result<(usize, usize), IndexOutOfBounds> {
-    let start = range.start_bound().cloned();
-    let end = range.end_bound().cloned();
-
-    let start = match start {
-        Bound::Included(start) => start,
-        Bound::Excluded(start) => start + 1,
-        Bound::Unbounded => 0,
-    };
-
-    let end = match end {
-        Bound::Included(end) => end + 1,
-        Bound::Excluded(end) => end,
-        Bound::Unbounded => length,
-    };
+    let (start, end) = crate::util::slice_bounds(range, 0, length);
 
     if start > length {
         Err(IndexOutOfBounds {

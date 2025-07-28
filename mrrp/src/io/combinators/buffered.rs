@@ -28,6 +28,7 @@ pin_project! {
 }
 
 impl<R, S> Buffered<R, S> {
+    #[inline]
     pub fn new(inner: R, buffer_size: usize) -> Self {
         Self {
             inner,
@@ -51,29 +52,14 @@ where
         let mut have_filled_buf = false;
 
         while buffer.remaining() > 0 {
-            let mut this = self.as_mut().project();
+            let this = self.as_mut().project();
 
             if this.buffer.read_pos < this.buffer.write_pos {
                 // we still have data buffered, so lets cosume that first.
 
-                let n = buffer
-                    .remaining()
-                    .min(this.buffer.write_pos - this.buffer.read_pos);
-
-                buffer.unfilled_mut()[..n]
-                    .copy_from_uninit(&this.buffer.buffer[this.buffer.read_pos..][..n]);
-
-                unsafe {
-                    buffer.assume_init(n);
-                }
-                buffer.set_filled(buffer.filled().len() + n);
+                let num_samples = this.buffer.read(buffer);
+                assert!(num_samples != 0);
                 have_filled_buf = true;
-
-                this.buffer.read_pos += n;
-                if this.buffer.read_pos == this.buffer.write_pos {
-                    this.buffer.read_pos = 0;
-                    this.buffer.write_pos = 0;
-                }
             }
             else {
                 if inner_is_pending {
@@ -86,24 +72,14 @@ where
                     assert_eq!(this.buffer.read_pos, 0);
                     assert_eq!(this.buffer.write_pos, 0);
 
-                    let mut read_buf = ReadBuf::uninit(&mut this.buffer.buffer);
-
-                    match this.inner.as_mut().poll_read_samples(cx, &mut read_buf) {
+                    match this.buffer.poll_fill(cx, this.inner) {
                         Poll::Pending => {
                             inner_is_pending = true;
-                            // note that we can't break out of the outer loop, since we
-                            // might have read something into our buffer in the last
-                            // interation of this inner loop.
                             break;
                         }
                         Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-                        Poll::Ready(Ok(())) => {
-                            this.buffer.write_pos = read_buf.filled().len();
-                            unsafe {
-                                read_buf.drop_unfilled_initialized();
-                            }
-
-                            if this.buffer.write_pos == 0 {
+                        Poll::Ready(Ok(num_samples)) => {
+                            if num_samples == 0 {
                                 // the read_buf wasn't filled with any bytes, so this is an eof.
                                 break;
                             }
@@ -167,3 +143,146 @@ where
 }
 
 impl<R, S> FiniteStream for Buffered<R, S> where R: FiniteStream {}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::FutureExt;
+
+    use crate::io::{
+        AsyncReadSamplesExt,
+        Cursor,
+    };
+
+    #[test]
+    fn it_reads_straight_to_destination_buffer() {
+        let samples = (0..100).collect::<Vec<_>>();
+        let mut buffered = Cursor::new(&samples[..]).buffered(50);
+        let mut destination = vec![0; 70];
+
+        // since the destination buffer is larger than the internal buffer this should
+        // read straight to the destination buffer
+        buffered
+            .read_samples(&mut destination[..])
+            .now_or_never()
+            .expect("pending")
+            .unwrap();
+
+        assert_eq!(buffered.inner.position(), 70);
+        assert_eq!(buffered.buffer.read_pos, 0);
+        assert_eq!(buffered.buffer.write_pos, 0);
+        destination
+            .iter()
+            .enumerate()
+            .for_each(|(i, sample)| assert_eq!(samples[i], *sample));
+    }
+
+    #[test]
+    fn it_buffers_if_necessary() {
+        let samples = (0..100).collect::<Vec<_>>();
+        let mut buffered = Cursor::new(&samples[..]).buffered(50);
+        let mut destination = vec![0; 20];
+
+        // since the destination buffer is smaller than the internal buffer this should
+        // read first into the internal buffer
+        buffered
+            .read_samples(&mut destination[..])
+            .now_or_never()
+            .expect("pending")
+            .unwrap();
+
+        assert_eq!(buffered.inner.position(), 50);
+        assert_eq!(buffered.buffer.read_pos, 20);
+        assert_eq!(buffered.buffer.write_pos, 50);
+        destination
+            .iter()
+            .enumerate()
+            .for_each(|(i, sample)| assert_eq!(samples[i], *sample));
+    }
+
+    #[test]
+    fn successive_reads_will_be_served_by_the_buffer() {
+        let samples = (0..100).collect::<Vec<_>>();
+        let mut buffered = Cursor::new(&samples[..]).buffered(50);
+        let mut destination = vec![0; 10];
+
+        for i in 0..4 {
+            buffered
+                .read_samples(&mut destination[..])
+                .now_or_never()
+                .expect("pending")
+                .unwrap();
+            assert_eq!(buffered.inner.position(), 50);
+            assert_eq!(buffered.buffer.read_pos, (i + 1) * 10);
+            assert_eq!(buffered.buffer.write_pos, 50);
+            destination
+                .iter()
+                .enumerate()
+                .for_each(|(j, sample)| assert_eq!(samples[i * 10 + j], *sample));
+        }
+
+        // the last read will drain the buffer, resetting the pointers
+        buffered
+            .read_samples(&mut destination[..])
+            .now_or_never()
+            .expect("pending")
+            .unwrap();
+        assert_eq!(buffered.buffer.read_pos, 0);
+        assert_eq!(buffered.buffer.write_pos, 0);
+        destination
+            .iter()
+            .enumerate()
+            .for_each(|(i, sample)| assert_eq!(samples[40 + i], *sample));
+
+        // the next read will fill the buffer again
+        buffered
+            .read_samples(&mut destination[..])
+            .now_or_never()
+            .expect("pending")
+            .unwrap();
+        assert_eq!(buffered.inner.position(), 100);
+        assert_eq!(buffered.buffer.read_pos, 10);
+        assert_eq!(buffered.buffer.write_pos, 50);
+        destination
+            .iter()
+            .enumerate()
+            .for_each(|(i, sample)| assert_eq!(samples[50 + i], *sample));
+    }
+
+    #[test]
+    fn it_reads_if_the_buffer_has_only_partial_data() {
+        let samples = (0..100).collect::<Vec<_>>();
+        let mut buffered = Cursor::new(&samples[..]).buffered(50);
+        let mut destination = vec![0; 50];
+
+        // first do a small read to fill the buffer
+        buffered
+            .read_samples(&mut destination[..10])
+            .now_or_never()
+            .expect("pending")
+            .unwrap();
+
+        assert_eq!(buffered.inner.position(), 50);
+        assert_eq!(buffered.buffer.read_pos, 10);
+        assert_eq!(buffered.buffer.write_pos, 50);
+        destination[..10]
+            .iter()
+            .enumerate()
+            .for_each(|(i, sample)| assert_eq!(samples[i], *sample));
+
+        // now do a larger read that can't be completely filled by the buffer.
+        let num_samples_read = buffered
+            .read_samples(&mut destination[..])
+            .now_or_never()
+            .expect("pending")
+            .unwrap();
+
+        assert_eq!(num_samples_read, 50);
+        assert_eq!(buffered.inner.position(), 100);
+        assert_eq!(buffered.buffer.read_pos, 10);
+        assert_eq!(buffered.buffer.write_pos, 50);
+        destination
+            .iter()
+            .enumerate()
+            .for_each(|(i, sample)| assert_eq!(samples[10 + i], *sample));
+    }
+}
