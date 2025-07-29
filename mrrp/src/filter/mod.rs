@@ -4,11 +4,18 @@ pub mod fir;
 pub mod resampling;
 
 use std::{
+    collections::VecDeque,
     f32::consts::TAU,
     fmt::Debug,
+    ops::{
+        AddAssign,
+        Mul,
+        SubAssign,
+    },
 };
 
 use num_complex::Complex;
+use num_traits::Zero;
 
 use crate::{
     filter::{
@@ -150,5 +157,47 @@ impl Scanner<Complex<f32>> for GoertzelFilter {
             self.s = Default::default();
         }
         self.y * self.norm
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MovingAverage<S> {
+    length: usize,
+    norm: f32,
+    sum: S,
+    delay: VecDeque<S>,
+}
+
+impl<S> MovingAverage<S>
+where
+    S: Zero,
+{
+    pub fn new(length: usize) -> Self {
+        assert!(length > 0);
+        Self {
+            length,
+            norm: 1.0 / (length as f32),
+            sum: Zero::zero(),
+            delay: VecDeque::with_capacity(length),
+        }
+    }
+}
+
+impl<S> Scanner<S> for MovingAverage<S>
+where
+    S: Copy + AddAssign<S> + SubAssign<S> + Mul<f32, Output = S>,
+{
+    type Output = S;
+
+    fn scan(&mut self, sample: S) -> Self::Output {
+        self.sum += sample;
+
+        if self.delay.len() == self.length {
+            let old = self.delay.pop_front().unwrap();
+            self.sum -= old;
+        }
+        self.delay.push_back(sample);
+
+        self.sum * self.norm
     }
 }

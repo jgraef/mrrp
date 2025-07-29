@@ -81,10 +81,15 @@ pub struct DifferentiateAndDivide {
 
 impl DifferentiateAndDivide {
     pub fn new(sample_rate: f32, frequency_deviation: f32) -> Self {
+        let norm_factor = sample_rate / (TAU * frequency_deviation);
+
+        // for whatever reason this seems to be off by a factor of 2
+        let norm_factor = 0.5 * norm_factor;
+
         Self {
             delay1: Complex::zero(),
             delay2: Complex::zero(),
-            norm_factor: sample_rate / (TAU * frequency_deviation),
+            norm_factor,
         }
     }
 }

@@ -4,10 +4,7 @@ pub mod test;
 mod write;
 
 use std::{
-    ops::{
-        Add,
-        RangeBounds,
-    },
+    ops::Add,
     pin::Pin,
     task::{
         Context,
@@ -22,10 +19,7 @@ pub use self::{
     read::*,
     write::*,
 };
-use crate::{
-    buf::UninitSlice,
-    util::slice_bounds,
-};
+use crate::buf::UninitSlice;
 
 pub trait GetSampleRate {
     fn sample_rate(&self) -> f32;
@@ -395,11 +389,6 @@ impl<S> Buffer<S> {
         }
 
         n
-    }
-
-    #[inline]
-    pub fn remaining(&self) -> usize {
-        self.write_pos - self.read_pos
     }
 
     pub fn poll_fill<R>(

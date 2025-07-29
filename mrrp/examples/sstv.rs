@@ -1,9 +1,6 @@
-use std::{
-    collections::VecDeque,
-    path::{
-        Path,
-        PathBuf,
-    },
+use std::path::{
+    Path,
+    PathBuf,
 };
 
 use clap::Parser;
@@ -16,38 +13,37 @@ use image::{
 use mrrp::{
     filter::{
         GoertzelFilter,
+        MovingAverage,
         design::{
             FilterDesign,
             Lowpass,
             Normalize,
             pm_remez::pm_remez,
         },
-        resampling::AverageDecimate,
     },
     io::{
-        AsyncReadSamples,
         AsyncReadSamplesExt,
-        EofError,
         GetSampleRate,
         StreamLength,
         combinators::{
-            ScanWith,
             Scanner,
             ScannerExt,
         },
-        silence,
     },
     modem::{
         fm,
         sstv::{
-            HEADER_LEADER_TIME,
-            HEADER_LEADER_TONE,
-            HEADER_VIS_HIGH_TONE,
-            HEADER_VIS_LOW_TONE,
-            LINE_PORCH_TONE,
-            LINE_SYNC_TONE,
-            ModeSpecification,
+            LEADER_TONE,
+            PORCH_TONE,
+            SYNC_TONE,
+            SstvDecoder,
             SstvEncoder,
+            VIS_HIGH_TONE,
+            VIS_LOW_TONE,
+            modes::{
+                ModeSpecification,
+                VisCode,
+            },
         },
     },
     sink::file::write_stream_to_wav,
@@ -89,6 +85,7 @@ async fn main() -> Result<(), color_eyre::eyre::Error> {
             sample_rate,
         } => encode_image(&image, &output, sample_rate).await?,
         Args::Decode { input, output } => decode_image(&input, &output).await?,
+        Args::Plot { input, output } => plot(&input, &output).await?,
     }
 
     Ok(())
@@ -98,7 +95,9 @@ async fn main() -> Result<(), color_eyre::eyre::Error> {
 enum Args {
     Encode {
         image: PathBuf,
+
         output: PathBuf,
+
         #[clap(short, long, default_value = "32000")]
         sample_rate: f32,
     },
@@ -106,39 +105,60 @@ enum Args {
         input: PathBuf,
         output: PathBuf,
     },
+    Plot {
+        input: PathBuf,
+        output: PathBuf,
+    },
 }
+
+const TEST_MODE: ModeSpecification = ModeSpecification {
+    num_lines: 8,
+    pixels_per_line: 8,
+    vis_code: VisCode::new_unchecked(0x7f),
+    ..ModeSpecification::M2
+};
 
 async fn encode_image(
     image: impl AsRef<Path>,
     output: impl AsRef<Path>,
     sample_rate: f32,
 ) -> Result<(), Error> {
-    let mut mode = ModeSpecification::M2;
-    mode.num_lines = 8;
-    mode.pixels_per_line = 8;
-
     let image = ImageReader::open(image)?.decode()?;
-    let image = image.resize_exact(8, 8, FilterType::Gaussian);
+
+    // for testing
+    //let image = image.resize_exact(8, 8, FilterType::Gaussian);
+
     let image = image.into_rgb8();
 
     // encode the image
-    let stream = SstvEncoder::new(image, mode, sample_rate);
+    let stream = SstvEncoder::new(image, ModeSpecification::M2, sample_rate);
 
+    // lowpass filter the output
+    let lowpass = pm_remez(
+        Lowpass::new(2400.0, 100.0, 0.05, 0.01).normalize(sample_rate),
+        31,
+    )?
+    .fir_filter();
+    let stream = stream.scan_in_place_with(lowpass);
+
+    /*
     // prepend and append 1s of silence
     let silence = silence().with_sample_rate(sample_rate).limit_by_time(0.2);
     let stream = silence.clone().chain(stream).chain(silence);
 
-    let lowpass = pm_remez(
-        Lowpass::new(2000.0, 100.0, 0.05, 0.01).normalize(sample_rate),
-        31,
-    )?
-    .fir_filter();
+    // add some noise
+    let noise_amplitude = db_to_linear(-30.0);
+    let stream = stream.zip_with(
+        white_noise::<Complex<f32>>(),
+        FuncScanner::new(|(signal, noise)| noise_amplitude * noise + signal),
+    );
+    */
 
-    write_stream_to_wav(output, stream.scan_in_place_with(lowpass)).await?;
+    write_stream_to_wav(output, stream).await?;
     Ok(())
 }
 
-async fn decode_image(input: impl AsRef<Path>, _output: impl AsRef<Path>) -> Result<(), Error> {
+async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<(), Error> {
     //let source = WavSource::<_, f32>::from_path("tmp/Martin_1.wav")?;
     let source = WavSource::<_, Complex<f32>>::from_path(input)?;
     let sample_rate = source.sample_rate();
@@ -147,53 +167,58 @@ async fn decode_image(input: impl AsRef<Path>, _output: impl AsRef<Path>) -> Res
     println!("source sample rate: {sample_rate}");
     println!("source num samples: {num_samples}");
 
-    //let hilbert_filter = HilbertFilter::new(0.1, 11);
+    let mut image = RgbImage::new(0, 0);
+    let sstv_decoder = SstvDecoder::new_with_mode_select(source, &mut image, ModeSpecification::M2);
+    let result = sstv_decoder.await;
+    println!("{result:?}");
 
-    //let output = source.scan_with(hilbert_filter).interpolate_to(2400000.0);
-    //write_stream_to_wav("sstv_iq.wav", output).await?;
+    if image.width() != 0 && image.height() != 0 {
+        println!("saving image: {}", output.as_ref().display());
+        image.save(output)?;
+    }
+    else {
+        println!("no image generated");
+    }
 
-    //let fm_demod = fm::DifferentiateAndDivide::new(sample_rate, 3000.0);
+    Ok(())
+}
 
-    //let mut downsampled = AverageDecimate::<_, f32>::new(fm, 22);
-    // //.buffered(0x4000);
+async fn plot(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<(), Error> {
+    let source = WavSource::<_, Complex<f32>>::from_path(input)?;
+    let sample_rate = source.sample_rate();
+    let num_samples = source.len();
 
-    /*let mut decoder = SstvDecoder::new(source.convert::<Complex<f32>>());
-    while let Some(image) = decoder.decode().await? {
-        todo!();
-    }*/
-
-    /*let lowpass = pm_remez(
-        Lowpass::new(1000.0, 10.0, 1.0, 1.0).normalize(sample_rate),
-        41,
-    )?
-    .fir_filter();*/
-
-    //let lowpass2 =
-    // pm_remez(Lowpass::new(10.0, 1.0, 1.0, 1.0).normalize(sample_rate),
-    // 41)?.fir_filter();
-
-    // vis high: 1100
-    // header break, vis stop, line sync: 1200
-    // vis low: 1300
-    // line break: 1500
-    // header leader: 1900
+    println!("source sample rate: {sample_rate}");
+    println!("source num samples: {num_samples}");
 
     let frequency_shift = 0.0;
     //let norm = |x: Complex<f32>| x.norm_sqr().log10() * 10.0;
     let norm = |x: Complex<f32>| x.norm();
     let mut leader_detect =
-        GoertzelFilter::new(sample_rate, HEADER_LEADER_TONE - frequency_shift, 100.0).map(norm);
+        GoertzelFilter::new(sample_rate, LEADER_TONE - frequency_shift, 100.0).map(norm);
     let mut sync_detect =
-        GoertzelFilter::new(sample_rate, LINE_SYNC_TONE - frequency_shift, 100.0).map(norm);
+        GoertzelFilter::new(sample_rate, SYNC_TONE - frequency_shift, 100.0).map(norm);
     let mut porch_detect =
-        GoertzelFilter::new(sample_rate, LINE_PORCH_TONE - frequency_shift, 100.0).map(norm);
+        GoertzelFilter::new(sample_rate, PORCH_TONE - frequency_shift, 100.0).map(norm);
     let mut vis_low =
-        GoertzelFilter::new(sample_rate, HEADER_VIS_LOW_TONE - frequency_shift, 100.0).map(norm);
+        GoertzelFilter::new(sample_rate, VIS_LOW_TONE - frequency_shift, 100.0).map(norm);
     let mut vis_high =
-        GoertzelFilter::new(sample_rate, HEADER_VIS_HIGH_TONE - frequency_shift, 100.0).map(norm);
-    let mut fm_demod = fm::DifferentiateAndAccessPhase::new(sample_rate, 1.0);
+        GoertzelFilter::new(sample_rate, VIS_HIGH_TONE - frequency_shift, 100.0).map(norm);
+    let mut channel_low =
+        GoertzelFilter::new(sample_rate, VIS_LOW_TONE - frequency_shift, 100.0).map(norm);
+    let mut channel_high =
+        GoertzelFilter::new(sample_rate, VIS_HIGH_TONE - frequency_shift, 100.0).map(norm);
 
-    let mut max_detect = [0.0f32; 6];
+    // this is somehow off by a factor of 2
+    let fm_demod = fm::DifferentiateAndDivide::new(sample_rate, 1.0);
+    //let fm_demod = fm::AccessPhaseAndDifferentiate::new(sample_rate, 1.0);
+    //let fm_demod = fm::DifferentiateAndAccessPhase::new(sample_rate, 1.0);
+
+    // smooth it
+    let mut fm_demod = fm_demod.chain(MovingAverage::new(32));
+
+    let mut mins = [0.0f32; 8];
+    let mut maxs = [0.0f32; 8];
     let mut tone_detect = source
         //.convert::<Complex<f32>>()
         //.scan_with(lowpass.chain(fm::AccessPhaseAndDifferentiate::new(sample_rate, 1.0)));
@@ -205,9 +230,14 @@ async fn decode_image(input: impl AsRef<Path>, _output: impl AsRef<Path>) -> Res
                 porch_detect.scan(sample),
                 vis_low.scan(sample),
                 vis_high.scan(sample),
+                channel_low.scan(sample),
+                channel_high.scan(sample),
                 fm_demod.scan(sample),
             ];
-            for (x, max) in detect.iter().zip(max_detect.iter_mut()) {
+            for (x, (min, max)) in detect.iter().zip(mins.iter_mut().zip(maxs.iter_mut())) {
+                if *x < *min {
+                    *min = *x;
+                }
                 if *x > *max {
                     *max = *x;
                 }
@@ -219,11 +249,12 @@ async fn decode_image(input: impl AsRef<Path>, _output: impl AsRef<Path>) -> Res
     tone_detect.read_to_end(&mut tones).await?;
     let t_start = -0.05f32;
     let t_end = num_samples as f32 / sample_rate + 0.05;
-    max_detect[5] = 2000.0;
+    mins[7] = 1000.0;
+    maxs[7] = 2000.0;
 
-    let root = BitMapBackend::new("sstv_freq.png", (1080, 1080)).into_drawing_area();
+    let root = BitMapBackend::new(&output, (1080, 1080)).into_drawing_area();
     root.fill(&WHITE)?;
-    let drawing_areas = root.split_evenly((6, 1));
+    let drawing_areas = root.split_evenly((8, 1));
 
     let draw_series = |label, color, index| {
         let mut chart = ChartBuilder::on(&drawing_areas[index])
@@ -231,7 +262,7 @@ async fn decode_image(input: impl AsRef<Path>, _output: impl AsRef<Path>) -> Res
             .caption(label, ("sans-serif", 20))
             .set_label_area_size(LabelAreaPosition::Left, 60)
             .set_label_area_size(LabelAreaPosition::Bottom, 40)
-            .build_cartesian_2d(t_start..t_end, -0.2f32..max_detect[index] * 1.2)?;
+            .build_cartesian_2d(t_start..t_end, mins[index]..maxs[index])?;
         chart
             .configure_mesh()
             .disable_mesh()
@@ -253,175 +284,11 @@ async fn decode_image(input: impl AsRef<Path>, _output: impl AsRef<Path>) -> Res
     draw_series("Porch (1500 Hz)", RGBColor(0, 0, 128), 2)?;
     draw_series("Vis Low (1300 Hz)", RGBColor(0, 128, 0), 3)?;
     draw_series("Vis High (1100 Hz)", GREEN, 4)?;
-    draw_series("Frequency", RED, 5)?;
+    draw_series("Channel Low (1500 Hz)", RGBColor(0, 128, 0), 5)?;
+    draw_series("Channel High (2300 Hz)", GREEN, 6)?;
+    draw_series("Frequency", RED, 7)?;
 
     root.present()?;
+
     Ok(())
 }
-
-#[derive(Debug, thiserror::Error)]
-enum DecodeError<R> {
-    Stream(#[source] R),
-    Eof,
-    Invalid,
-}
-
-// http://lionel.cordesses.free.fr/gpages/sstv.html
-// https://web.archive.org/web/20120505141047/http://www.cs.helsinki.fi/u/okraisan/slowrx/
-// header: http://www.barberdsp.com/downloads/Dayton%20Paper.pdf
-// very good: https://web.archive.org/web/20120313215600/http://lionel.cordesses.free.fr/gpages/Cordesses.pdf
-#[derive(Debug)]
-struct SstvDecoder<R> {
-    tones: AverageDecimate<ScanWith<R, Complex<f32>, fm::AccessPhaseAndDifferentiate>, f32>,
-    //tones: ScanWith<R, Complex<f32>, fm::AccessPhaseAndDifferentiate>,
-    sample_time: f32,
-    num_samples_consumed: usize,
-    peeked: VecDeque<f32>,
-}
-
-impl<R> SstvDecoder<R>
-where
-    R: GetSampleRate + AsyncReadSamples<Complex<f32>> + Unpin,
-    R::Error: Send + Sync + 'static,
-{
-    pub fn new(input: R) -> Self {
-        let sample_rate = input.sample_rate();
-
-        // passing 1 as frequency deviation only affects the normalization factor, thus
-        // giving the frequency in Hz
-        let fm = fm::AccessPhaseAndDifferentiate::new(sample_rate, 1.0);
-
-        let tones = AverageDecimate::new(input.scan_with(fm), 6);
-        //let tones = input.scan_with(fm);
-
-        Self {
-            tones,
-            sample_time: 1.0 / sample_rate,
-            num_samples_consumed: 0,
-            peeked: VecDeque::new(),
-        }
-    }
-
-    async fn next_tone(&mut self) -> Result<f32, DecodeError<R::Error>> {
-        let tone = if let Some(tone) = self.peeked.pop_front() {
-            tone
-        }
-        else {
-            let tone = self.tones.read_sample().await.map_err(|error| {
-                match error {
-                    EofError::Eof {
-                        num_samples_read: _,
-                    } => DecodeError::Eof,
-                    EofError::Other(error) => DecodeError::Stream(error),
-                }
-            })?;
-            //tone + 950.0
-
-            tone
-        };
-        self.num_samples_consumed += 1;
-        Ok(tone)
-    }
-
-    fn put_back_tone(&mut self, tone: f32) {
-        self.peeked.push_back(tone);
-        self.num_samples_consumed -= 1;
-    }
-
-    async fn wait_for_tone(&mut self, expected: f32) -> Result<(), DecodeError<R::Error>> {
-        loop {
-            let tone = self.next_tone().await?;
-            if is_tone(tone, expected) {
-                println!("got tone: {tone} at {}", self.num_samples_consumed);
-                self.put_back_tone(tone);
-                return Ok(());
-            }
-        }
-    }
-
-    async fn consume_tone(
-        &mut self,
-        expected_tone: f32,
-        expected_duration: f32,
-    ) -> Result<f32, DecodeError<R::Error>> {
-        let mut t = 0.0;
-        let duration_tolerance = 0.1;
-
-        //println!("starting to consume tone: {expected_tone}");
-
-        loop {
-            let tone = self.next_tone().await?;
-
-            if !is_tone(tone, expected_tone) {
-                //self.put_back_tone(tone);
-                //println!("consumed tone: {t}");
-                break;
-            }
-            else {
-                println!("{}: {tone} Hz for {t}", self.num_samples_consumed);
-            }
-            t += self.sample_time;
-        }
-
-        if t > expected_duration - duration_tolerance && t < expected_duration + duration_tolerance
-        {
-            println!("tone {expected_tone} Hz for {t} s");
-            Ok(t)
-        }
-        else {
-            Err(DecodeError::Invalid)
-        }
-    }
-
-    async fn decode_inner(&mut self) -> Result<RgbImage, DecodeError<R::Error>> {
-        //self.wait_for_tone(HEADER_LEADER_TONE).await?;
-
-        self.consume_tone(HEADER_LEADER_TONE, HEADER_LEADER_TIME)
-            .await?;
-        //dbg!(leader1_tone_duration);
-
-        //let break_tone_duration = self.consume_tone(HEADER_BREAK_TONE).await?;
-        //dbg!(break_tone_duration);
-
-        //let leader2_tone_duration = self.consume_tone(HEADER_LEADER_TONE).await?;
-        //dbg!(leader2_tone_duration);*/
-        for i in 0..100 {
-            println!("{}", self.next_tone().await?);
-        }
-
-        todo!();
-    }
-
-    pub async fn decode(&mut self) -> Result<Option<RgbImage>, Error> {
-        loop {
-            match self.decode_inner().await {
-                Ok(image) => return Ok(Some(image)),
-                Err(DecodeError::Eof) => return Ok(None),
-                Err(DecodeError::Stream(error)) => return Err(error.into()),
-                Err(DecodeError::Invalid) => {}
-            }
-        }
-    }
-
-    fn as_secs(&self, samples: usize) -> f32 {
-        samples as f32 * self.sample_time
-    }
-
-    fn as_samples(&self, secs: f32) -> usize {
-        (secs / self.sample_time) as usize
-    }
-}
-
-#[inline]
-fn is_tone(frequency: f32, tone: f32) -> bool {
-    frequency > tone - TONE_TOLERANCE && frequency < tone + TONE_TOLERANCE
-}
-
-const TONE_TOLERANCE: f32 = 50.0;
-
-const LINE_SYNC_TIME: f32 = 0.004862;
-
-const LINE_BREAK_TIME: f32 = 0.000572;
-const LINE_LUM_LOW_TONE: f32 = 1500.0;
-const LINE_LUM_HIGH_TONE: f32 = 2300.0;
-const LINE_LUM_TIME: f32 = 0.146432;

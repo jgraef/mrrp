@@ -4,10 +4,7 @@ mod uninit_slice;
 
 use std::{
     marker::PhantomData,
-    ops::{
-        Bound,
-        RangeBounds,
-    },
+    ops::RangeBounds,
 };
 
 pub use crate::buf::{

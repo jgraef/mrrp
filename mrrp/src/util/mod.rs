@@ -33,3 +33,14 @@ pub fn slice_bounds(range: impl RangeBounds<usize>, start: usize, end: usize) ->
 
     (range_start, range_end)
 }
+
+#[inline]
+pub fn db_to_linear(decibels: f32) -> f32 {
+    //10.0f32.powf(decibels / 10.0)
+
+    // https://docs.rs/rodio/latest/src/rodio/math.rs.html#39-43
+    // ~3-4% faster than using `10f32.powf(decibels * 0.05)`,
+    // with a maximum error of 2.48e-7 representing only about -132 dB.
+    //2.0f32.powf(decibels * 0.05 * std::f32::consts::LOG2_10)
+    (decibels * 0.05 * std::f32::consts::LOG2_10).exp2()
+}

@@ -42,10 +42,12 @@ use crate::{
             MapErr,
             MapInPlace,
             MapInPlacePod,
+            Multiplied,
             Repeated,
             ScanInPlaceWith,
             ScanWith,
             Scanner,
+            Summed,
             Throttled,
             WithSampleRate,
             WithSpan,
@@ -557,6 +559,24 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         Self: Sized + FiniteStream,
     {
         Repeated::new(self)
+    }
+
+    #[inline]
+    fn add<R, T>(self, other: R) -> Summed<Self, R, S, T>
+    where
+        Self: Sized,
+        R: AsyncReadSamples<R> + Sized,
+    {
+        Summed::new(self, other)
+    }
+
+    #[inline]
+    fn mul<R, T>(self, other: R) -> Multiplied<Self, R, S, T>
+    where
+        Self: Sized,
+        R: AsyncReadSamples<R> + Sized,
+    {
+        Multiplied::new(self, other)
     }
 }
 

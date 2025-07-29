@@ -1,5 +1,9 @@
 use std::{
     marker::PhantomData,
+    ops::{
+        Add,
+        Mul,
+    },
     pin::Pin,
     task::{
         Context,
@@ -327,5 +331,35 @@ where
     #[inline]
     fn scan(&mut self, sample: S) -> Self::Output {
         Q::from_sample(sample)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct SumScanner;
+
+impl<S, T> Scanner<(S, T)> for SumScanner
+where
+    S: Add<T>,
+{
+    type Output = <S as Add<T>>::Output;
+
+    #[inline]
+    fn scan(&mut self, (left, right): (S, T)) -> Self::Output {
+        left + right
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ProductScanner;
+
+impl<S, T> Scanner<(S, T)> for ProductScanner
+where
+    S: Mul<T>,
+{
+    type Output = <S as Mul<T>>::Output;
+
+    #[inline]
+    fn scan(&mut self, (left, right): (S, T)) -> Self::Output {
+        left * right
     }
 }

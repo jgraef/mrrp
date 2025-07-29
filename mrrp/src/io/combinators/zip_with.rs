@@ -1,5 +1,9 @@
 use std::{
     marker::PhantomData,
+    ops::{
+        Add,
+        Mul,
+    },
     pin::Pin,
     task::{
         Context,
@@ -20,7 +24,13 @@ use crate::{
         ReadBuf,
         Remaining,
         StreamLength,
-        combinators::Scanner,
+        combinators::{
+            Scanner,
+            scan::{
+                ProductScanner,
+                SumScanner,
+            },
+        },
     },
 };
 
@@ -128,6 +138,124 @@ pub enum ZipError<L, R> {
     Right(R),
 }
 
+pin_project! {
+    // todo: rename to Superposition?
+    #[derive(Clone, Debug)]
+    pub struct Summed<L, R, S, T> {
+        #[pin]
+        inner: ZipWith<L, R, S, T, SumScanner>,
+    }
+}
+
+impl<L, R, S, T> Summed<L, R, S, T> {
+    #[inline]
+    pub fn new(left: L, right: R) -> Self {
+        Self {
+            inner: ZipWith::new(left, right, SumScanner),
+        }
+    }
+}
+
+impl<L, R, S, T> AsyncReadSamples<<S as Add<T>>::Output> for Summed<L, R, S, T>
+where
+    S: Add<T>,
+    L: AsyncReadSamples<S>,
+    R: AsyncReadSamples<T>,
+{
+    type Error = ZipError<L::Error, R::Error>;
+
+    #[inline]
+    fn poll_read_samples(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<<S as Add<T>>::Output>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_read_samples(cx, buffer)
+    }
+}
+
+impl<L, R, S, T> GetSampleRate for Summed<L, R, S, T>
+where
+    L: GetSampleRate,
+{
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.inner.sample_rate()
+    }
+}
+
+impl<L, R, S, T> StreamLength for Summed<L, R, S, T>
+where
+    L: StreamLength,
+    R: StreamLength,
+{
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        self.inner.remaining()
+    }
+}
+
+impl<L, R, S, T> FiniteStream for Summed<L, R, S, T> where L: FiniteStream {}
+
+pin_project! {
+    // todo: renamed to Mixed?
+    #[derive(Clone, Debug)]
+    pub struct Multiplied<L, R, S, T> {
+        #[pin]
+        inner: ZipWith<L, R, S, T, ProductScanner>,
+    }
+}
+
+impl<L, R, S, T> Multiplied<L, R, S, T> {
+    #[inline]
+    pub fn new(left: L, right: R) -> Self {
+        Self {
+            inner: ZipWith::new(left, right, ProductScanner),
+        }
+    }
+}
+
+impl<L, R, S, T> AsyncReadSamples<<S as Mul<T>>::Output> for Multiplied<L, R, S, T>
+where
+    S: Mul<T>,
+    L: AsyncReadSamples<S>,
+    R: AsyncReadSamples<T>,
+{
+    type Error = ZipError<L::Error, R::Error>;
+
+    #[inline]
+    fn poll_read_samples(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<<S as Mul<T>>::Output>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.project().inner.poll_read_samples(cx, buffer)
+    }
+}
+
+impl<L, R, S, T> GetSampleRate for Multiplied<L, R, S, T>
+where
+    L: GetSampleRate,
+{
+    #[inline]
+    fn sample_rate(&self) -> f32 {
+        self.inner.sample_rate()
+    }
+}
+
+impl<L, R, S, T> StreamLength for Multiplied<L, R, S, T>
+where
+    L: StreamLength,
+    R: StreamLength,
+{
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        self.inner.remaining()
+    }
+}
+
+impl<L, R, S, T> FiniteStream for Multiplied<L, R, S, T> where L: FiniteStream {}
+
 #[cfg(test)]
 mod tests {
     use futures_util::FutureExt;
@@ -142,7 +270,7 @@ mod tests {
     };
 
     #[test]
-    fn it_adds_two_streams() {
+    fn it_zip_two_streams() {
         let left = Cursor::new((0..100).collect::<Vec<_>>());
         let right = Cursor::new((0..100).map(|x| x * x).collect::<Vec<_>>());
 

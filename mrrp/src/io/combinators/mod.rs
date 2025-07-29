@@ -45,4 +45,9 @@ pub use scan::{
 pub use throttled::Throttled;
 pub use with_samplerate::WithSampleRate;
 pub use with_span::WithSpan;
-pub use zip_with::ZipWith;
+pub use zip_with::{
+    Multiplied,
+    Summed,
+    ZipError,
+    ZipWith,
+};
