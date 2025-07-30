@@ -11,6 +11,7 @@ use std::{
 
 use clap::Parser;
 use color_eyre::eyre::Error;
+use futures_util::pin_mut;
 use mrrp::{
     audio::play_audio,
     filter::resampling::AverageDecimate,
@@ -76,13 +77,21 @@ async fn main() -> Result<(), Error> {
     //
     // `play_audio` is just a helper function that turns our mrrp stream into a
     // rodio stream, creates an audio sink and plays the sound.
-    play_audio(audio, args.volume)?;
+    //
+    // The future it returns will resolve once the stream stops playing and will
+    // return any errors produced by our stream.
+    let playback_future = play_audio(audio, args.volume);
+    pin_mut!(playback_future);
 
     // Every 2 seconds we'll print the number of samples we have processed so far.
     let mut interval = tokio::time::interval(Duration::from_secs(2));
 
     loop {
         tokio::select! {
+            result = &mut playback_future => {
+                result?;
+                break;
+            }
             // Abort on Ctrl-C
             _ = ctrl_c() => {
                 println!("Ctrl-C pressed. Aborting.");

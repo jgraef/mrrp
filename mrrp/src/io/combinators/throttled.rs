@@ -23,6 +23,7 @@ use crate::io::{
     GetSampleRate,
     ReadBuf,
     Remaining,
+    SizeHint,
     StreamLength,
 };
 
@@ -41,6 +42,21 @@ impl<R> Throttled<R> {
         Self {
             inner,
             sample_duration,
+            delay: Box::pin(Fuse::terminated()),
+        }
+    }
+}
+
+impl<R> Clone for Throttled<R>
+where
+    R: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+            sample_duration: self.sample_duration,
+            // fixme: this unfortunately doesn't work, as Fuse doesn't let us access the inner type
+            //delay: Box::pin(tokio::time::sleep_until(self.delay.deadline()).fuse()),
             delay: Box::pin(Fuse::terminated()),
         }
     }
@@ -115,6 +131,11 @@ where
     #[inline]
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
     }
 }
 

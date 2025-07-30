@@ -120,7 +120,7 @@ where
 impl<R, S, Sc> FiniteStream for ScanWith<R, S, Sc> where R: FiniteStream {}
 
 pin_project! {
-    #[derive(Clone, Debug)]
+    #[derive(Clone, Copy, Debug)]
     pub struct ScanInPlaceWith<R, Sc> {
         #[pin]
         inner: R,
@@ -285,7 +285,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct FuncScanner<F> {
     f: F,
 }

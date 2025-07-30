@@ -3,6 +3,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
 };
 
@@ -53,20 +54,16 @@ where
         }
         else {
             let mut read_buf = buffer.take(*this.remaining);
-            match this.inner.poll_read_samples(cx, &mut read_buf) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
-                Poll::Ready(Ok(())) => {
-                    let initialized = read_buf.initialized().len();
-                    let filled = read_buf.filled().len();
-                    unsafe {
-                        buffer.assume_init(initialized);
-                    }
-                    buffer.set_filled(buffer.filled().len() + filled);
-                    *this.remaining -= filled;
-                    Poll::Ready(Ok(()))
-                }
+            ready!(this.inner.poll_read_samples(cx, &mut read_buf))?;
+
+            let initialized = read_buf.initialized().len();
+            let filled = read_buf.filled().len();
+            unsafe {
+                buffer.assume_init(initialized);
             }
+            buffer.set_filled(buffer.filled().len() + filled);
+            *this.remaining -= filled;
+            Poll::Ready(Ok(()))
         }
     }
 }

@@ -26,7 +26,7 @@ use crate::io::{
 
 pin_project! {
     /// Stream wrapper that maps the samples using an intermediate buffer.
-    #[derive(Debug)]
+    #[derive(Clone, Debug)]
     pub struct Map<R, S, F> {
         #[pin]
         inner: ScanWith<R, S, FuncScanner<F>>,
@@ -90,7 +90,7 @@ impl<R, S, F> FiniteStream for Map<R, S, F> where R: FiniteStream {}
 
 pin_project! {
     /// Stream wrapper that maps the samples using an intermediate buffer.
-    #[derive(Debug)]
+    #[derive(Clone, Copy, Debug)]
     pub struct MapInPlace<R, F> {
         #[pin]
         inner: ScanInPlaceWith<R, FuncScanner<F>>,

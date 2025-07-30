@@ -76,10 +76,19 @@ async fn main() -> Result<(), Error> {
     //
     // `play_audio` is just a helper function that turns our mrrp stream into a
     // rodio stream, creates an audio sink and plays the sound.
-    play_audio(filtered, args.volume)?;
+    //
+    // The future it returns will resolve once the stream stops playing and will
+    // return any errors produced by our stream.
+    let playback_future = play_audio(filtered, args.volume);
 
-    let _ = ctrl_c().await;
-    println!("Ctrl-C pressed. Aborting.");
+    tokio::select! {
+        result = playback_future => {
+            result?;
+        }
+        _ = ctrl_c() => {
+            println!("Ctrl-C pressed. Aborting.");
+        }
+    }
 
     Ok(())
 }

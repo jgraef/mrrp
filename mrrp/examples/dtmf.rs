@@ -1,24 +1,23 @@
-use std::path::{
-    Path,
-    PathBuf,
+use std::{
+    convert::Infallible,
+    fmt::Debug,
+    path::{
+        Path,
+        PathBuf,
+    },
 };
 
 use clap::Parser;
-use color_eyre::eyre::Error;
-use image::{
-    ImageReader,
-    RgbImage,
+use color_eyre::eyre::{
+    Error,
+    eyre,
 };
+use futures_util::stream;
 use mrrp::{
+    audio::play_audio,
     filter::{
         GoertzelFilter,
         MovingAverage,
-        design::{
-            FilterDesign,
-            Lowpass,
-            Normalize,
-            pm_remez::pm_remez,
-        },
     },
     io::{
         AsyncReadSamplesExt,
@@ -30,19 +29,17 @@ use mrrp::{
         },
     },
     modem::{
+        dtmf::{
+            DtmfEncoder,
+            DtmfSymbol,
+        },
         fm,
         sstv::{
             LEADER_TONE,
             PORCH_TONE,
             SYNC_TONE,
-            SstvDecoder,
-            SstvEncoder,
             VIS_HIGH_TONE,
             VIS_LOW_TONE,
-            modes::{
-                ModeSpecification,
-                VisCode,
-            },
         },
     },
     sink::file::write_stream_to_wav,
@@ -79,12 +76,35 @@ async fn main() -> Result<(), color_eyre::eyre::Error> {
 
     match args {
         Args::Encode {
-            image,
             output,
             sample_rate,
-        } => encode_image(&image, &output, sample_rate).await?,
-        Args::Decode { input, output } => decode_image(&input, &output).await?,
-        Args::Plot { input, output } => plot(&input, &output).await?,
+            tone_duration,
+            keys,
+        } => {
+            // parse symbols
+            let symbols = keys
+                .chars()
+                .map(|c| DtmfSymbol::try_from(c))
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|c| eyre!("Invalid DTMF symbol: {c}"))?;
+
+            // convert to stream
+            let symbols = stream::iter(
+                symbols
+                    .into_iter()
+                    .map(|symbol| Ok::<_, Infallible>(symbol)),
+            );
+
+            // encode
+            let encoded = DtmfEncoder::new(symbols, sample_rate, tone_duration);
+
+            if let Some(output) = output {
+                write_stream_to_wav(output, encoded).await?;
+            }
+            else {
+                play_audio(encoded.map(|sample| sample.re), 0.5).await?;
+            }
+        }
     }
 
     Ok(())
@@ -93,93 +113,17 @@ async fn main() -> Result<(), color_eyre::eyre::Error> {
 #[derive(Debug, clap::Parser)]
 enum Args {
     Encode {
-        image: PathBuf,
+        #[clap(short, long)]
+        output: Option<PathBuf>,
 
-        output: PathBuf,
-
-        #[clap(short, long, default_value = "32000")]
+        #[clap(short, long, default_value = "44100")]
         sample_rate: f32,
+
+        #[clap(short, long, default_value = "0.5")]
+        tone_duration: f32,
+
+        keys: String,
     },
-    Decode {
-        input: PathBuf,
-        output: PathBuf,
-    },
-    Plot {
-        input: PathBuf,
-        output: PathBuf,
-    },
-}
-
-const TEST_MODE: ModeSpecification = ModeSpecification {
-    num_lines: 8,
-    pixels_per_line: 8,
-    vis_code: VisCode::new_unchecked(0x7f),
-    ..ModeSpecification::M2
-};
-
-async fn encode_image(
-    image: impl AsRef<Path>,
-    output: impl AsRef<Path>,
-    sample_rate: f32,
-) -> Result<(), Error> {
-    let image = ImageReader::open(image)?.decode()?;
-
-    // for testing
-    //let image = image.resize_exact(8, 8, FilterType::Gaussian);
-
-    let image = image.into_rgb8();
-
-    // encode the image
-    let stream = SstvEncoder::new(image, ModeSpecification::M2, sample_rate);
-
-    // lowpass filter the output
-    let lowpass = pm_remez(
-        Lowpass::new(2400.0, 100.0, 0.05, 0.01).normalize(sample_rate),
-        31,
-    )?
-    .fir_filter();
-    let stream = stream.scan_in_place_with(lowpass);
-
-    /*
-    // prepend and append 1s of silence
-    let silence = silence().with_sample_rate(sample_rate).limit_by_time(0.2);
-    let stream = silence.clone().chain(stream).chain(silence);
-
-    // add some noise
-    let noise_amplitude = db_to_linear(-30.0);
-    let stream = stream.zip_with(
-        white_noise::<Complex<f32>>(),
-        FuncScanner::new(|(signal, noise)| noise_amplitude * noise + signal),
-    );
-    */
-
-    write_stream_to_wav(output, stream).await?;
-    Ok(())
-}
-
-async fn decode_image(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<(), Error> {
-    //let source = WavSource::<_, f32>::from_path("tmp/Martin_1.wav")?;
-    let source = WavSource::<_, Complex<f32>>::from_path(input)?;
-    let sample_rate = source.sample_rate();
-    let num_samples = source.len();
-
-    println!("source sample rate: {sample_rate}");
-    println!("source num samples: {num_samples}");
-
-    let mut image = RgbImage::new(0, 0);
-    let sstv_decoder = SstvDecoder::new_with_mode_select(source, &mut image, ModeSpecification::M2);
-    let result = sstv_decoder.await;
-    println!("{result:?}");
-
-    if image.width() != 0 && image.height() != 0 {
-        println!("saving image: {}", output.as_ref().display());
-        image.save(output)?;
-    }
-    else {
-        println!("no image generated");
-    }
-
-    Ok(())
 }
 
 async fn plot(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<(), Error> {

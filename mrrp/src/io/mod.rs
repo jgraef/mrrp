@@ -163,6 +163,13 @@ impl Remaining {
             }
         }
     }
+
+    pub fn finite_length(&self) -> Option<usize> {
+        match self {
+            Remaining::Finite { num_samples } => Some(*num_samples),
+            Remaining::Infinite | Remaining::Unknown => None,
+        }
+    }
 }
 
 impl Add<Self> for Remaining {
