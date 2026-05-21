@@ -89,12 +89,15 @@ pub struct Mode {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Satellite {
     pub sat_id: SatelliteId,
     pub norad_cat_id: Option<NoradCatId>,
     pub norad_follow_id: Option<NoradFollowId>,
     pub name: String,
+    // todo: the satnogs API returns this a comma-separated list in a string. once we decouple our
+    // model from the satnogs model, we can deserialize this into a vec. right now we also
+    // serialize this and use this format for our db, which would conflict then.
     #[serde_as(as = "NoneAsEmptyString")]
     pub names: Option<String>,
     #[serde_as(as = "NoneAsEmptyString")]
@@ -152,7 +155,7 @@ pub struct NoradCatId(pub u64);
 )]
 pub struct NoradFollowId(pub u64);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SatelliteStatus {
     Alive,
@@ -161,13 +164,12 @@ pub enum SatelliteStatus {
     Future,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Telemetry {
     pub decoder: String,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Tle {
     pub tle0: String,
     pub tle1: String,
@@ -179,8 +181,7 @@ pub struct Tle {
 }
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Transmitter {
     pub uuid: String,
     pub description: String,
@@ -213,24 +214,27 @@ pub struct Transmitter {
     pub unconfirmed: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum TransmitterType {
     Transceiver,
     Transmitter,
     Transponder,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, derive_more::Display)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, derive_more::Display,
+)]
+#[serde(transparent)]
 pub struct TransmitterMode(pub String);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum TransmitterStatus {
     Active,
     Inactive,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ItuNotification {
     pub urls: Vec<String>,
 }
@@ -239,12 +243,18 @@ fn deserialize_operator<'de, D>(deserializer: D) -> Result<Option<String>, D::Er
 where
     D: Deserializer<'de>,
 {
-    let s: Cow<'de, str> = Deserialize::deserialize(deserializer)?;
-    if &s == "None" {
-        Ok(None)
+    let s: Option<Cow<'de, str>> = Deserialize::deserialize(deserializer)?;
+
+    if let Some(s) = s {
+        if s == "None" {
+            Ok(None)
+        }
+        else {
+            Ok(Some(s.into_owned()))
+        }
     }
     else {
-        Ok(Some(s.into_owned()))
+        Ok(None)
     }
 }
 
@@ -252,11 +262,17 @@ fn deserialize_citation<'de, D>(deserializer: D) -> Result<Option<String>, D::Er
 where
     D: Deserializer<'de>,
 {
-    let s: Cow<'de, str> = Deserialize::deserialize(deserializer)?;
-    if s.contains("CITATION NEEDED") {
-        Ok(None)
+    let s: Option<Cow<'de, str>> = Deserialize::deserialize(deserializer)?;
+
+    if let Some(s) = s {
+        if s.contains("CITATION NEEDED") {
+            Ok(None)
+        }
+        else {
+            Ok(Some(s.into_owned()))
+        }
     }
     else {
-        Ok(Some(s.into_owned()))
+        Ok(None)
     }
 }

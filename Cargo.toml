@@ -1,3 +1,8 @@
 [workspace]
 resolver = "2"
 members = ["mrrp-sat"]
+
+[profile.dev.package.satkit]
+opt-level = 3
+debug-assertions = false
+overflow-checks = false
