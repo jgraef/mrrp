@@ -1,15 +1,22 @@
+#![allow(unused)]
+
+use std::sync::Arc;
+
 use eframe::egui_wgpu;
+use parking_lot::Mutex;
 
 use crate::RenderConfig;
 
 #[derive(Debug)]
 pub struct Waterfall {
-    // todo
+    buffer: Arc<Mutex<Buffer>>,
 }
 
 impl Waterfall {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            buffer: Arc::new(Mutex::new(Buffer::default())),
+        }
     }
 }
 
@@ -23,7 +30,9 @@ impl egui::Widget for Waterfall {
         if !ui.is_sizing_pass() && ui.is_rect_visible(response.rect) {
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                 response.rect,
-                PaintCallback {},
+                PaintCallback {
+                    buffer: self.buffer,
+                },
             ));
         }
 
@@ -33,7 +42,7 @@ impl egui::Widget for Waterfall {
 
 #[derive(Debug)]
 struct PaintCallback {
-    // todo
+    buffer: Arc<Mutex<Buffer>>,
 }
 
 impl egui_wgpu::CallbackTrait for PaintCallback {
@@ -57,6 +66,10 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
         let _pipeline = callback_resources
             .entry()
             .or_insert_with(|| Pipeline::new(device, target_texture_format));
+
+        // stream data to GPU
+        let mut buffer = self.buffer.lock();
+        buffer.flush();
 
         vec![]
     }
@@ -138,4 +151,45 @@ impl Pipeline {
 
         Self { pipeline }
     }
+}
+
+#[derive(Debug, Default)]
+struct Buffer {
+    queued_lines: Vec<WaterfallLine>,
+    gpu_buffer: GpuBuffer,
+}
+
+impl Buffer {
+    fn flush(&mut self) {
+        self.gpu_buffer.upload(&self.queued_lines);
+        self.queued_lines.clear();
+    }
+}
+
+#[derive(Debug, Default)]
+struct GpuBuffer {
+    buffer: Option<wgpu::Buffer>,
+
+    start: u64,
+    end: u64,
+
+    staging: Option<wgpu::Buffer>,
+}
+
+impl GpuBuffer {
+    pub fn upload(&self, lines: &[WaterfallLine]) {
+        /*let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("waterfall/buffer"),
+            size: ,
+            usage: todo!(),
+            mapped_at_creation: todo!(),
+        });*/
+
+        //todo!();
+    }
+}
+
+#[derive(Debug)]
+struct WaterfallLine {
+    // todo
 }

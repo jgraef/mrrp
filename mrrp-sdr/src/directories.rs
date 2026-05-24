@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
 use anyhow::{
     Error,
@@ -34,7 +37,7 @@ impl Directories {
         self.directories.config_dir().join("config.toml")
     }
 
-    pub fn egui_persist_path(&self) -> PathBuf {
-        self.state_dir.join("egui")
+    pub fn state_dir(&self) -> &Path {
+        &self.state_dir
     }
 }
