@@ -1,7 +1,4 @@
-use egui_dock::{
-    DockState,
-    NodePath,
-};
+use egui_dock::NodePath;
 use serde::{
     Deserialize,
     Serialize,
@@ -10,8 +7,8 @@ use serde::{
 use crate::{
     cli::UiCommand,
     ui::dock::{
-        Tab,
-        default_dock_state,
+        DockState,
+        TabState,
     },
 };
 
@@ -38,8 +35,8 @@ pub struct AppState {
     #[serde(skip, default)]
     pub show_debug_window: bool,
 
-    #[serde(default = "default_dock_state")]
-    pub dock_state: DockState<Tab>,
+    #[serde(default)]
+    pub dock_state: DockState,
 }
 
 impl Default for AppState {
@@ -49,7 +46,7 @@ impl Default for AppState {
             persist_everything: true,
             show_about_window: false,
             show_debug_window: false,
-            dock_state: default_dock_state(),
+            dock_state: Default::default(),
         }
     }
 }
@@ -131,16 +128,9 @@ impl CommandBuffer {
         }
     }
 
-    pub fn add_dock(&mut self, path: Option<NodePath>, tab: Tab) {
+    pub fn add_tab(&mut self, path: Option<NodePath>, tab: TabState) {
         self.push(move |state| {
-            if let Some(path) = path {
-                if let Ok(leaf) = state.dock_state.leaf_mut(path) {
-                    leaf.append_tab(tab);
-                }
-            }
-            else {
-                state.dock_state.push_to_focused_leaf(tab);
-            }
+            state.dock_state.add_tab(path, tab);
         })
     }
 }

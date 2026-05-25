@@ -1,5 +1,4 @@
 use eframe::Storage;
-use egui_dock::DockArea;
 
 use crate::{
     cli::UiCommand,
@@ -8,8 +7,8 @@ use crate::{
     ui::{
         about_window::AboutWindow,
         debug_window::DebugWindow,
-        dock::DockViewer,
-        menu::MainMenu,
+        dock::DockPanel,
+        menu::MainMenuPanel,
         radio::{
             RadioConfigWindow,
             RadioUiState,
@@ -68,25 +67,16 @@ impl App {
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         // app menu
-        egui::Panel::top("menu_panel").show_inside(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                ui.add(MainMenu::new(
-                    &mut self.radio_state,
-                    &mut self.app_state,
-                    &mut self.command_buffer,
-                ))
-            });
-        });
+        ui.add(MainMenuPanel::new(
+            &mut self.app_state,
+            &mut self.command_buffer,
+        ));
 
         // main panel with docks
-        egui::CentralPanel::default().show_inside(ui, |ui| {
-            let mut dock_viewer = DockViewer::new(&mut self.command_buffer);
-
-            DockArea::new(&mut self.app_state.dock_state)
-                .show_add_buttons(true)
-                .show_add_popup(true)
-                .show_inside(ui, &mut dock_viewer);
-        });
+        ui.add(DockPanel::new(
+            &mut self.app_state,
+            &mut self.command_buffer,
+        ));
 
         // show windows
         RadioConfigWindow::new(&mut self.radio_state).show(ui.ctx());

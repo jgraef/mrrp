@@ -1,7 +1,6 @@
 use crate::{
     ui::{
-        dock::add_tab_menu,
-        radio::RadioUiState,
+        dock::DockAddTabMenu,
         state::{
             AppState,
             CommandBuffer,
@@ -11,20 +10,41 @@ use crate::{
 };
 
 #[derive(Debug)]
+pub struct MainMenuPanel<'a> {
+    app_state: &'a mut AppState,
+    command_buffer: &'a mut CommandBuffer,
+}
+
+impl<'a> MainMenuPanel<'a> {
+    pub fn new(app_state: &'a mut AppState, command_buffer: &'a mut CommandBuffer) -> Self {
+        Self {
+            app_state,
+            command_buffer,
+        }
+    }
+}
+
+impl<'a> egui::Widget for MainMenuPanel<'a> {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
+        egui::Panel::top("menu_panel")
+            .show_inside(ui, |ui| {
+                egui::MenuBar::new().ui(ui, |ui| {
+                    ui.add(MainMenu::new(&mut self.app_state, &mut self.command_buffer))
+                });
+            })
+            .response
+    }
+}
+
+#[derive(Debug)]
 pub struct MainMenu<'a> {
-    radio_state: &'a mut RadioUiState,
     app_state: &'a mut AppState,
     command_buffer: &'a mut CommandBuffer,
 }
 
 impl<'a> MainMenu<'a> {
-    pub fn new(
-        radio_state: &'a mut RadioUiState,
-        app_state: &'a mut AppState,
-        command_buffer: &'a mut CommandBuffer,
-    ) -> Self {
+    pub fn new(app_state: &'a mut AppState, command_buffer: &'a mut CommandBuffer) -> Self {
         Self {
-            radio_state,
             app_state,
             command_buffer,
         }
@@ -36,7 +56,8 @@ impl<'a> egui::Widget for MainMenu<'a> {
         egui::MenuBar::new()
             .ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
-                    if self.radio_state.is_connected() {
+                    //if self.radio_state.is_connected() {
+                    if false {
                         if ui.button("Stop Capture").clicked() {
                             // todo: stop capture
                         }
@@ -67,7 +88,10 @@ impl<'a> egui::Widget for MainMenu<'a> {
                     }
 
                     ui.menu_button("Add Dock", |ui| {
-                        add_tab_menu(ui, None, &mut self.command_buffer);
+                        ui.add(DockAddTabMenu::new(
+                            &mut self.app_state,
+                            &mut self.command_buffer,
+                        ));
                     });
                 });
 
