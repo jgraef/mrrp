@@ -1,3 +1,6 @@
+pub mod build_info;
+pub mod github_urls;
+
 use std::hash::Hash;
 
 use indexmap::IndexSet;

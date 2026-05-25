@@ -1,8 +1,12 @@
 use crate::{
-    build_info::BUILD_INFO,
     ui::app::AppState,
+    util::{
+        build_info::BUILD_INFO,
+        github_urls::GithubUrls,
+    },
 };
 
+#[derive(Debug)]
 pub struct AboutWindow<'a> {
     app_state: &'a mut AppState,
 }
@@ -53,16 +57,13 @@ impl<'a> AboutWindow<'a> {
                     ui.spacing_mut().item_spacing.x = 0.0;
 
                     ui.label("Website: ");
-                    let url = std::env!("CARGO_PKG_REPOSITORY");
-                    if ui
-                        .add(egui::Hyperlink::from_label_and_url(
-                            egui::RichText::new(url).text_style(egui::TextStyle::Monospace),
-                            url,
-                        ))
-                        .clicked()
-                    {
-                        ui.open_url(egui::OpenUrl::new_tab(url));
-                    }
+
+                    let url = GithubUrls::PACKAGE.repository;
+
+                    ui.add(egui::Hyperlink::from_label_and_url(
+                        egui::RichText::new(&*url).text_style(egui::TextStyle::Monospace),
+                        &url,
+                    ));
                 });
             });
     }

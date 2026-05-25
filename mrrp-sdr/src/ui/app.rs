@@ -12,6 +12,7 @@ use crate::{
     directories::Directories,
     ui::{
         about_window::AboutWindow,
+        debug_window::DebugWindow,
         menu::MainMenu,
         radio::{
             RadioConfigWindow,
@@ -43,6 +44,7 @@ impl App {
         directories: Directories,
         config: Config,
         command: UiCommand,
+        ctx: &egui::Context,
         storage: &dyn Storage,
     ) -> Self {
         let radio_state = RadioUiState::new(&config, &command);
@@ -53,6 +55,10 @@ impl App {
         else {
             AppState::load(storage)
         };
+
+        ctx.all_styles_mut(|style| {
+            style.url_in_tooltip = true;
+        });
 
         Self {
             directories,
@@ -128,8 +134,8 @@ impl eframe::App for App {
         });
 
         RadioConfigWindow::new(&mut self.radio_state).show(ui.ctx());
-
         AboutWindow::new(&mut self.app_state).show(ui.ctx());
+        DebugWindow::new(&mut self.app_state).show(ui.ctx());
     }
 
     fn persist_egui_memory(&self) -> bool {
@@ -143,11 +149,19 @@ impl eframe::App for App {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppState {
+    /// If this state should be persisted
     #[serde(skip, default)]
     pub persist: bool,
 
-    #[serde(skip, default)]
+    /// Persist all app state - even settings that are usually reset on startup,
+    /// e.g. which windows are open. This is useful for debugging.
+    ///
+    /// Note: Actually we always persist this whole struct, but when loading
+    /// we'll reset certain states if this is false.
+    pub persist_everything: bool,
+
     pub show_about_window: bool,
+    pub show_debug_window: bool,
 
     pub show_baseband_spectrum: bool,
     pub show_baseband_waterfall: bool,
@@ -159,7 +173,9 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             persist: true,
+            persist_everything: true,
             show_about_window: false,
+            show_debug_window: false,
             show_baseband_spectrum: true,
             show_baseband_waterfall: true,
             show_channels: true,
@@ -174,7 +190,7 @@ impl AppState {
     fn load(storage: &dyn eframe::Storage) -> Self {
         tracing::debug!("loading app state");
 
-        if let Some(value) = storage.get_string(Self::KEY) {
+        let mut state = if let Some(value) = storage.get_string(Self::KEY) {
             match serde_json::from_str::<Self>(&value) {
                 Ok(mut state) => {
                     state.persist = true;
@@ -193,12 +209,25 @@ impl AppState {
             let mut state = Self::default();
             state.persist = true;
             state
+        };
+
+        if !state.persist_everything {
+            state.reset_on_app_start();
         }
+
+        state
     }
 
     fn save(&self, storage: &mut dyn eframe::Storage) {
-        tracing::debug!("saving app state");
-        let value = serde_json::to_string(self).expect("main app state serialization");
-        storage.set_string(Self::KEY, value);
+        if self.persist {
+            tracing::debug!("saving app state");
+            let value = serde_json::to_string(self).expect("main app state serialization");
+            storage.set_string(Self::KEY, value);
+        }
+    }
+
+    fn reset_on_app_start(&mut self) {
+        self.show_about_window = false;
+        self.show_debug_window = false;
     }
 }

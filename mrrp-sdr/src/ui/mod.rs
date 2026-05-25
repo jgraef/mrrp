@@ -1,5 +1,6 @@
 pub mod about_window;
 pub mod app;
+pub mod debug_window;
 pub mod menu;
 pub mod placeholder;
 pub mod radio;
@@ -57,6 +58,7 @@ pub fn run_app(directories: Directories, config: Config, command: UiCommand) -> 
                 directories,
                 config,
                 command,
+                &cc.egui_ctx,
                 cc.storage.expect("persist"),
             )))
         }),

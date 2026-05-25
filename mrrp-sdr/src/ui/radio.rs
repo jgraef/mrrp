@@ -422,9 +422,11 @@ impl<'a> RadioConfigWindow<'a> {
                 .id(id.with("window"))
                 .open(&mut is_open)
                 .vscroll(true)
+                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .collapsible(false)
                 .show(ctx, |ui| {
                     let mut response = Grid::new(id.with("grid_header"))
+                        .num_columns(2)
                         .show(ui, |ui| {
                             ui.label("Name");
                             ui.add(

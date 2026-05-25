@@ -1,6 +1,9 @@
-use crate::ui::{
-    app::AppState,
-    radio::RadioUiState,
+use crate::{
+    ui::{
+        app::AppState,
+        radio::RadioUiState,
+    },
+    util::github_urls::GithubUrls,
 };
 
 #[derive(Debug)]
@@ -62,8 +65,11 @@ impl<'a> egui::Widget for MainMenu<'a> {
                     }
 
                     if ui.button("File Bug Report").clicked() {
-                        let url = format!("{}issues", std::env!("CARGO_PKG_REPOSITORY"));
-                        ui.open_url(egui::OpenUrl::new_tab(url));
+                        ui.open_url(egui::OpenUrl::new_tab(GithubUrls::PACKAGE.issues()));
+                    }
+
+                    if ui.button("Debug").clicked() {
+                        self.app_state.show_debug_window = true;
                     }
                 })
             })
