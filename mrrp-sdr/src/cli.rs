@@ -12,8 +12,14 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Runs the app.
+    ///
+    /// This is most likely what you want to use. All other commands are for
+    /// niche and debugging usecases.
     Ui(UiCommand),
-    ListDevices,
+
+    /// List radios that are connected.
+    ListRadios,
 }
 
 impl Default for Command {
@@ -32,4 +38,7 @@ pub struct UiCommand {
 
     #[clap(short, long)]
     pub sample_rate: Option<u64>,
+
+    #[clap(long)]
+    pub reset_app_state: bool,
 }

@@ -15,6 +15,7 @@ use crate::{
         self,
         radio::RadioDescriptor,
     },
+    util::Lru,
 };
 
 #[derive(Debug)]
@@ -23,22 +24,15 @@ pub struct RadioUiState {
     selected: Option<usize>,
     connected: Option<Connected>,
 
+    recent_radios: Lru<usize>,
+
     config_window: Option<RadioConfigWindowState>,
 }
 
-#[derive(Clone, Debug)]
-struct Radio {
-    name: String,
-    config: Option<RadioConfig>,
-    descriptor: Option<RadioDescriptor>,
-    configured: bool,
-    detected: bool,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct Connected {
-    in_progress: bool,
-    radio: usize,
+impl RadioUiState {
+    pub fn is_connected(&self) -> bool {
+        self.connected.is_some()
+    }
 }
 
 impl RadioUiState {
@@ -144,9 +138,25 @@ impl RadioUiState {
             radios,
             selected,
             connected: None,
+            recent_radios: Lru::with_limit(10),
             config_window: None,
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct Radio {
+    name: String,
+    config: Option<RadioConfig>,
+    descriptor: Option<RadioDescriptor>,
+    configured: bool,
+    detected: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct Connected {
+    in_progress: bool,
+    radio: usize,
 }
 
 pub struct RadioUi<'a> {

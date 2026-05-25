@@ -14,7 +14,7 @@ use parking_lot::{
 };
 use wgpu::util::DeviceExt;
 
-use crate::RenderConfig;
+use crate::ui::RenderConfig;
 
 #[derive(Clone, Debug, Default)]
 pub struct SpectrumBuffer {

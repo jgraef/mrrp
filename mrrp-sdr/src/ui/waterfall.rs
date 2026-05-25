@@ -5,7 +5,7 @@ use std::sync::Arc;
 use eframe::egui_wgpu;
 use parking_lot::Mutex;
 
-use crate::RenderConfig;
+use crate::ui::RenderConfig;
 
 #[derive(Debug)]
 pub struct Waterfall {
