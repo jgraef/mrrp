@@ -1,5 +1,5 @@
 use crate::{
-    ui::app::AppState,
+    ui::state::AppState,
     util::{
         build_info::BUILD_INFO,
         github_urls::GithubUrls,
@@ -22,7 +22,7 @@ impl<'a> DebugWindow<'a> {
         let mut debug_on_hover = ctx.debug_on_hover();
 
         egui::Window::new("About mrrp-sdr")
-            .id(id.with("window"))
+            //.id(id.with("window"))
             .vscroll(true)
             .hscroll(true)
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)

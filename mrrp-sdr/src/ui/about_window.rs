@@ -1,5 +1,5 @@
 use crate::{
-    ui::app::AppState,
+    ui::state::AppState,
     util::{
         build_info::BUILD_INFO,
         github_urls::GithubUrls,

@@ -41,4 +41,7 @@ pub struct UiCommand {
 
     #[clap(long)]
     pub reset_app_state: bool,
+
+    #[clap(long)]
+    pub dont_save_app_state: bool,
 }

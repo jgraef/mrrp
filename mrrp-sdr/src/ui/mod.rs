@@ -1,11 +1,12 @@
 pub mod about_window;
 pub mod app;
 pub mod debug_window;
+pub mod dock;
 pub mod menu;
 pub mod placeholder;
 pub mod radio;
-pub mod spectrum;
-pub mod waterfall;
+pub mod state;
+pub mod widgets;
 
 use anyhow::Error;
 use eframe::NativeOptions;

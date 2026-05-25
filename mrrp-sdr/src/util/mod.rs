@@ -65,3 +65,7 @@ where
         self.items.clear();
     }
 }
+
+pub fn bool_true() -> bool {
+    true
+}

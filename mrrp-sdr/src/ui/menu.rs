@@ -1,19 +1,38 @@
 use crate::{
     ui::{
-        app::AppState,
+        dock::add_tab_menu,
         radio::RadioUiState,
+        state::{
+            AppState,
+            CommandBuffer,
+        },
     },
     util::github_urls::GithubUrls,
 };
 
 #[derive(Debug)]
 pub struct MainMenu<'a> {
-    pub radio_state: &'a mut RadioUiState,
-    pub app_state: &'a mut AppState,
+    radio_state: &'a mut RadioUiState,
+    app_state: &'a mut AppState,
+    command_buffer: &'a mut CommandBuffer,
+}
+
+impl<'a> MainMenu<'a> {
+    pub fn new(
+        radio_state: &'a mut RadioUiState,
+        app_state: &'a mut AppState,
+        command_buffer: &'a mut CommandBuffer,
+    ) -> Self {
+        Self {
+            radio_state,
+            app_state,
+            command_buffer,
+        }
+    }
 }
 
 impl<'a> egui::Widget for MainMenu<'a> {
-    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+    fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         egui::MenuBar::new()
             .ui(ui, |ui| {
                 ui.menu_button("File", |ui| {
@@ -47,16 +66,9 @@ impl<'a> egui::Widget for MainMenu<'a> {
                         // todo
                     }
 
-                    ui.checkbox(
-                        &mut self.app_state.show_baseband_spectrum,
-                        "Baseband Spectrum",
-                    );
-                    ui.checkbox(
-                        &mut self.app_state.show_baseband_waterfall,
-                        "Baseband Waterfall",
-                    );
-                    ui.checkbox(&mut self.app_state.show_channels, "Channels");
-                    ui.checkbox(&mut self.app_state.show_bookmarks, "Bookmarks");
+                    ui.menu_button("Add Dock", |ui| {
+                        add_tab_menu(ui, None, &mut self.command_buffer);
+                    });
                 });
 
                 ui.menu_button("Help", |ui| {

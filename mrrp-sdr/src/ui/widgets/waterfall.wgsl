@@ -1,6 +1,3 @@
-
-
-
 struct VertexInput {
     @builtin(vertex_index) vertex_index: u32,
 }
