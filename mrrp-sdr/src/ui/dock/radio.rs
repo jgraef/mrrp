@@ -1,9 +1,13 @@
 use egui::{
+    FontFamily,
     Frame,
     Margin,
 };
 
-use crate::ui::widgets::frequency_dial::FrequencyDial;
+use crate::ui::widgets::frequency_dial::{
+    FrequencyDial,
+    FrequencyDialStyle,
+};
 
 #[derive(Debug)]
 pub struct RadioDock;
@@ -21,7 +25,19 @@ impl RadioDock {
                 ui.add(
                     FrequencyDial::new(&mut frequency)
                         .insignificant_digits(3)
-                        .desired_width(ui.available_width()),
+                        .desired_width(ui.available_width())
+                        .style({
+                            // todo: remove this. instead let the user just configure a font file -
+                            // maybe through a theme config
+                            let font_family = FontFamily::Name("dseg".into());
+
+                            let mut style = FrequencyDialStyle::from_egui(ui.style());
+                            style.font_id.family = font_family.clone();
+                            style.small_font_id.family = font_family;
+                            style.digit_spacing = 4.0;
+                            style.italics = true;
+                            style
+                        }),
                 )
             })
             .inner;

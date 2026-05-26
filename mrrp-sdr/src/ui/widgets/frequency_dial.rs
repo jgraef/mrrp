@@ -310,13 +310,15 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
 
                 let mut format = TextFormat {
                     font_id,
+                    // we think this only affects spacing between letters in one section, so
+                    // layout_section.leading_space is actually doing this.
                     extra_letter_spacing: style.digit_spacing,
                     line_height: None,
                     color: style.text_color,
                     background: style.background_color,
                     expand_bg: style.digit_expand_background,
                     coords: Default::default(),
-                    italics: false,
+                    italics: style.italics,
                     underline: Stroke::NONE,
                     strikethrough: Stroke::NONE,
                     valign: Align::BOTTOM,
@@ -331,7 +333,7 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
                 }
 
                 let layout_section = LayoutSection {
-                    leading_space: 0.0,
+                    leading_space: style.digit_spacing,
                     byte_range: 0..0, // placeholder, fixed later
                     format,
                 };
@@ -526,6 +528,7 @@ pub struct FrequencyDialStyle {
     pub edit_background_color: Color32,
     pub leading_zeros_text_color: Color32,
     pub align: Align2,
+    pub italics: bool,
 }
 
 impl FrequencyDialStyle {
@@ -542,6 +545,7 @@ impl FrequencyDialStyle {
             edit_background_color: Color32::WHITE,
             leading_zeros_text_color: style.visuals.weak_text_color(),
             align: Align2::CENTER_CENTER,
+            italics: false,
         }
     }
 }

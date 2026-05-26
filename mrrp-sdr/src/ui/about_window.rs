@@ -26,6 +26,12 @@ impl<'a> AboutWindow<'a> {
             .collapsible(false)
             .open(&mut self.app_state.show_about_window)
             .show(ctx, |ui| {
+                ui.heading(format!(
+                    "{} {}",
+                    std::env!("CARGO_PKG_NAME"),
+                    std::env!("CARGO_PKG_VERSION"),
+                ));
+
                 ui.label(format!(
                     "This is {} {}",
                     std::env!("CARGO_PKG_NAME"),
@@ -65,6 +71,19 @@ impl<'a> AboutWindow<'a> {
                         &url,
                     ));
                 });
+
+                ui.separator();
+
+                ui.heading("Attributions");
+
+                ui.horizontal_wrapped(|ui| {
+                    ui.hyperlink_to("DSEG font", "https://github.com/keshikan/DSEG");
+                    ui.label("by keshikan licensed under");
+                    ui.hyperlink_to(
+                        "SIL Open Font License Version 1.1",
+                        "https://github.com/keshikan/DSEG/blob/master/DSEG-LICENSE.txt",
+                    );
+                })
             });
     }
 }

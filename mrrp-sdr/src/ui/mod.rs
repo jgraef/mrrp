@@ -57,9 +57,25 @@ pub fn run_app(directories: Directories, config: Config, command: UiCommand) -> 
                     target_texture_format: wgpu.target_format,
                 });
 
-            // add phosphor icons
             let mut fonts = egui::FontDefinitions::default();
+
+            // add phosphor icons
+
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+
+            // add dseg font
+            // for now we'll just include_bytes one variant
+            // todo: make these an option in the theme
+            fonts.font_data.insert(
+                "dseg".into(),
+                egui::FontData::from_static(include_bytes!("../../assets/DSEG7Modern-Regular.ttf"))
+                    .into(),
+            );
+
+            fonts
+                .families
+                .insert(egui::FontFamily::Name("dseg".into()), vec!["dseg".into()]);
+
             cc.egui_ctx.set_fonts(fonts);
 
             Ok(Box::new(App::new(
