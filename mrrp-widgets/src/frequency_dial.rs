@@ -610,7 +610,7 @@ fn zero_remaining_digits(value: i64, digit: usize) -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use crate::ui::widgets::frequency_dial::{
+    use crate::frequency_dial::{
         replace_digit,
         replace_digit_from,
         zero_remaining_digits,

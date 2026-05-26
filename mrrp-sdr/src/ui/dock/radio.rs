@@ -3,8 +3,7 @@ use egui::{
     Frame,
     Margin,
 };
-
-use crate::ui::widgets::frequency_dial::{
+use mrrp_widgets::frequency_dial::{
     FrequencyDial,
     FrequencyDialStyle,
 };

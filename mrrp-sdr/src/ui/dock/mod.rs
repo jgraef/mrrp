@@ -27,7 +27,10 @@ use crate::ui::{
         channels::ChannelsDock,
         demodulation::DemodulationDock,
         radio::RadioDock,
-        spectrum::SpectrumDock,
+        spectrum::{
+            SpectrumDock,
+            SpectrumDockState,
+        },
         waterfall::WaterfallDock,
     },
     state::{
@@ -49,7 +52,7 @@ pub enum TabState {
         // todo
     },
     Spectrum {
-        // todo
+        state: SpectrumDockState,
     },
     Waterfall {
         // todo
@@ -115,7 +118,11 @@ impl TabType {
     pub fn create_state(&self) -> TabState {
         match self {
             TabType::Radio => TabState::Radio {},
-            TabType::Spectrum => TabState::Spectrum {},
+            TabType::Spectrum => {
+                TabState::Spectrum {
+                    state: SpectrumDockState::default(),
+                }
+            }
             TabType::Waterfall => TabState::Waterfall {},
             TabType::Bookmarks => TabState::Bookmarks {},
             TabType::Channels => TabState::Channels {},
@@ -240,9 +247,9 @@ impl<'a> TabViewer for DockViewer<'a> {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
-        match tab.state {
+        match &mut tab.state {
             TabState::Radio {} => RadioDock.show(ui),
-            TabState::Spectrum {} => SpectrumDock::new().show(ui),
+            TabState::Spectrum { state } => SpectrumDock::new(state).show(ui),
             TabState::Waterfall {} => WaterfallDock.show(ui),
             TabState::Bookmarks {} => BookmarksDock.show(ui),
             TabState::Channels {} => ChannelsDock.show(ui),

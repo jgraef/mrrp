@@ -6,41 +6,57 @@ use bytemuck::{
     Pod,
     Zeroable,
 };
-use eframe::egui_wgpu;
-use palette::LinSrgba;
+use egui::{
+    Color32,
+    Vec2,
+};
 use parking_lot::{
     Mutex,
     RwLock,
+    RwLockWriteGuard,
 };
 use wgpu::util::DeviceExt;
 
-use crate::ui::RenderConfig;
-
-#[derive(Clone, Debug, Default)]
-pub struct SpectrumBuffer {
-    state: Arc<RwLock<State>>,
-}
-
-impl SpectrumBuffer {
-    pub fn push(&mut self, spectrum: &[f32]) {
-        todo!();
-    }
-}
+use crate::GetWidgetRenderState;
 
 #[derive(Debug)]
-pub struct Spectrum {
-    buffer: SpectrumBuffer,
+pub struct SpectrumView<'a> {
+    state: &'a SpectrumState,
+    desired_size: Vec2,
+    style: SpectrumStyle,
 }
 
-impl Spectrum {
-    pub fn new(buffer: &SpectrumBuffer) -> Self {
+impl<'a> SpectrumView<'a> {
+    pub fn new(state: &'a SpectrumState) -> Self {
         Self {
-            buffer: buffer.clone(),
+            state,
+            desired_size: Vec2::INFINITY,
+            style: Default::default(),
         }
+    }
+
+    pub fn desired_size(mut self, size: Vec2) -> Self {
+        self.desired_size = size;
+        self
+    }
+
+    pub fn desired_width(mut self, width: f32) -> Self {
+        self.desired_size.x = width;
+        self
+    }
+
+    pub fn desired_height(mut self, height: f32) -> Self {
+        self.desired_size.y = height;
+        self
+    }
+
+    pub fn style(mut self, style: SpectrumStyle) -> Self {
+        self.style = style;
+        self
     }
 }
 
-impl egui::Widget for Spectrum {
+impl<'a> egui::Widget for SpectrumView<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let response = ui.allocate_response(
             ui.available_size(),
@@ -51,7 +67,7 @@ impl egui::Widget for Spectrum {
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                 response.rect,
                 PaintCallback {
-                    buffer: self.buffer,
+                    shared_state: self.state.shared_state.clone(),
                 },
             ));
         }
@@ -60,9 +76,54 @@ impl egui::Widget for Spectrum {
     }
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct SpectrumState {
+    shared_state: Arc<RwLock<State>>,
+}
+
+impl SpectrumState {
+    pub fn new(data: Vec<f32>) -> Self {
+        Self {
+            shared_state: Arc::new(RwLock::new(State {
+                config: ConfigData::default(),
+                config_changed: false,
+                config_buffer: None,
+                queued_data: data,
+                queued_dirty: true,
+                data_buffer: None,
+                bind_group: None,
+            })),
+        }
+    }
+
+    pub fn update(&self) -> SpectrumStateUpdateGuard<'_> {
+        let mut state = self.shared_state.write();
+        SpectrumStateUpdateGuard { state }
+    }
+}
+
+#[derive(Debug)]
+pub struct SpectrumStateUpdateGuard<'a> {
+    state: RwLockWriteGuard<'a, State>,
+}
+
+impl<'a> SpectrumStateUpdateGuard<'a> {
+    pub fn data_mut(&mut self) -> &mut Vec<f32> {
+        self.state.queued_dirty = true;
+        &mut self.state.queued_data
+    }
+
+    // todo: methods to change configuration
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct SpectrumStyle {
+    // todo
+}
+
 #[derive(Debug)]
 struct PaintCallback {
-    buffer: SpectrumBuffer,
+    shared_state: Arc<RwLock<State>>,
 }
 
 impl egui_wgpu::CallbackTrait for PaintCallback {
@@ -79,17 +140,14 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
         // note: unfortunately there is no easy way to do this without always getting
         // the RenderConfig first
 
-        let render_config = callback_resources
-            .get::<RenderConfig>()
-            .expect("RenderConfig");
-        let target_texture_format = render_config.target_texture_format;
+        let render_state = callback_resources.expect_widget_render_state();
         let pipeline = callback_resources
             .entry()
-            .or_insert_with(|| Pipeline::new(device, target_texture_format));
+            .or_insert_with(|| Pipeline::new(device, render_state.target_texture_format));
 
         // stream data to GPU
-        let mut buffer = self.buffer.state.write();
-        buffer.flush(device, queue, &pipeline);
+        let mut state = self.shared_state.write();
+        state.flush(device, queue, &pipeline);
 
         vec![]
     }
@@ -113,7 +171,7 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
     ) {
         let pipeline = callback_resources.get::<Pipeline>().expect("pipeline");
 
-        let state = self.buffer.state.read();
+        let state = self.shared_state.read();
 
         if let Some(bind_group) = &state.bind_group {
             render_pass.set_pipeline(&pipeline.pipeline);
@@ -163,7 +221,7 @@ impl Pipeline {
             immediate_size: 0,
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("spectrum_gpu.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("spectrum.wgsl"));
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("spectrum"),
@@ -208,11 +266,12 @@ impl Pipeline {
 
 #[derive(Debug, Default)]
 struct State {
-    config: Config,
+    config: ConfigData,
     config_changed: bool,
     config_buffer: Option<wgpu::Buffer>,
 
-    queued_data: Option<Vec<f32>>,
+    queued_data: Vec<f32>,
+    queued_dirty: bool,
     data_buffer: Option<wgpu::Buffer>,
 
     bind_group: Option<wgpu::BindGroup>,
@@ -247,8 +306,8 @@ impl State {
         }
 
         // update data buffer
-        if let Some(data) = self.queued_data.take() {
-            let data_bytes = bytemuck::cast_slice(&data);
+        if self.queued_dirty && !self.queued_data.is_empty() {
+            let data_bytes = bytemuck::cast_slice(&self.queued_data);
 
             // data doesn't fit, so we'll have to get a new one anyway.
             if let Some(data_buffer) = &self.data_buffer
@@ -280,6 +339,8 @@ impl State {
             if !data_written {
                 queue.write_buffer(data_buffer, 0, data_bytes);
             }
+
+            self.queued_dirty = false;
         }
         // if we don't have data, we still want to have a data buffer, so we can render
         else if self.data_buffer.is_none() {
@@ -319,24 +380,25 @@ impl State {
 
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
-struct Config {
+struct ConfigData {
     min_db: f32,
     max_db: f32,
     f_resolution: u32,
     _padding: u32,
-    fg_color: LinSrgba<f32>,
-    bg_color: LinSrgba<f32>,
+    fg_color: Color32,
+    bg_color: Color32,
 }
 
-impl Default for Config {
+impl Default for ConfigData {
     fn default() -> Self {
+        // todo: remove this. needs to be user-configured
         Self {
             min_db: -100.0,
             max_db: 0.0,
             f_resolution: 4096,
             _padding: 0,
-            fg_color: LinSrgba::new(1.0, 0.0, 1.0, 1.0),
-            bg_color: LinSrgba::new(0.0, 1.0, 0.0, 1.0),
+            fg_color: Color32::MAGENTA,
+            bg_color: Color32::GREEN,
         }
     }
 }

@@ -18,10 +18,9 @@ egui = "0.34.2"
 egui-phosphor = "0.12.0"
 egui_dock = { version = "0.19.1", features = ["serde"] }
 egui_extras = { version = "0.34.2", features = ["all_loaders"] }
-enterpolation = "0.3.0"
 indexmap = { version = "2.14.0", features = ["serde"] }
+mrrp-widgets.workspace = true
 num-traits = "0.2.19"
-palette = { version = "0.7.6", features = ["bytemuck", "named", "serde"] }
 parking_lot = "0.12.5"
 rand = "0.10.1"
 rtl-sdr-rs = { version = "0.3.1", features = ["rtl_sdr_blog"] }
@@ -34,6 +33,7 @@ tokio = { version = "1.52.3", features = [
     "sync",
     "time",
 ] }
+tokio-util = { version = "0.7.18", features = ["rt"] }
 toml = "1.1.2"
 tracing = "0.1.44"
 tracing-subscriber = "0.3.23"

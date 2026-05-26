@@ -1,8 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["mrrp-sdr"]
+members = ["mrrp-sdr", "mrrp-widgets"]
 
 [profile.dev.package."*"]
 opt-level = 3
 debug-assertions = true
 overflow-checks = true
+
+[workspace.dependencies]
+mrrp-widgets = { version = "0.1.0", path = "mrrp-widgets" }

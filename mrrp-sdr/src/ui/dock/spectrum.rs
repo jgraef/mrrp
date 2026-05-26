@@ -1,73 +1,101 @@
-use std::time::Duration;
+use std::{
+    sync::Arc,
+    time::Duration,
+};
 
+use mrrp_widgets::spectrum::{
+    SpectrumState,
+    SpectrumView,
+};
 use rand::{
     RngExt,
     rngs::SmallRng,
 };
-use tokio::sync::watch;
-
-use crate::ui::widgets::spectrum_cpu::{
-    SpectrumData,
-    SpectrumView,
+use serde::{
+    Deserialize,
+    Serialize,
 };
+use tokio_util::task::AbortOnDropHandle;
 
 #[derive(Debug)]
-pub struct SpectrumDock {
-    pub amplitude_spectrum: watch::Receiver<SpectrumData>,
+pub struct SpectrumDock<'a> {
+    state: &'a mut SpectrumDockState,
 }
 
-impl SpectrumDock {
-    pub fn new() -> Self {
-        Self {
-            amplitude_spectrum: test_data(),
-        }
+impl<'a> SpectrumDock<'a> {
+    pub fn new(state: &'a mut SpectrumDockState) -> Self {
+        Self { state }
     }
 
-    pub fn show(mut self, ui: &mut egui::Ui) {
-        ui.add(SpectrumView::new(
-            &self.amplitude_spectrum.borrow_and_update(),
-        ));
+    pub fn show(self, ui: &mut egui::Ui) {
+        ui.add(SpectrumView::new(&self.state.inner().state));
         ui.label("TODO: Spectrum");
     }
 }
 
-fn test_data() -> watch::Receiver<SpectrumData> {
-    // for testing we spawn a task that generates random data
-    let center_frequency = 7_000_000;
-    let sample_rate = 2_400_000;
-    let buffer_size = 4096;
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct SpectrumDockState {
+    /// Holds state for the dock, this is not serializable, so it'll be lazily
+    /// initialized when needed.
+    #[serde(skip, default)]
+    inner: Option<StateInner>,
+}
 
-    let mut data = vec![0.0; buffer_size];
+impl SpectrumDockState {
+    fn inner(&mut self) -> &mut StateInner {
+        self.inner.get_or_insert_with(|| StateInner::new())
+    }
+}
 
-    let mut rng: SmallRng = rand::make_rng();
+#[derive(Clone, Debug)]
+struct StateInner {
+    /// When this drops the task that generates the test data is cancelled
+    _drop_handle: Arc<AbortOnDropHandle<()>>,
 
-    let mut fill_uniform = move |data: &mut [f32]| {
-        data.iter_mut().for_each(|value| {
-            *value = rng.random(); // standard uniform [0, 1)
-        });
-    };
+    /// Holds GPU resources (pipeline, buffers, etc.)
+    state: SpectrumState,
+}
 
-    fill_uniform(&mut data);
+impl StateInner {
+    fn new() -> Self {
+        // for testing we spawn a task that generates random data
+        //let center_frequency = 7_000_000;
+        let sample_rate = 2_400_000;
+        let buffer_size = 4096;
 
-    let (sender, receiver) = watch::channel(SpectrumData {
-        data,
-        start_frequency: center_frequency as f32 - sample_rate as f32 / 2.0,
-        end_frequency: center_frequency as f32 + sample_rate as f32 / 2.0,
-    });
+        let mut data = vec![0.0; buffer_size];
 
-    let _join_handle = tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs_f32(
-            buffer_size as f32 / sample_rate as f32,
-        ));
+        let mut rng: SmallRng = rand::make_rng();
 
-        while !sender.is_closed() {
-            interval.tick().await;
-
-            sender.send_modify(|data| {
-                fill_uniform(&mut data.data);
+        let mut fill_uniform = move |data: &mut [f32]| {
+            data.iter_mut().for_each(|value| {
+                *value = rng.random(); // standard uniform [0, 1)
             });
-        }
-    });
+        };
 
-    receiver
+        fill_uniform(&mut data);
+
+        let state = SpectrumState::default();
+
+        let join_handle = tokio::spawn({
+            let state = state.clone();
+
+            async move {
+                let mut interval = tokio::time::interval(Duration::from_secs_f32(
+                    buffer_size as f32 / sample_rate as f32,
+                ));
+
+                loop {
+                    interval.tick().await;
+
+                    fill_uniform(state.update().data_mut());
+                }
+            }
+        });
+
+        Self {
+            _drop_handle: Arc::new(AbortOnDropHandle::new(join_handle)),
+            state,
+        }
+    }
 }

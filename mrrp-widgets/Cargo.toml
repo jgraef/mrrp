@@ -1,0 +1,12 @@
+[package]
+name = "mrrp-widgets"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bytemuck = "1.25.0"
+egui = { version = "0.34.2", default-features = false }
+egui-wgpu = { version = "0.34.2", default-features = false }
+parking_lot = "0.12.5"
+tracing = "0.1.44"
+wgpu = { version = "29.0.3", default-features = false }
