@@ -385,8 +385,8 @@ struct ConfigData {
     max_db: f32,
     f_resolution: u32,
     _padding: u32,
-    fg_color: Color32,
-    bg_color: Color32,
+    fg_color: [f32; 4],
+    bg_color: [f32; 4],
 }
 
 impl Default for ConfigData {
@@ -397,8 +397,8 @@ impl Default for ConfigData {
             max_db: 0.0,
             f_resolution: 4096,
             _padding: 0,
-            fg_color: Color32::MAGENTA,
-            bg_color: Color32::GREEN,
+            fg_color: [1.0, 0.0, 1.0, 1.0],
+            bg_color: [0.0, 1.0, 0.0, 1.0],
         }
     }
 }

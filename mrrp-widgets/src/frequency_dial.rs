@@ -1,3 +1,21 @@
+//! A numeric editable widgets.
+//!
+//! ![Screenshot showing the widget](https://media.githubusercontent.com/media/jgraef/mrrp-sdr/refs/heads/main/docs/widgets/frequency_dial.png)
+//!
+//! This is used to tune the frequency of a radio. It has a bit more convenient
+//! UX for that use-case. Looks pretty cool with DSEG font :)
+//!
+//! This is the bare widget without any frame arond it. Put it in a
+//! [`Frame`](egui::Frame) to control the background, border and margins.
+//!
+//! # TODO
+//!
+//! - Optional to scale font size with available space
+//! - Decide if we want to support negative numbers
+//! - Shift-Left/Right to jump to next 1000-group
+//! - When moving the cursor to the left beyond what is displayed, display more
+//!   while editing.
+
 use std::hash::Hash;
 
 use egui::{

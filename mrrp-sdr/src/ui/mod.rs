@@ -45,17 +45,12 @@ pub fn run_app(directories: Directories, config: Config, command: UiCommand) -> 
             ..Default::default()
         },
         Box::new(|cc| {
-            let wgpu = cc.wgpu_render_state.as_ref().expect("wgpu render state");
-            tracing::debug!(adapter = ?wgpu.device.adapter_info());
-
-            // eframe doesn't give us some info we need in the paint callback, so we need to
-            // store it in the callback resources.
-            wgpu.renderer
-                .write()
-                .callback_resources
-                .insert(RenderConfig {
-                    target_texture_format: wgpu.target_format,
-                });
+            mrrp_widgets::initialize_wgpu_rendering(
+                &cc.egui_ctx,
+                cc.wgpu_render_state
+                    .as_ref()
+                    .expect("wgpu_render_state not present"),
+            );
 
             let mut fonts = egui::FontDefinitions::default();
 

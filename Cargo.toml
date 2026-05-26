@@ -4,8 +4,14 @@ members = ["mrrp-sdr", "mrrp-widgets"]
 
 [profile.dev.package."*"]
 opt-level = 3
+debug-assertions = false
+overflow-checks = false
+
+# Without debug-assertions egui compiles out some methods we want to use (debug overlay)
+[profile.dev.package."egui"]
+opt-level = 3
 debug-assertions = true
-overflow-checks = true
+overflow-checks = false
 
 [workspace.dependencies]
 mrrp-widgets = { version = "0.1.0", path = "mrrp-widgets" }

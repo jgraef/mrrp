@@ -131,13 +131,13 @@ impl TabType {
     }
 }
 
-/// Helper to generate [`TabWithId`]s from [`Tab`]s
+/// Helper to generate [`Tab`]s from [`TabState`]s
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-struct TabWithIdMaker {
+struct TabMaker {
     next_id: usize,
 }
 
-impl TabWithIdMaker {
+impl TabMaker {
     pub fn make_tab(&mut self, state: TabState) -> Tab {
         let id = self.next_id;
         self.next_id += 1;
@@ -157,7 +157,7 @@ impl TabWithIdMaker {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DockState {
-    tab_with_id_maker: TabWithIdMaker,
+    tab_with_id_maker: TabMaker,
     viewer_state: DockViewerState,
     inner: egui_dock::DockState<Tab>,
 }
@@ -179,7 +179,7 @@ impl DockState {
 
 impl Default for DockState {
     fn default() -> Self {
-        let mut tab_with_id_maker = TabWithIdMaker::default();
+        let mut tab_with_id_maker = TabMaker::default();
 
         // create dock state with only radio dock
         let mut inner =
