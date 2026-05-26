@@ -242,7 +242,7 @@ impl<'a> TabViewer for DockViewer<'a> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
         match tab.state {
             TabState::Radio {} => RadioDock.show(ui),
-            TabState::Spectrum {} => SpectrumDock.show(ui),
+            TabState::Spectrum {} => SpectrumDock::new().show(ui),
             TabState::Waterfall {} => WaterfallDock.show(ui),
             TabState::Bookmarks {} => BookmarksDock.show(ui),
             TabState::Channels {} => ChannelsDock.show(ui),

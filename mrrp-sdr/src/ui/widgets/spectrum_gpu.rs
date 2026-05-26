@@ -163,7 +163,7 @@ impl Pipeline {
             immediate_size: 0,
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("spectrum.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("spectrum_gpu.wgsl"));
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("spectrum"),

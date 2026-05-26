@@ -106,8 +106,181 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
         // track if we consumed the scroll delta
         let mut consumed_scroll_delta = false;
 
+        // layout
+        let (layout_job, selections) = {
+            let num_characters = self.num_digits + self.num_digits.div_ceil(3) + 1;
+
+            let mut layout_job = LayoutJob {
+                text: String::with_capacity(num_characters),
+                sections: Vec::with_capacity(num_characters),
+                wrap: TextWrapping::no_max_width(),
+                first_row_min_height: 0.0,
+                break_on_newline: false,
+                halign: Align::Min,
+                justify: false,
+                round_output_to_gui: false,
+            };
+
+            let frequency = *self.frequency;
+            let mut frequency_abs = frequency.abs();
+
+            let mut digit_index = 0;
+
+            // individual characters (digits, decimals, sign) with layout sections
+            // we need to create this ahead of time to properly reverse it and convert it to
+            // text.
+            let mut text_chars = Vec::with_capacity(num_characters);
+
+            // similar to text_chars, but only tracks what digit this character corresponds
+            // to
+            let mut selections = Vec::with_capacity(num_characters);
+
+            let mut layout_section = |ch: char, highlight, weak, smol, select_info| {
+                let font_id = if smol {
+                    style.small_font_id.clone()
+                }
+                else {
+                    style.font_id.clone()
+                };
+
+                let mut format = TextFormat {
+                    font_id,
+                    // we think this only affects spacing between letters in one section, so
+                    // layout_section.leading_space is actually doing this.
+                    extra_letter_spacing: style.digit_spacing,
+                    line_height: None,
+                    color: style.text_color,
+                    background: style.background_color,
+                    expand_bg: style.digit_expand_background,
+                    coords: Default::default(),
+                    italics: style.italics,
+                    underline: Stroke::NONE,
+                    strikethrough: Stroke::NONE,
+                    valign: Align::BOTTOM,
+                };
+
+                if highlight {
+                    format.color = style.edit_text_color;
+                    format.background = style.edit_background_color;
+                }
+                else if weak {
+                    format.color = style.leading_zeros_text_color;
+                }
+
+                let layout_section = LayoutSection {
+                    leading_space: style.digit_spacing,
+                    byte_range: 0..0, // placeholder, fixed later
+                    format,
+                };
+
+                text_chars.push((ch, layout_section));
+                selections.push(select_info);
+            };
+
+            while frequency_abs > 0 || digit_index < self.num_digits {
+                let digit_value = frequency_abs % 10;
+
+                // this digit is being edited
+                let is_being_edited = data
+                    .edit_state
+                    .as_ref()
+                    .is_some_and(|edit_state| edit_state.digit_index == digit_index);
+
+                // the remaining digits are all 0 and will be displayed in a lighter
+                // tone
+                let remaining_is_zero = frequency_abs == 0;
+
+                // these will be rendered with a smaller font size
+                let is_insignificant_digit =
+                    self.insignificant_digits.is_some_and(|n| digit_index < n);
+
+                // decimal point
+                if digit_index > 0 && digit_index % 3 == 0 {
+                    let previous_is_insignificant_digit = self
+                        .insignificant_digits
+                        .is_some_and(|n| digit_index < n + 1);
+
+                    layout_section(
+                        style.decimal, // decimal point
+                        false,
+                        remaining_is_zero,
+                        previous_is_insignificant_digit,
+                        None,
+                    );
+                }
+
+                // layout section
+                layout_section(
+                    char::from_digit(digit_value.try_into().unwrap(), 10).unwrap(),
+                    is_being_edited,
+                    remaining_is_zero,
+                    is_insignificant_digit,
+                    Some((digit_index, digit_value)),
+                );
+
+                frequency_abs /= 10;
+                digit_index += 1;
+            }
+
+            // draw minus sign
+            // todo: this needs to be editable too. but we could also clamp to positive
+            if frequency < 0 {
+                layout_section('-', false, false, false, None);
+            }
+
+            // we created sections from right-to-left. now we fix this
+            for (ch, mut layout_section) in text_chars.into_iter().rev() {
+                layout_section.byte_range.start = layout_job.text.len();
+                layout_job.text.push(ch);
+                layout_section.byte_range.end = layout_job.text.len();
+                layout_job.sections.push(layout_section);
+            }
+            selections.reverse();
+
+            (layout_job, selections)
+        };
+
+        // layout and allocate response and painter
+
+        let galley = ui.painter().layout_job(layout_job);
+        assert_eq!(galley.rows.len(), 1);
+
+        let desired_size = self.desired_size.max(galley.size());
+
+        let (mut response, painter) =
+            ui.allocate_painter(desired_size, Sense::CLICK | Sense::HOVER);
+
+        response = response.on_hover_cursor(CursorIcon::Text);
+
+        // draw it
+        let aligned = style
+            .align
+            .align_size_within_rect(galley.size(), response.rect);
+
+        painter.galley(aligned.min, galley.clone(), Color32::WHITE);
+
+        // Helper to map cursor position to (digit_index, digit_value, step/multiplier)
+        let cursor_position_to_digit = |cursor_position| {
+            let row = &galley.rows[0];
+            let position: Vec2 = cursor_position - aligned.min - row.pos.to_vec2();
+
+            row.glyphs
+                .iter()
+                .enumerate()
+                .find_map(|(character_index, glyph)| {
+                    // you can also match via rect() or logical_rect(), but this way we only
+                    // consider the x coordinate
+                    if position.x >= glyph.pos.x && position.x < glyph.pos.x + glyph.advance_width {
+                        selections[character_index]
+                    }
+                    else {
+                        None
+                    }
+                })
+        };
+
         // handle inputs (mouse wheel, keys)
-        let mut scroll_delta = 0;
+        let hover_pos = response.hover_pos();
         ui.input(|input_state| {
             for event in &input_state.raw.events {
                 match event {
@@ -118,19 +291,26 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
                         phase,
                         modifiers,
                     } => {
-                        // check smooth_scroll_delta to know if scrolling has already been consumed
-                        if input_state.smooth_scroll_delta.y != 0.0 {
+                        // check if we're still scrolling with a digit under the pointer
+                        if (*unit == MouseWheelUnit::Line || *unit == MouseWheelUnit::Point)
+                            && input_state.smooth_scroll_delta.y != 0.0
+                            && let Some(hover_pos) = hover_pos
+                            && let Some((digit_index, _digit_value)) =
+                                cursor_position_to_digit(hover_pos)
+                        {
                             tracing::debug!(?unit, ?delta, ?phase, ?modifiers, "mouse wheel");
 
-                            // not sure if we need to ignore page scrolling
-                            if *unit == MouseWheelUnit::Line || *unit == MouseWheelUnit::Point {
-                                if delta.y > 0.0 {
-                                    scroll_delta += 1;
-                                }
-                                else if delta.y < 0.0 {
-                                    scroll_delta -= 1;
-                                }
+                            let step = ipow10(digit_index);
+
+                            if delta.y > 0.0 {
+                                *self.frequency += step;
                             }
+                            else if delta.y < 0.0 && *self.frequency >= step {
+                                *self.frequency -= step;
+                            }
+
+                            frequency_changed = true;
+                            consumed_scroll_delta = true;
                         }
                     }
                     // check if enter/escape are pressed
@@ -271,215 +451,22 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
             }
         });
 
-        // layout
-        let (layout_job, selections) = {
-            let num_characters = self.num_digits + self.num_digits.div_ceil(3) + 1;
-
-            let mut layout_job = LayoutJob {
-                text: String::with_capacity(num_characters),
-                sections: Vec::with_capacity(num_characters),
-                wrap: TextWrapping::no_max_width(),
-                first_row_min_height: 0.0,
-                break_on_newline: false,
-                halign: Align::Min,
-                justify: false,
-                round_output_to_gui: false,
-            };
-
-            let frequency = *self.frequency;
-            let mut frequency_abs = frequency.abs();
-
-            let mut digit_index = 0;
-
-            // individual characters (digits, decimals, sign) with layout sections
-            // we need to create this ahead of time to properly reverse it and convert it to
-            // text.
-            let mut text_chars = Vec::with_capacity(num_characters);
-
-            // similar to text_chars, but only tracks what digit this character corresponds
-            // to
-            let mut selections = Vec::with_capacity(num_characters);
-
-            let mut layout_section = |ch: char, highlight, weak, smol, select_info| {
-                let font_id = if smol {
-                    style.small_font_id.clone()
-                }
-                else {
-                    style.font_id.clone()
-                };
-
-                let mut format = TextFormat {
-                    font_id,
-                    // we think this only affects spacing between letters in one section, so
-                    // layout_section.leading_space is actually doing this.
-                    extra_letter_spacing: style.digit_spacing,
-                    line_height: None,
-                    color: style.text_color,
-                    background: style.background_color,
-                    expand_bg: style.digit_expand_background,
-                    coords: Default::default(),
-                    italics: style.italics,
-                    underline: Stroke::NONE,
-                    strikethrough: Stroke::NONE,
-                    valign: Align::BOTTOM,
-                };
-
-                if highlight {
-                    format.color = style.edit_text_color;
-                    format.background = style.edit_background_color;
-                }
-                else if weak {
-                    format.color = style.leading_zeros_text_color;
-                }
-
-                let layout_section = LayoutSection {
-                    leading_space: style.digit_spacing,
-                    byte_range: 0..0, // placeholder, fixed later
-                    format,
-                };
-
-                text_chars.push((ch, layout_section));
-                selections.push(select_info);
-            };
-
-            while frequency_abs > 0 || digit_index < self.num_digits {
-                let digit_value = frequency_abs % 10;
-
-                // this digit is being edited
-                let is_being_edited = data
-                    .edit_state
-                    .as_ref()
-                    .is_some_and(|edit_state| edit_state.digit_index == digit_index);
-
-                // the remaining digits are all 0 and will be displayed in a lighter
-                // tone
-                let remaining_is_zero = frequency_abs == 0;
-
-                // these will be rendered with a smaller font size
-                let is_insignificant_digit =
-                    self.insignificant_digits.is_some_and(|n| digit_index < n);
-
-                // decimal point
-                if digit_index > 0 && digit_index % 3 == 0 {
-                    let previous_is_insignificant_digit = self
-                        .insignificant_digits
-                        .is_some_and(|n| digit_index < n + 1);
-
-                    layout_section(
-                        style.decimal, // decimal point
-                        false,
-                        remaining_is_zero,
-                        previous_is_insignificant_digit,
-                        None,
-                    );
-                }
-
-                // layout section
-                layout_section(
-                    char::from_digit(digit_value.try_into().unwrap(), 10).unwrap(),
-                    is_being_edited,
-                    remaining_is_zero,
-                    is_insignificant_digit,
-                    Some((digit_index, digit_value)),
-                );
-
-                frequency_abs /= 10;
-                digit_index += 1;
+        // handle click
+        if let Some(cursor_position) = response.interact_pointer_pos()
+            && response.clicked()
+            && let Some((digit_index, _digit_value)) = cursor_position_to_digit(cursor_position)
+        {
+            if let Some(edit_state) = &mut data.edit_state {
+                edit_state.digit_index = digit_index;
             }
-
-            // draw minus sign
-            // todo: this needs to be editable too. but we could also clamp to positive
-            if frequency < 0 {
-                layout_section('-', false, false, false, None);
+            else {
+                data.edit_state = Some(EditState {
+                    digit_index,
+                    reset_value: *self.frequency,
+                });
             }
-
-            // we created sections from right-to-left. now we fix this
-            for (ch, mut layout_section) in text_chars.into_iter().rev() {
-                layout_section.byte_range.start = layout_job.text.len();
-                layout_job.text.push(ch);
-                layout_section.byte_range.end = layout_job.text.len();
-                layout_job.sections.push(layout_section);
-            }
-            selections.reverse();
-
-            (layout_job, selections)
-        };
-
-        // draw and react to response
-        let mut response = {
-            let galley = ui.painter().layout_job(layout_job);
-            assert_eq!(galley.rows.len(), 1);
-
-            let desired_size = self.desired_size.max(galley.size());
-
-            let (mut response, painter) =
-                ui.allocate_painter(desired_size, Sense::CLICK | Sense::HOVER);
-
-            response = response.on_hover_cursor(CursorIcon::Text);
-
-            let aligned = style
-                .align
-                .align_size_within_rect(galley.size(), response.rect);
-
-            painter.galley(aligned.min, galley.clone(), Color32::WHITE);
-
-            // Helper to map cursor position to (digit_index, digit_value, step/multiplier)
-            let cursor_position_to_digit = |cursor_position| {
-                let row = &galley.rows[0];
-                let position: Vec2 = cursor_position - aligned.min - row.pos.to_vec2();
-
-                row.glyphs
-                    .iter()
-                    .enumerate()
-                    .find_map(|(character_index, glyph)| {
-                        // you can also match via rect() or logical_rect(), but this way we only
-                        // consider the x coordinate
-                        if position.x >= glyph.pos.x
-                            && position.x < glyph.pos.x + glyph.advance_width
-                        {
-                            selections[character_index]
-                        }
-                        else {
-                            None
-                        }
-                    })
-            };
-
-            if let Some(cursor_position) = response.interact_pointer_pos()
-                && response.clicked()
-                && let Some((digit_index, _digit_value)) = cursor_position_to_digit(cursor_position)
-            {
-                if let Some(edit_state) = &mut data.edit_state {
-                    edit_state.digit_index = digit_index;
-                }
-                else {
-                    data.edit_state = Some(EditState {
-                        digit_index,
-                        reset_value: *self.frequency,
-                    });
-                }
-                data_changed = true;
-            }
-
-            if let Some(cursor_position) = response.hover_pos()
-                && let Some((digit_index, _digit_value)) = cursor_position_to_digit(cursor_position)
-            {
-                let step = ipow10(digit_index);
-
-                if scroll_delta > 0 {
-                    *self.frequency += step;
-                    frequency_changed = true;
-                    consumed_scroll_delta = true;
-                }
-                else if scroll_delta < 0 && *self.frequency >= step {
-                    *self.frequency -= step;
-                    frequency_changed = true;
-                    consumed_scroll_delta = true;
-                }
-            }
-
-            response
-        };
+            data_changed = true;
+        }
 
         debug_assert!(
             *self.frequency == frequency_before || frequency_changed,
