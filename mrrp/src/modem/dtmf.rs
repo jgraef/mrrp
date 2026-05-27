@@ -300,7 +300,10 @@ impl CurrentSignal {
 
 #[cfg(test)]
 mod tests {
-    use std::convert::Infallible;
+    use std::{
+        convert::Infallible,
+        fmt::Display,
+    };
 
     use futures_util::{
         FutureExt,
@@ -360,6 +363,7 @@ mod tests {
     fn count_stream<R>(mut stream: R) -> usize
     where
         R: AsyncReadSamples<f32> + Unpin,
+        R::Error: Display,
     {
         let mut num_samples = 0;
         loop {

@@ -63,7 +63,7 @@ where
     F: ?Sized,
 {
     type Design: FilterDesign;
-    type Error: std::error::Error;
+    type Error;
 
     fn design_filter(&self, filter_specification: F) -> Result<Self::Design, Self::Error>;
 }

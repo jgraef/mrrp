@@ -169,7 +169,7 @@ enum Args {
 async fn plot_frequencies<R>(source: R, output: impl AsRef<Path>) -> Result<(), Error>
 where
     R: AsyncReadSamples<Complex<f32>> + GetSampleRate + Unpin,
-    R::Error: Send + Sync + 'static,
+    R::Error: std::error::Error + Send + Sync + 'static,
 {
     let sample_rate = source.sample_rate();
 

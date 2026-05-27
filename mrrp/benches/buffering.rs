@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     hint::black_box,
     time::Duration,
 };
@@ -95,6 +96,7 @@ criterion_main!(benches);
 fn read_stream<R, S>(mut stream: R)
 where
     R: AsyncReadSamples<S> + Unpin + FiniteStream,
+    R::Error: Debug,
 {
     let mut output = vec![];
     stream

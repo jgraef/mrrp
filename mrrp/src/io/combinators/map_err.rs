@@ -38,7 +38,6 @@ impl<R, S, E, F> AsyncReadSamples<S> for MapErr<R, F>
 where
     R: AsyncReadSamples<S>,
     F: FnMut(R::Error) -> E,
-    E: std::error::Error,
 {
     type Error = E;
 

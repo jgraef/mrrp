@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     hint::black_box,
     pin::Pin,
     task::{
@@ -68,6 +69,7 @@ fn bench_fir_single_sample_buffered_bug() {
 fn read_stream<R, S>(mut stream: R)
 where
     R: AsyncReadSamples<S> + Unpin + FiniteStream,
+    R::Error: Debug,
 {
     let mut output = vec![];
     stream

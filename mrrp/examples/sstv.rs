@@ -22,8 +22,8 @@ use mrrp::{
     },
     io::{
         AsyncReadSamplesExt,
+        FiniteStream,
         GetSampleRate,
-        StreamLength,
         combinators::{
             Scanner,
             ScannerExt,

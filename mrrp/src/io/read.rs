@@ -231,7 +231,7 @@ impl<'a, S> SampleBufMut<S> for ReadBuf<'a, S> {
 /// [1]: https://docs.rs/futures/latest/futures/io/trait.AsyncRead.html
 pub trait AsyncReadSamples<S>: StreamLength {
     /// Error that might occur when reading the IQ stream.
-    type Error: std::error::Error;
+    type Error;
 
     /// Poll the stream to fill a buffer with IQ samples.
     fn poll_read_samples(

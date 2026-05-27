@@ -53,7 +53,6 @@ where
     T: Stream<Item = Result<C, E>> + Unpin,
     C: SampleBuf<S> + Unpin,
     S: Clone,
-    E: std::error::Error,
 {
     type Error = E;
 

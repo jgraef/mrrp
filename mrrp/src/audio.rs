@@ -230,10 +230,7 @@ where
 
     match done_receiver.await {
         Ok(Ok(())) => Ok(()),
-        Ok(Err(error)) => {
-            tracing::warn!(?error);
-            Err(Error::Stream(error))
-        }
+        Ok(Err(error)) => Err(Error::Stream(error)),
         Err(_) => {
             // todo: investigate why rodio seems to drop the source just before the stream
             // is exhausted

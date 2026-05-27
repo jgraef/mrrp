@@ -47,6 +47,7 @@ impl<R, S> StreamHandler<R, S> {
 impl<R, S> ConnectionHandler for StreamHandler<R, S>
 where
     R: AsyncReadSamples<S> + Send + Unpin,
+    R::Error: std::error::Error,
     S: Sample + Send,
     Complex<u8>: FromSample<S>,
 {
@@ -76,6 +77,7 @@ where
 pub async fn serve_connection<R>(connection: TcpStream, stream: R) -> Result<(), Error<R::Error>>
 where
     R: AsyncReadSamples<Complex<f32>> + Send + Unpin,
+    R::Error: std::error::Error,
 {
     rtlsdr_async::rtl_tcp::server::serve_connection(
         connection,
