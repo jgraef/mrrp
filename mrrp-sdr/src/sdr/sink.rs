@@ -1,4 +1,3 @@
-use mrrp::buf::SampleBufMut;
 use mrrp_widgets::{
     spectrum::SpectrumState,
     waterfall::{
@@ -24,7 +23,7 @@ impl SpectrumSink for SpectrumState {
 
         let data = guard.data_mut();
         data.clear();
-        data.put(&*frame.data);
+        data.extend(frame.data);
     }
 }
 
@@ -35,15 +34,35 @@ impl SpectrumSink for WaterfallState {
         let (start_frequency, end_frequency) = frame.frequency_range();
 
         // see comment in <SpectrumState as SpectrumSink>::push
-
-        let mut data = vec![];
-        data.put(&*frame.data);
+        let data = frame.data.to_owned();
 
         guard.push(WaterfallLine {
             data,
             start_frequency,
             end_frequency,
         });
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct RepaintOnPush<S> {
+    inner: S,
+    ctx: egui::Context,
+}
+
+impl<S> RepaintOnPush<S> {
+    pub fn new(inner: S, ctx: egui::Context) -> Self {
+        Self { inner, ctx }
+    }
+}
+
+impl<S> SpectrumSink for RepaintOnPush<S>
+where
+    S: SpectrumSink,
+{
+    fn push<'a>(&mut self, frame: SpectrumFrame<&'a [f32]>) {
+        self.inner.push(frame);
+        self.ctx.request_repaint();
     }
 }
 

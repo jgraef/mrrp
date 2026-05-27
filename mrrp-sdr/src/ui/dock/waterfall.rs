@@ -8,8 +8,8 @@ use serde::{
 };
 
 use crate::sdr::{
-    GetSdrHandle,
     SpectrumSinkHandle,
+    ensure_spectrum_sink_is_linked,
 };
 
 #[derive(Debug)]
@@ -23,7 +23,8 @@ impl<'a> WaterfallDock<'a> {
     }
 
     pub fn show(self, ui: &mut egui::Ui) {
-        ui.ctx().ensure_spectrum_sink_is_linked(
+        ensure_spectrum_sink_is_linked(
+            ui.ctx(),
             &self.state.view_state,
             &mut self.state.sdr_link_handle,
         );

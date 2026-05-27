@@ -5,7 +5,13 @@ use crate::{
     cli::UiCommand,
     config::Config,
     directories::Directories,
-    sdr::initialize_sdr_runtime,
+    sdr::{
+        initialize_sdr_runtime,
+        source::{
+            MockSource,
+            SourceInfo,
+        },
+    },
     ui::{
         about_window::AboutWindow,
         debug_window::DebugWindow,
@@ -49,7 +55,12 @@ impl App {
         storage: &dyn Storage,
     ) -> Self {
         // start SDR runtime
-        initialize_sdr_runtime(ctx);
+        let sdr = initialize_sdr_runtime(ctx);
+        sdr.add_source(MockSource::new(SourceInfo {
+            center_frequency: 7_000_000,
+            sample_rate: 2_400_000,
+        }))
+        .leak();
 
         let span = tracing::info_span!("app").entered();
 

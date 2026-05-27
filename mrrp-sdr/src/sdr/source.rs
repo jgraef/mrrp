@@ -4,14 +4,17 @@ use std::{
         Context,
         Poll,
     },
+    time::Duration,
 };
 
 use anyhow::Error;
 use mrrp::{
     io::{
         AsyncReadSamples,
+        AsyncReadSamplesExt,
         ReadBuf,
         StreamLength,
+        combinators::Throttled,
     },
     source::Noise,
 };
@@ -37,7 +40,7 @@ pub struct SourceInfo {
 
 #[derive(Clone, Debug)]
 pub struct MockSource {
-    noise: Noise<SmallRng, ComplexDistribution<Normal<f32>, Normal<f32>>>,
+    noise: Throttled<Noise<SmallRng, ComplexDistribution<Normal<f32>, Normal<f32>>>>,
     pub info: SourceInfo,
 }
 
@@ -47,8 +50,10 @@ impl MockSource {
         let distribution = Normal::new(0.0, std_dev).unwrap();
         let distribution = ComplexDistribution::new(distribution, distribution);
 
+        let sample_time = Duration::from_secs_f32(1.0 / info.sample_rate as f32);
+
         Self {
-            noise: Noise::new(rand::make_rng(), distribution),
+            noise: Noise::new(rand::make_rng(), distribution).throttle(sample_time),
             info,
         }
     }

@@ -4,10 +4,17 @@ pub mod source;
 use std::{
     collections::HashMap,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{
+            AtomicBool,
+            Ordering,
+        },
+    },
     task::{
         Context,
         Poll,
+        Waker,
     },
 };
 
@@ -27,6 +34,7 @@ use tracing::Instrument;
 use crate::{
     sdr::{
         sink::{
+            RepaintOnPush,
             SpectrumFrame,
             SpectrumSink,
         },
@@ -45,8 +53,7 @@ pub struct SdrRuntime {
     amplitude_buffer: SamplesMut<f32>,
     fft: Fft,
 
-    #[debug(skip)]
-    sources: HashMap<usize, BufferedSource>,
+    sources: Sources,
 
     #[debug(skip)]
     spectrum_sinks: HashMap<usize, Box<dyn SpectrumSink + Send>>,
@@ -56,6 +63,7 @@ impl SdrRuntime {
     pub fn spawn() -> SdrHandle {
         let (command_sender, command_receiver) = mpsc::unbounded_channel();
 
+        // todo: don't hard-code. this is also the window_size for the FFT
         let buffer_size = 4096;
 
         let this = Self {
@@ -63,11 +71,13 @@ impl SdrRuntime {
             buffer_size,
             amplitude_buffer: SamplesMut::with_capacity(buffer_size),
             fft: Fft::default(),
-            sources: HashMap::new(),
+            sources: Sources::new(buffer_size),
             spectrum_sinks: HashMap::new(),
         };
 
-        let _join_handle = tokio::spawn(this.run().instrument(tracing::info_span!("sdr-runtime")));
+        let span = tracing::info_span!("sdr-runtime");
+
+        let _join_handle = tokio::spawn(this.run().instrument(span));
 
         SdrHandle {
             command_sender,
@@ -77,18 +87,13 @@ impl SdrRuntime {
 
     pub async fn run(mut self) {
         loop {
-            let read_sources = ReadSources {
-                sources: &mut self.sources,
-                read_exactly: self.buffer_size,
-            };
-
             tokio::select! {
                 biased;
                 command = self.command_receiver.recv() => {
                     let Some(command) = command else { break; };
                     self.handle_command(command);
                 }
-                id = read_sources => {
+                id = self.sources.read() => {
                     self.handle_data(id);
                 }
             }
@@ -100,16 +105,10 @@ impl SdrRuntime {
 
         match command {
             Command::AddSource { id, source } => {
-                self.sources.insert(
-                    id,
-                    BufferedSource {
-                        source,
-                        buffer: SamplesMut::with_capacity(self.buffer_size),
-                    },
-                );
+                self.sources.insert(id, source);
             }
             Command::RemoveSource { id } => {
-                self.sources.remove(&id);
+                self.sources.remove(id);
             }
             Command::AddSpectrumSink {
                 id,
@@ -126,6 +125,7 @@ impl SdrRuntime {
     fn handle_data(&mut self, id: usize) {
         let buffered_source = &mut self
             .sources
+            .buffered_sources
             .get_mut(&id)
             .unwrap_or_else(|| panic!("Got data for source #{id}, but it doesn't exist anymore."));
 
@@ -169,6 +169,48 @@ impl SdrRuntime {
         for (_, spectrum_sink) in &mut self.spectrum_sinks {
             spectrum_sink.push(frame);
         }
+
+        // clear buffer
+        buffered_source.buffer.clear();
+    }
+}
+
+#[derive(Debug)]
+struct Sources {
+    buffer_size: usize,
+    buffered_sources: HashMap<usize, BufferedSource>,
+    waker: Waker,
+}
+
+impl Sources {
+    pub fn new(buffer_size: usize) -> Self {
+        Self {
+            buffer_size,
+            buffered_sources: HashMap::new(),
+            waker: Waker::noop().clone(),
+        }
+    }
+
+    pub fn insert(&mut self, id: usize, source: Pin<Box<dyn Source + Send>>) {
+        self.buffered_sources.insert(
+            id,
+            BufferedSource {
+                source,
+                buffer: SamplesMut::with_capacity(self.buffer_size),
+            },
+        );
+
+        // a task might be waiting for data, but will not be woken by any of the exiting
+        // sources (if there are any). so we also need to wake if there is a new souce.
+        self.waker.wake_by_ref();
+    }
+
+    pub fn remove(&mut self, id: usize) {
+        self.buffered_sources.remove(&id);
+    }
+
+    pub fn read(&mut self) -> ReadSources<'_> {
+        ReadSources { sources: self }
     }
 }
 
@@ -181,36 +223,37 @@ struct BufferedSource {
 }
 
 /// Helper to read from all sources at once
+#[derive(Debug)]
 struct ReadSources<'a> {
-    sources: &'a mut HashMap<usize, BufferedSource>,
-    read_exactly: usize,
+    sources: &'a mut Sources,
 }
 
 impl<'a> Future for ReadSources<'a> {
     type Output = usize;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let this = &mut *self;
+        let sources = &mut *self.sources;
 
         'outer: loop {
             let mut all_pending = true;
 
-            for (&id, buffered_source) in &mut *this.sources {
-                // todo: we need to limit that read_buf
-
-                // todo: this might happen if we reduce the requested amount between calls to
-                // this. we should handle this case.
-                let mut remaining_buffer_capacity = this
-                    .read_exactly
+            for (&id, buffered_source) in &mut sources.buffered_sources {
+                // todo: this expect might fail if we reduce the requested amount between calls
+                // to this. we should handle this case.
+                let mut remaining_buffer_capacity = sources
+                    .buffer_size
                     .checked_sub(buffered_source.buffer.len())
                     .expect("buffer overflowed");
+
+                assert!(remaining_buffer_capacity != 0, "buffer full");
 
                 let (result, num_read) = buffered_source.buffer.with_read_buf(|read_buf| {
                     buffered_source
                         .source
                         .as_mut()
-                        .poll_read_samples(cx, &mut read_buf.take(remaining_buffer_capacity))
+                        .poll_read_samples(cx, read_buf)
                 });
+                assert!(num_read <= sources.buffer_size);
 
                 match result {
                     Poll::Pending => {
@@ -219,12 +262,19 @@ impl<'a> Future for ReadSources<'a> {
                     Poll::Ready(Err(error)) => {
                         // the source failed. we can't remove it while we're iterating over it, so
                         // we remove it and start over
-                        tracing::error!(%error, "Source #{id} error");
-                        this.sources.remove(&id);
+                        tracing::error!(id, %error, "Source error");
+                        sources.buffered_sources.remove(&id);
                         continue 'outer;
                     }
                     Poll::Ready(Ok(())) => {
                         // got some samples.
+
+                        if num_read == 0 {
+                            // nevermind, this is the end of stream
+                            tracing::error!(id, "Source end of stream");
+                            sources.buffered_sources.remove(&id);
+                            continue 'outer;
+                        }
 
                         // check if the buffer has been filled
                         remaining_buffer_capacity -= num_read;
@@ -244,8 +294,10 @@ impl<'a> Future for ReadSources<'a> {
 
             if all_pending {
                 // all sources pending, so we just return pending.
-                // note that if there are no sources we just return pending, which is exactly
-                // what we want.
+                // note that there might be no sources at all.
+                // in either case we need to wake if we get a new source
+                self.sources.waker.clone_from(cx.waker());
+
                 return Poll::Pending;
             }
             else {
@@ -280,12 +332,10 @@ impl SdrHandle {
             spectrum_sink: Box::new(sink),
         });
 
-        SpectrumSinkHandle {
-            command_sender: self.command_sender.clone(),
-            id,
-        }
+        SpectrumSinkHandle::new(self.command_sender.clone(), id)
     }
 
+    #[must_use]
     pub fn add_source<S>(&self, source: S) -> SourceHandle
     where
         S: Source + Sized + Send + 'static,
@@ -298,10 +348,7 @@ impl SdrHandle {
             source: Box::pin(source),
         });
 
-        SourceHandle {
-            command_sender: self.command_sender.clone(),
-            id,
-        }
+        SourceHandle::new(self.command_sender.clone(), id)
     }
 }
 
@@ -325,31 +372,81 @@ enum Command {
     },
 }
 
-#[derive(Clone, Debug)]
-pub struct SpectrumSinkHandle {
+#[derive(Debug)]
+struct HandleInner {
     command_sender: mpsc::UnboundedSender<Command>,
     id: usize,
+    remove_on_drop: AtomicBool,
+    on_drop: fn(usize) -> Command,
 }
 
-impl Drop for SpectrumSinkHandle {
+impl HandleInner {
+    fn new(
+        command_sender: mpsc::UnboundedSender<Command>,
+        id: usize,
+        on_drop: fn(usize) -> Command,
+    ) -> Self {
+        Self {
+            command_sender,
+            id,
+            remove_on_drop: AtomicBool::new(true),
+            on_drop,
+        }
+    }
+
+    fn leak(&self) {
+        self.remove_on_drop.store(false, Ordering::Relaxed);
+    }
+}
+
+impl Drop for HandleInner {
     fn drop(&mut self) {
-        let _ = self
-            .command_sender
-            .send(Command::RemoveSpectrumSink { id: self.id });
+        let command = (self.on_drop)(self.id);
+
+        if self.remove_on_drop.load(Ordering::Relaxed) {
+            let _ = self.command_sender.send(command);
+        }
+        else {
+            tracing::debug!(?command, "leaking handle");
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct SpectrumSinkHandle {
+    inner: Arc<HandleInner>,
+}
+
+impl SpectrumSinkHandle {
+    fn new(command_sender: mpsc::UnboundedSender<Command>, id: usize) -> Self {
+        Self {
+            inner: Arc::new(HandleInner::new(command_sender, id, |id| {
+                Command::RemoveSpectrumSink { id }
+            })),
+        }
+    }
+
+    pub fn leak(self) {
+        self.inner.leak();
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct SourceHandle {
-    command_sender: mpsc::UnboundedSender<Command>,
-    id: usize,
+    inner: Arc<HandleInner>,
 }
 
-impl Drop for SourceHandle {
-    fn drop(&mut self) {
-        let _ = self
-            .command_sender
-            .send(Command::RemoveSource { id: self.id });
+impl SourceHandle {
+    fn new(command_sender: mpsc::UnboundedSender<Command>, id: usize) -> Self {
+        Self {
+            inner: Arc::new(HandleInner::new(command_sender, id, |id| {
+                Command::RemoveSource { id }
+            })),
+        }
+    }
+
+    pub fn leak(self) {
+        self.inner.leak();
     }
 }
 
@@ -360,16 +457,6 @@ pub trait GetSdrHandle {
         self.sdr_handle()
             .expect("Could not retrieve handle to SDR runtime")
     }
-
-    fn ensure_spectrum_sink_is_linked<S>(&self, sink: &S, handle: &mut Option<SpectrumSinkHandle>)
-    where
-        S: SpectrumSink + Send + Clone + 'static,
-    {
-        if handle.is_none() {
-            let sdr = self.expect_sdr_handle();
-            *handle = Some(sdr.add_spectrum_sink(sink.clone()));
-        }
-    }
 }
 
 impl GetSdrHandle for egui::Context {
@@ -378,9 +465,23 @@ impl GetSdrHandle for egui::Context {
     }
 }
 
-pub fn initialize_sdr_runtime(ctx: &egui::Context) {
+pub fn initialize_sdr_runtime(ctx: &egui::Context) -> SdrHandle {
     let sdr_handle = SdrRuntime::spawn();
-    ctx.data_mut(|data| data.insert_temp(egui::Id::NULL, sdr_handle));
+    ctx.data_mut(|data| data.insert_temp(egui::Id::NULL, sdr_handle.clone()));
+    sdr_handle
+}
+
+pub fn ensure_spectrum_sink_is_linked<S>(
+    ctx: &egui::Context,
+    sink: &S,
+    handle: &mut Option<SpectrumSinkHandle>,
+) where
+    S: SpectrumSink + Send + Clone + 'static,
+{
+    if handle.is_none() {
+        let sdr = ctx.expect_sdr_handle();
+        *handle = Some(sdr.add_spectrum_sink(RepaintOnPush::new(sink.clone(), ctx.clone())));
+    }
 }
 
 #[derive(derive_more::Debug)]
