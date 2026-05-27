@@ -15,27 +15,24 @@ use parking_lot::{
     RwLock,
     RwLockWriteGuard,
 };
-use wgpu::{
-    TextureViewDimension::D1,
-    util::DeviceExt,
-};
 
 use crate::{
     GetWidgetRenderState,
+    RenderState,
     util::color32_to_linrgba,
 };
 
 #[derive(Debug)]
-pub struct SpectrumView<'a> {
-    state: &'a SpectrumState,
+pub struct WaterfallView<'a> {
+    state: &'a WaterfallState,
     desired_size: Vec2,
-    style: SpectrumStyle,
+    style: WaterfallStyle,
     min_db: f32,
     max_db: f32,
 }
 
-impl<'a> SpectrumView<'a> {
-    pub fn new(state: &'a SpectrumState) -> Self {
+impl<'a> WaterfallView<'a> {
+    pub fn new(state: &'a WaterfallState) -> Self {
         Self {
             state,
             desired_size: Vec2::INFINITY,
@@ -60,13 +57,13 @@ impl<'a> SpectrumView<'a> {
         self
     }
 
-    pub fn style(mut self, style: SpectrumStyle) -> Self {
+    pub fn style(mut self, style: WaterfallStyle) -> Self {
         self.style = style;
         self
     }
 }
 
-impl<'a> egui::Widget for SpectrumView<'a> {
+impl<'a> egui::Widget for WaterfallView<'a> {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let response = ui.allocate_response(
             ui.available_size(),
@@ -88,50 +85,48 @@ impl<'a> egui::Widget for SpectrumView<'a> {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct SpectrumState {
+pub struct WaterfallState {
     shared_state: Arc<RwLock<State>>,
 }
 
-impl SpectrumState {
+impl WaterfallState {
     pub fn new(data: Vec<f32>) -> Self {
         Self {
             shared_state: Arc::new(RwLock::new(State {
                 config: None,
                 config_buffer: None,
-                queued_data: data,
-                queued_dirty: true,
+                queued_lines: vec![],
                 data_buffer: None,
                 bind_group: None,
             })),
         }
     }
 
-    pub fn update(&self) -> SpectrumStateUpdateGuard<'_> {
+    pub fn update(&self) -> WaterfallStateUpdateGuard<'_> {
         let mut state = self.shared_state.write();
-        SpectrumStateUpdateGuard { state }
+        WaterfallStateUpdateGuard { state }
     }
 }
 
 #[derive(Debug)]
-pub struct SpectrumStateUpdateGuard<'a> {
+pub struct WaterfallStateUpdateGuard<'a> {
     state: RwLockWriteGuard<'a, State>,
 }
 
-impl<'a> SpectrumStateUpdateGuard<'a> {
-    pub fn data_mut(&mut self) -> &mut Vec<f32> {
-        self.state.queued_dirty = true;
-        &mut self.state.queued_data
+impl<'a> WaterfallStateUpdateGuard<'a> {
+    pub fn push(&mut self, line: WaterfallLine) {
+        self.state.queued_lines.push(line);
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct SpectrumStyle {
+pub struct WaterfallStyle {
     pub background_color: Color32,
     pub foreground_color1: Color32,
     pub foreground_color2: Color32,
 }
 
-impl Default for SpectrumStyle {
+impl Default for WaterfallStyle {
     fn default() -> Self {
         Self {
             background_color: Color32::BLACK,
@@ -207,7 +202,7 @@ struct Pipeline {
 impl Pipeline {
     pub fn new(device: &wgpu::Device, target_texture_format: wgpu::TextureFormat) -> Self {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("spectrum"),
+            label: Some("waterfall"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -233,15 +228,15 @@ impl Pipeline {
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("spectrum"),
+            label: Some("waterfall"),
             bind_group_layouts: &[Some(&bind_group_layout)],
             immediate_size: 0,
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("spectrum.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("waterfall.wgsl"));
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("spectrum"),
+            label: Some("waterfall"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
@@ -289,12 +284,7 @@ struct State {
     /// The GPU buffer storing the config
     config_buffer: Option<wgpu::Buffer>,
 
-    /// Host-side data buffer
-    queued_data: Vec<f32>,
-
-    /// If the host-side data buffer has been changed since it was last sent to
-    /// the GPU
-    queued_dirty: bool,
+    queued_lines: Vec<WaterfallLine>,
 
     /// The GPU-side data buffer
     data_buffer: Option<wgpu::Buffer>,
@@ -311,125 +301,16 @@ impl State {
         pipeline: &Pipeline,
         config: &ConfigData,
     ) {
-        // update config buffer
-        let mut config_changed = self
-            .config
-            .as_ref()
-            .is_some_and(|current| config != current);
 
-        let config_buffer = self.config_buffer.get_or_insert_with(|| {
-            tracing::debug!("creating spectrum config buffer");
-
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("spectrum config"),
-                contents: bytemuck::bytes_of(config),
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-            });
-
-            // note: no need to recreate a bind group here, since we can't have one already
-            // anyway
-            assert!(self.bind_group.is_none());
-
-            self.config = Some(*config);
-
-            buffer
-        });
-
-        if config_changed {
-            tracing::debug!("writing spectrum config buffer");
-
-            queue.write_buffer(&config_buffer, 0, bytemuck::bytes_of(config));
-
-            self.config = Some(*config);
-        }
-
-        let buffer_size = self.queued_data.len();
-        let buffer_size_bytes =
-            u64::try_from(buffer_size * size_of::<f32>()).expect("usize -> u64 overflow");
-
-        if buffer_size != 0 {
-            // if the the host-buffer is now bigger than the gpu buffer, we need to
-            // reallocate
-            if self
-                .data_buffer
-                .as_ref()
-                .is_some_and(|buffer| buffer.size() < buffer_size_bytes)
-            {
-                self.data_buffer = None;
-            }
-
-            // upload data to gpu if dirty
-            if self.queued_dirty {
-                let data_bytes = bytemuck::cast_slice(&self.queued_data);
-
-                // data doesn't fit, so we'll have to get a new one anyway.
-                if let Some(data_buffer) = &self.data_buffer
-                    && u64::try_from(data_bytes.len()).expect("usize -> u64 overflow")
-                        > data_buffer.size()
-                {
-                    self.data_buffer = None;
-                    self.bind_group = None;
-                }
-
-                // create buffer if we don't have one
-                let mut data_written = false;
-                let data_buffer = self.data_buffer.get_or_insert_with(|| {
-                    tracing::debug!("creating spectrum data buffer");
-
-                    let data_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("spectrum config"),
-                            contents: data_bytes,
-                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-                        });
-
-                    // when we create the buffer we can always initialize it right away, so we don't
-                    // need to write to it anymore.
-                    data_written = true;
-
-                    data_buffer
-                });
-
-                if !data_written {
-                    queue.write_buffer(data_buffer, 0, data_bytes);
-                }
-
-                self.queued_dirty = false;
-            }
-            // if we don't have data, we still want to have a data buffer, so we can render
-            else if self.data_buffer.is_none() {
-                self.data_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("spectrum config"),
-                    size: buffer_size_bytes,
-                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-                    mapped_at_creation: false,
-                }));
-            }
-        }
-
-        // create bind group
-        if self.bind_group.is_none()
-            && let (Some(config_buffer), Some(data_buffer)) =
-                (&self.config_buffer, &self.data_buffer)
-        {
-            tracing::debug!("creating spectrum bind group");
-
-            self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("spectrum"),
-                layout: &pipeline.bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: config_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: data_buffer.as_entire_binding(),
-                    },
-                ],
-            }));
-        }
+        //todo!();
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct WaterfallLine {
+    pub data: Vec<f32>,
+    pub start_frequency: f32,
+    pub end_frequency: f32,
 }
 
 #[derive(Clone, Copy, Debug, Pod, Zeroable, Default, PartialEq)]
@@ -444,7 +325,7 @@ struct ConfigData {
 }
 
 impl ConfigData {
-    pub fn new(style: &SpectrumStyle, min_db: f32, max_db: f32) -> Self {
+    pub fn new(style: &WaterfallStyle, min_db: f32, max_db: f32) -> Self {
         Self {
             min_db,
             max_db,

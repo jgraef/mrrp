@@ -1,5 +1,7 @@
 pub mod frequency_dial;
 pub mod spectrum;
+pub(crate) mod util;
+pub mod waterfall;
 
 use egui_wgpu::{
     CallbackResources,

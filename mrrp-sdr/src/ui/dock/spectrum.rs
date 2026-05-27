@@ -8,9 +8,10 @@ use mrrp_widgets::spectrum::{
     SpectrumView,
 };
 use rand::{
-    RngExt,
+    distr::Distribution,
     rngs::SmallRng,
 };
+use rand_distr::Normal;
 use serde::{
     Deserialize,
     Serialize,
@@ -28,8 +29,7 @@ impl<'a> SpectrumDock<'a> {
     }
 
     pub fn show(self, ui: &mut egui::Ui) {
-        ui.add(SpectrumView::new(&self.state.inner().state));
-        ui.label("TODO: Spectrum");
+        ui.add(SpectrumView::new(&self.state.inner(ui.ctx()).state));
     }
 }
 
@@ -42,8 +42,9 @@ pub struct SpectrumDockState {
 }
 
 impl SpectrumDockState {
-    fn inner(&mut self) -> &mut StateInner {
-        self.inner.get_or_insert_with(|| StateInner::new())
+    fn inner(&mut self, ctx: &egui::Context) -> &mut StateInner {
+        self.inner
+            .get_or_insert_with(|| StateInner::new(ctx.clone()))
     }
 }
 
@@ -57,23 +58,11 @@ struct StateInner {
 }
 
 impl StateInner {
-    fn new() -> Self {
+    fn new(ctx: egui::Context) -> Self {
         // for testing we spawn a task that generates random data
         //let center_frequency = 7_000_000;
         let sample_rate = 2_400_000;
         let buffer_size = 4096;
-
-        let mut data = vec![0.0; buffer_size];
-
-        let mut rng: SmallRng = rand::make_rng();
-
-        let mut fill_uniform = move |data: &mut [f32]| {
-            data.iter_mut().for_each(|value| {
-                *value = rng.random(); // standard uniform [0, 1)
-            });
-        };
-
-        fill_uniform(&mut data);
 
         let state = SpectrumState::default();
 
@@ -81,6 +70,9 @@ impl StateInner {
             let state = state.clone();
 
             async move {
+                let mut rng: SmallRng = rand::make_rng();
+                let noise = Normal::new(0.01, 0.003).unwrap();
+
                 let mut interval = tokio::time::interval(Duration::from_secs_f32(
                     buffer_size as f32 / sample_rate as f32,
                 ));
@@ -88,7 +80,17 @@ impl StateInner {
                 loop {
                     interval.tick().await;
 
-                    fill_uniform(state.update().data_mut());
+                    // clear and re-fill buffer with `buffer_size` number of values
+                    let mut update_guard = state.update();
+                    let buffer = update_guard.data_mut();
+                    buffer.clear();
+                    buffer.resize_with(buffer_size, || {
+                        let value: f32 = noise.sample(&mut rng);
+                        value.clamp(0.001, 1.0)
+                    });
+
+                    // trigger repaint
+                    ctx.request_repaint();
                 }
             }
         });

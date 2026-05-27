@@ -1,5 +1,5 @@
 
-struct SpectrumConfig {
+struct WaterfallConfig {
     min_db: f32,
     max_db: f32,
     //_padding: [u32; 2],
@@ -8,7 +8,19 @@ struct SpectrumConfig {
     foreground_color2: vec4f,
 }
 
-struct SpectrumData {
+
+struct WaterfallIndex {
+    lines: array<WaterfallIndexLine>
+}
+
+struct WaterfallIndexLine {
+    data_offset: u32,
+    data_len: u32,
+    frequency_start: f32,
+    frequency_end: f32,
+}
+
+struct WaterfallData {
     data: array<f32>,
 }
 
@@ -27,11 +39,11 @@ struct FragmentOutput {
 
 @group(0)
 @binding(0)
-var<storage, read> spectrum_config: SpectrumConfig;
+var<storage, read> waterfall_config: WaterfallConfig;
 
 @group(0)
 @binding(1)
-var<storage, read> spectrum_data: SpectrumData;
+var<storage, read> waterfall_data: WaterfallData;
 
 @vertex
 fn vertex_main(input: VertexInput) -> VertexOutput {
@@ -56,16 +68,7 @@ fn vertex_main(input: VertexInput) -> VertexOutput {
 fn fragment_main(input: VertexOutput) -> FragmentOutput {
     var output: FragmentOutput;
 
-    let data_len = arrayLength(&spectrum_data.data);
-    let index = u32(input.uv.x * f32(data_len - 1));
-    let value = (linear_to_db(spectrum_data.data[index]) - spectrum_config.min_db) / (spectrum_config.max_db - spectrum_config.min_db);
-
-    let y = input.uv.y;
-    let is_background = step(value, y);
-
-    let foreground_color = mix(spectrum_config.foreground_color1, spectrum_config.foreground_color2, y / value);
-
-    output.color = mix(foreground_color, spectrum_config.background_color, is_background);
+    output.color = vec4f(0.0, 0.0, 0.5, 1.0);
 
     return output;
 }
