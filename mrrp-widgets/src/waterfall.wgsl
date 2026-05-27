@@ -39,10 +39,14 @@ struct FragmentOutput {
 
 @group(0)
 @binding(0)
-var<storage, read> waterfall_config: WaterfallConfig;
+var<uniform> waterfall_config: WaterfallConfig;
 
 @group(0)
 @binding(1)
+var<storage, read> waterfall_index: WaterfallIndex;
+
+@group(0)
+@binding(2)
 var<storage, read> waterfall_data: WaterfallData;
 
 @vertex

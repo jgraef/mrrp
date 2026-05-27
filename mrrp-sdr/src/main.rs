@@ -2,6 +2,7 @@ pub mod cli;
 pub mod config;
 pub mod directories;
 pub mod hal;
+pub mod sdr;
 pub mod ui;
 pub mod util;
 

@@ -31,7 +31,10 @@ use crate::ui::{
             SpectrumDock,
             SpectrumDockState,
         },
-        waterfall::WaterfallDock,
+        waterfall::{
+            WaterfallDock,
+            WaterfallDockState,
+        },
     },
     state::{
         AppState,
@@ -51,12 +54,8 @@ pub enum TabState {
     Radio {
         // todo
     },
-    Spectrum {
-        state: SpectrumDockState,
-    },
-    Waterfall {
-        // todo
-    },
+    Spectrum(SpectrumDockState),
+    Waterfall(WaterfallDockState),
     Bookmarks {
         // todo
     },
@@ -118,12 +117,8 @@ impl TabType {
     pub fn create_state(&self) -> TabState {
         match self {
             TabType::Radio => TabState::Radio {},
-            TabType::Spectrum => {
-                TabState::Spectrum {
-                    state: SpectrumDockState::default(),
-                }
-            }
-            TabType::Waterfall => TabState::Waterfall {},
+            TabType::Spectrum => TabState::Spectrum(Default::default()),
+            TabType::Waterfall => TabState::Waterfall(Default::default()),
             TabType::Bookmarks => TabState::Bookmarks {},
             TabType::Channels => TabState::Channels {},
             TabType::Demodulation => TabState::Demodulation {},
@@ -249,8 +244,8 @@ impl<'a> TabViewer for DockViewer<'a> {
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
         match &mut tab.state {
             TabState::Radio {} => RadioDock.show(ui),
-            TabState::Spectrum { state } => SpectrumDock::new(state).show(ui),
-            TabState::Waterfall {} => WaterfallDock.show(ui),
+            TabState::Spectrum(state) => SpectrumDock::new(state).show(ui),
+            TabState::Waterfall(state) => WaterfallDock::new(state).show(ui),
             TabState::Bookmarks {} => BookmarksDock.show(ui),
             TabState::Channels {} => ChannelsDock.show(ui),
             TabState::Demodulation {} => DemodulationDock.show(ui),

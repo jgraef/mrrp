@@ -27,7 +27,7 @@ struct FragmentOutput {
 
 @group(0)
 @binding(0)
-var<storage, read> spectrum_config: SpectrumConfig;
+var<uniform> spectrum_config: SpectrumConfig;
 
 @group(0)
 @binding(1)

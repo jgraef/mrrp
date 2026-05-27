@@ -15,6 +15,7 @@ use parking_lot::{
     RwLock,
     RwLockWriteGuard,
 };
+use wgpu::util::DeviceExt;
 
 use crate::{
     GetWidgetRenderState,
@@ -96,6 +97,7 @@ impl WaterfallState {
                 config: None,
                 config_buffer: None,
                 queued_lines: vec![],
+                index_buffer: None,
                 data_buffer: None,
                 bind_group: None,
             })),
@@ -204,8 +206,20 @@ impl Pipeline {
         let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("waterfall"),
             entries: &[
+                // config
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // index
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -214,8 +228,9 @@ impl Pipeline {
                     },
                     count: None,
                 },
+                // data
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
+                    binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -286,6 +301,9 @@ struct State {
 
     queued_lines: Vec<WaterfallLine>,
 
+    /// The GPU-side index buffer
+    index_buffer: Option<wgpu::Buffer>,
+
     /// The GPU-side data buffer
     data_buffer: Option<wgpu::Buffer>,
 
@@ -301,8 +319,66 @@ impl State {
         pipeline: &Pipeline,
         config: &ConfigData,
     ) {
+        // update config buffer
+        let mut config_changed = self
+            .config
+            .as_ref()
+            .is_some_and(|current| config != current);
 
-        //todo!();
+        let config_buffer = self.config_buffer.get_or_insert_with(|| {
+            tracing::debug!("creating spectrum config buffer");
+
+            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("spectrum config"),
+                contents: bytemuck::bytes_of(config),
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
+            });
+
+            // note: no need to recreate a bind group here, since we can't have one already
+            // anyway
+            assert!(self.bind_group.is_none());
+
+            self.config = Some(*config);
+
+            buffer
+        });
+
+        if config_changed {
+            tracing::debug!("writing spectrum config buffer");
+
+            queue.write_buffer(&config_buffer, 0, bytemuck::bytes_of(config));
+
+            self.config = Some(*config);
+        }
+
+        // todo: send data to gpu
+
+        // create bind group
+        if self.bind_group.is_none()
+            && let (Some(config_buffer), Some(index_buffer), Some(data_buffer)) =
+                (&self.config_buffer, &self.index_buffer, &self.data_buffer)
+        {
+            tracing::debug!("creating spectrum bind group");
+
+            self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("spectrum"),
+                layout: &pipeline.bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: config_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: index_buffer.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: data_buffer.as_entire_binding(),
+                    },
+                ],
+            }));
+        }
     }
 }
 

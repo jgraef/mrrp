@@ -3,6 +3,7 @@ pub mod app;
 pub mod debug_window;
 pub mod dock;
 pub mod menu;
+pub mod mock;
 pub mod radio;
 pub mod state;
 pub mod widgets;

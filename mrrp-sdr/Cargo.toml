@@ -20,6 +20,7 @@ egui_dock = { version = "0.19.1", features = ["serde"] }
 egui_extras = { version = "0.34.2", features = ["all_loaders"] }
 indexmap = { version = "2.14.0", features = ["serde"] }
 mrrp-widgets.workspace = true
+num-complex = "0.4.6"
 num-traits = "0.2.19"
 parking_lot = "0.12.5"
 rand = "0.10.1"

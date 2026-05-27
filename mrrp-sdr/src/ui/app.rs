@@ -4,6 +4,7 @@ use crate::{
     cli::UiCommand,
     config::Config,
     directories::Directories,
+    sdr::initialize_sdr_runtime,
     ui::{
         about_window::AboutWindow,
         debug_window::DebugWindow,
@@ -44,7 +45,11 @@ impl App {
         ctx: &egui::Context,
         storage: &dyn Storage,
     ) -> Self {
+        // todo: remove
         let radio_state = RadioUiState::new(&config, &command);
+
+        // start SDR runtime
+        initialize_sdr_runtime(ctx);
 
         // load app state
         let app_state = AppState::load(storage, &command);
