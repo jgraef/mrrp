@@ -10,7 +10,6 @@ use serde::{
 use crate::sdr::{
     GetSdrHandle,
     SpectrumSinkHandle,
-    sink::SpectrumSink,
 };
 
 #[derive(Debug)]
@@ -24,8 +23,7 @@ impl<'a> SpectrumDock<'a> {
     }
 
     pub fn show(self, ui: &mut egui::Ui) {
-        ensure_sink_is_linked(
-            ui.ctx(),
+        ui.ctx().ensure_spectrum_sink_is_linked(
             &self.state.view_state,
             &mut self.state.sdr_link_handle,
         );
@@ -42,14 +40,4 @@ pub struct SpectrumDockState {
 
     #[serde(skip, default)]
     sdr_link_handle: Option<SpectrumSinkHandle>,
-}
-
-fn ensure_sink_is_linked<S>(ctx: &egui::Context, sink: &S, handle: &mut Option<SpectrumSinkHandle>)
-where
-    S: SpectrumSink + Send + Clone + 'static,
-{
-    if handle.is_none() {
-        let sdr = ctx.expect_sdr_handle();
-        *handle = Some(sdr.add_spectrum_sink(sink.clone()));
-    }
 }

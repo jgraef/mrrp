@@ -1,4 +1,5 @@
 use eframe::Storage;
+use tracing::span::EnteredSpan;
 
 use crate::{
     cli::UiCommand,
@@ -35,6 +36,8 @@ pub struct App {
 
     /// buffer for deferred commands that can mutate the app state
     command_buffer: CommandBuffer,
+
+    span: EnteredSpan,
 }
 
 impl App {
@@ -45,11 +48,13 @@ impl App {
         ctx: &egui::Context,
         storage: &dyn Storage,
     ) -> Self {
-        // todo: remove
-        let radio_state = RadioUiState::new(&config, &command);
-
         // start SDR runtime
         initialize_sdr_runtime(ctx);
+
+        let span = tracing::info_span!("app").entered();
+
+        // todo: remove
+        let radio_state = RadioUiState::new(&config, &command);
 
         // load app state
         let app_state = AppState::load(storage, &command);
@@ -65,6 +70,7 @@ impl App {
             radio_state,
             app_state,
             command_buffer: Default::default(),
+            span,
         }
     }
 }

@@ -367,6 +367,19 @@ pub trait SampleBufMut<S> {
         }
         (output, num_samples_read)
     }
+
+    #[inline]
+    fn limit(self, limit: usize) -> Limit<Self, S>
+    where
+        Self: Sized,
+    {
+        let limit = limit.min(self.remaining_mut());
+        Limit {
+            inner: self,
+            limit,
+            _phantom: PhantomData,
+        }
+    }
 }
 
 impl<S> SampleBufMut<S> for &mut [S] {
@@ -412,6 +425,37 @@ impl<S> SampleBufMut<S> for Vec<S> {
     fn chunk_mut(&mut self) -> &mut UninitSlice<S> {
         self.reserve(1);
         UninitSlice::slice_mut_from_uninit(self.spare_capacity_mut())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Limit<B, S> {
+    inner: B,
+    limit: usize,
+    _phantom: PhantomData<fn() -> S>,
+}
+
+impl<B, S> SampleBufMut<S> for Limit<B, S>
+where
+    B: SampleBufMut<S>,
+{
+    unsafe fn advance_mut(&mut self, amount: usize) {
+        assert!(amount < self.limit);
+        unsafe {
+            self.inner.advance_mut(amount);
+        }
+    }
+
+    fn remaining_mut(&self) -> usize {
+        self.limit
+    }
+
+    fn chunk_mut(&mut self) -> &mut UninitSlice<S> {
+        let mut chunk = self.inner.chunk_mut();
+        if chunk.len() > self.limit {
+            chunk = &mut chunk[..self.limit];
+        }
+        chunk
     }
 }
 

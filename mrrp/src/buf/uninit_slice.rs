@@ -120,6 +120,12 @@ impl<S> UninitSlice<S> {
         self.0.len()
     }
 
+    /// This returns true iff this [`UninitSlice`] has zero length.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
     #[inline]
     pub unsafe fn assume_init_ref(&self) -> &[S] {
         unsafe { self.0.assume_init_ref() }

@@ -20,6 +20,7 @@ use crate::buf::{
 #[derive(Clone, Debug)]
 pub struct SamplesMut<S> {
     buffer: Vec<S>,
+    // note: this is always 0?
     start: usize,
 }
 
@@ -167,6 +168,9 @@ impl<S> SampleBufMut<S> for SamplesMut<S> {
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut UninitSlice<S> {
+        // this will make sure there's at least 1 byte capacity. usually there's much
+        // more spare capacity because of Vec's allocation policy. if you want to avoid
+        // reading small amounts you need to reserve enough capcity beforehand.
         self.reserve(1);
         self.spare_capacity_mut()
     }

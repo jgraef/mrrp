@@ -326,10 +326,10 @@ impl State {
             .is_some_and(|current| config != current);
 
         let config_buffer = self.config_buffer.get_or_insert_with(|| {
-            tracing::debug!("creating spectrum config buffer");
+            tracing::debug!("creating waterfall config buffer");
 
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("spectrum config"),
+                label: Some("waterfall config"),
                 contents: bytemuck::bytes_of(config),
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             });
@@ -344,7 +344,7 @@ impl State {
         });
 
         if config_changed {
-            tracing::debug!("writing spectrum config buffer");
+            tracing::debug!("writing waterfall config buffer");
 
             queue.write_buffer(&config_buffer, 0, bytemuck::bytes_of(config));
 
@@ -358,10 +358,10 @@ impl State {
             && let (Some(config_buffer), Some(index_buffer), Some(data_buffer)) =
                 (&self.config_buffer, &self.index_buffer, &self.data_buffer)
         {
-            tracing::debug!("creating spectrum bind group");
+            tracing::debug!("creating waterfall bind group");
 
             self.bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("spectrum"),
+                label: Some("waterfall"),
                 layout: &pipeline.bind_group_layout,
                 entries: &[
                     wgpu::BindGroupEntry {

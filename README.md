@@ -26,3 +26,33 @@ Graphical SDR app.
 
 egui widgets that are necessary for displaying radio-related things. Contains a GPU-rendered display for spectrum and waterfall.
 
+## `mrrp-sat`
+
+Satellite tracking
+
+## `mrrp-adsb`
+
+Mode-S a.k.a ADS-B demodulation and decoding for plane tracking.
+
+TODO: Merge from adsbee repo.
+
+## `mrrp-rigctl`
+
+[hamlib rigctl](https://github.com/Hamlib/Hamlib) client and server.
+
+TODO: Merge code
+
+## Important TODOs
+
+- Fix `Samples`/`SamplesMut` to actually be useful (`freeze`/`thaw`)
+- Rethink the noise API
+
+## Planned features:
+
+Just some features we want to implement eventually, but might forget if not noted down:
+
+- Capture Rollback: Keep a ring-buffer of samples (on disk?) so that we can start a capture starting a few seconds in the past.
+- Satellite overlay: Show transponder frequencies of satellites that are overhead.
+- Lots of demodulators/decoders of course :3
+- rpitx-like transmit (merge our BCM2711 code)
+- Does our NanoVNA crate fit in here? Probably not.

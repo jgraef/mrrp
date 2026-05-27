@@ -7,6 +7,11 @@ use serde::{
     Serialize,
 };
 
+use crate::sdr::{
+    GetSdrHandle,
+    SpectrumSinkHandle,
+};
+
 #[derive(Debug)]
 pub struct WaterfallDock<'a> {
     state: &'a mut WaterfallDockState,
@@ -18,6 +23,11 @@ impl<'a> WaterfallDock<'a> {
     }
 
     pub fn show(self, ui: &mut egui::Ui) {
+        ui.ctx().ensure_spectrum_sink_is_linked(
+            &self.state.view_state,
+            &mut self.state.sdr_link_handle,
+        );
+
         ui.add(WaterfallView::new(&self.state.view_state));
     }
 }
@@ -27,4 +37,7 @@ pub struct WaterfallDockState {
     /// Holds state for the WaterfallView.
     #[serde(skip, default)]
     view_state: WaterfallState,
+
+    #[serde(skip, default)]
+    sdr_link_handle: Option<SpectrumSinkHandle>,
 }
