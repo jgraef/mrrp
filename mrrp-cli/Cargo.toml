@@ -21,7 +21,7 @@ derive_more = "2.0.1"
 directories = "6.0.0"
 dotenvy = "0.15.7"
 futures-util = "0.3.31"
-num-complex = { version = "0.5.0", features = ["bytemuck", "serde"] }
+num-complex = { version = "0.4.6", features = ["serde"] }
 palette = { version = "0.7.6", features = ["serde", "serializing"] }
 parking_lot = "0.12.4"
 ratatui = { version = "0.30.0", features = ["palette", "serde"] }

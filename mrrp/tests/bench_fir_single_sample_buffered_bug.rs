@@ -29,6 +29,7 @@ use mrrp::{
 };
 use num_complex::Complex;
 use pin_project_lite::pin_project;
+use rand::rngs::SmallRng;
 
 #[test]
 fn bench_fir_single_sample_buffered_bug() {
@@ -48,7 +49,7 @@ fn bench_fir_single_sample_buffered_bug() {
     let num_samples = 0x100000;
 
     let mut samples = vec![];
-    white_noise::<Complex<f32>>()
+    white_noise::<SmallRng, Complex<f32>>(rand::make_rng())
         .limit(num_samples)
         .read_to_end(&mut samples)
         .now_or_never()

@@ -22,7 +22,7 @@ futures-util = "0.3.32"
 indexmap = { version = "2.14.0", features = ["serde"] }
 mrrp.workspace = true
 mrrp-widgets.workspace = true
-num-complex = "0.5.0"
+num-complex = "0.4.6"
 num-traits = "0.2.19"
 parking_lot = "0.12.5"
 rand = "0.10.1"

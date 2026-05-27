@@ -7,10 +7,7 @@ use std::{
     },
 };
 
-use num_complex::{
-    Complex,
-    ComplexDistribution,
-};
+use num_complex::Complex;
 use pin_project_lite::pin_project;
 use rand::{
     Rng,
@@ -19,7 +16,6 @@ use rand::{
         Distribution,
         Uniform,
     },
-    rngs::SmallRng,
 };
 
 use crate::io::{
@@ -70,12 +66,12 @@ impl<R, D> StreamLength for Noise<R, D> {
     }
 }
 
-pub fn white_noise<S: WhiteNoise>() -> Noise<SmallRng, S::Distribution> {
-    Noise::new(default_rng(), S::distribution())
-}
-
-fn default_rng() -> SmallRng {
-    rand::make_rng()
+pub fn white_noise<R, S>(rng: R) -> Noise<R, S::Distribution>
+where
+    R: Rng,
+    S: WhiteNoise,
+{
+    Noise::new(rng, S::distribution())
 }
 
 pub trait WhiteNoise: Sized {
@@ -113,11 +109,32 @@ impl_white_noise!(f64: -1.0, 1.0);
 impl<T> WhiteNoise for Complex<T>
 where
     T: WhiteNoise,
-    ComplexDistribution<<T as WhiteNoise>::Distribution>: Distribution<Complex<T>>,
 {
-    type Distribution = ComplexDistribution<<T as WhiteNoise>::Distribution>;
+    type Distribution =
+        ComplexDistribution<<T as WhiteNoise>::Distribution, <T as WhiteNoise>::Distribution>;
 
     fn distribution() -> Self::Distribution {
-        ComplexDistribution::new(T::distribution(), T::distribution())
+        ComplexDistribution {
+            re: T::distribution(),
+            im: T::distribution(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ComplexDistribution<Re, Im> {
+    pub re: Re,
+    pub im: Im,
+}
+
+impl<T, Re, Im> Distribution<Complex<T>> for ComplexDistribution<Re, Im>
+where
+    Re: Distribution<T>,
+    Im: Distribution<T>,
+{
+    fn sample<R: Rng + ?Sized>(&self, mut rng: &mut R) -> Complex<T> {
+        let re = self.re.sample(&mut rng);
+        let im = self.im.sample(&mut rng);
+        Complex { re, im }
     }
 }

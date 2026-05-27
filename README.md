@@ -45,7 +45,6 @@ TODO: Merge code
 ## Important TODOs
 
 - Fix `Samples`/`SamplesMut` to actually be useful (`freeze`/`thaw`)
-- Rethink the noise API
 
 ## Planned features:
 

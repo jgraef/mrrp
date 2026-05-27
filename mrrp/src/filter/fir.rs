@@ -139,6 +139,7 @@ where
 #[cfg(test)]
 mod tests {
     use futures_util::FutureExt;
+    use rand::rngs::SmallRng;
 
     use crate::{
         filter::fir::{
@@ -156,7 +157,11 @@ mod tests {
         let mut y = vec![0.0; x.len()];
         for i in 0..x.len() {
             for j in 0..h.len() {
-                y[i] += x.get(i - j).copied().unwrap_or_default() * h[j]
+                if i >= j
+                    && let Some(x) = x.get(i - j)
+                {
+                    y[i] += x * h[j];
+                }
             }
         }
         y
@@ -165,7 +170,7 @@ mod tests {
     #[test]
     fn test_fir_filter_against_reference_convolution() {
         let mut x = vec![];
-        white_noise::<f32>()
+        white_noise::<SmallRng, f32>(rand::make_rng())
             .limit(20)
             .read_to_end(&mut x)
             .now_or_never()

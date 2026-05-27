@@ -30,6 +30,7 @@ use mrrp::{
     source::white_noise,
 };
 use num_complex::Complex;
+use rand::rngs::SmallRng;
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -41,7 +42,8 @@ async fn main() -> Result<(), Error> {
 
     let args = Args::parse();
 
-    let noise = white_noise::<Complex<f32>>().with_sample_rate(args.sample_rate);
+    let noise =
+        white_noise::<SmallRng, Complex<f32>>(rand::make_rng()).with_sample_rate(args.sample_rate);
 
     println!("cutoff frequency: {}", args.cutoff_frequency());
     println!("transition bandwidth: {}", args.transition_bandwidth());

@@ -1,4 +1,5 @@
 use std::{
+    f32::consts::TAU,
     pin::Pin,
     task::{
         Context,
@@ -18,9 +19,17 @@ use mrrp::{
     },
     source::Noise,
 };
-use num_complex::ComplexDistribution;
-use rand::rngs::SmallRng;
-use rand_distr::Normal;
+use num_complex::Complex;
+use num_traits::Float;
+use rand::{
+    Rng,
+    rngs::SmallRng,
+};
+use rand_distr::{
+    Distribution,
+    Normal,
+    Uniform,
+};
 
 use crate::sdr::Iq;
 
@@ -40,20 +49,21 @@ pub struct SourceInfo {
 
 #[derive(Clone, Debug)]
 pub struct MockSource {
-    noise: Throttled<Noise<SmallRng, ComplexDistribution<Normal<f32>, Normal<f32>>>>,
+    noise: Throttled<Noise<SmallRng, PolarDistribution<Normal<f32>, Uniform<f32>>>>,
     pub info: SourceInfo,
 }
 
 impl MockSource {
     pub fn new(info: SourceInfo) -> Self {
-        let std_dev = 0.02;
-        let distribution = Normal::new(0.0, std_dev).unwrap();
-        let distribution = ComplexDistribution::new(distribution, distribution);
-
-        let sample_time = Duration::from_secs_f32(1.0 / info.sample_rate as f32);
-
         Self {
-            noise: Noise::new(rand::make_rng(), distribution).throttle(sample_time),
+            noise: Noise::new(
+                rand::make_rng(),
+                PolarDistribution {
+                    amplitude: Normal::new(0.0, 0.00002).unwrap(),
+                    phase: Uniform::new(0.0, TAU).unwrap(),
+                },
+            )
+            .throttle(Duration::from_secs_f32(1.0 / info.sample_rate as f32)),
             info,
         }
     }
@@ -82,5 +92,22 @@ impl Source for MockSource {
 impl StreamLength for MockSource {
     fn remaining(&self) -> mrrp::io::Remaining {
         mrrp::io::Remaining::Infinite
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct PolarDistribution<A, P> {
+    pub amplitude: A,
+    pub phase: P,
+}
+
+impl<T, A, P> Distribution<Complex<T>> for PolarDistribution<A, P>
+where
+    T: Float,
+    A: Distribution<T>,
+    P: Distribution<T>,
+{
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Complex<T> {
+        Complex::from_polar(self.amplitude.sample(rng), self.phase.sample(rng))
     }
 }

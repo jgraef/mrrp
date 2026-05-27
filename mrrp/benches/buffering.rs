@@ -30,6 +30,7 @@ use mrrp::{
     source::white_noise,
 };
 use num_complex::Complex;
+use rand::rngs::SmallRng;
 
 pub fn bench_buffering(c: &mut Criterion) {
     let num_samples = 0x400000;
@@ -40,7 +41,7 @@ pub fn bench_buffering(c: &mut Criterion) {
     group.measurement_time(Duration::from_secs(20));
 
     let mut samples = vec![];
-    white_noise::<Complex<f32>>()
+    white_noise::<SmallRng, Complex<f32>>(rand::make_rng())
         .limit(num_samples)
         .read_to_end(&mut samples)
         .now_or_never()

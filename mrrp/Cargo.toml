@@ -15,7 +15,7 @@ derive_more = { version = "2.0.1", features = ["debug"] }
 futures-util = { version = "0.3.31", features = ["sink"] }
 hound = "3.5.1"
 image = { version = "0.25.6", default-features = false }
-num-complex = { version = "0.5.0", features = ["bytemuck", "rand"] }
+num-complex = { version = "0.4.6", features = ["bytemuck"] }
 num-traits = "0.2.19"
 parking_lot = "0.12.4"
 pin-project-lite = "0.2.16"
