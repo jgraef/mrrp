@@ -109,7 +109,7 @@ async fn main() -> Result<(), Error> {
         Command::Track {
             band,
             mode,
-            update_interval,
+            update_interval: _,
         } => {
             let track_set = track_set(&satellites, &band, &mode);
 

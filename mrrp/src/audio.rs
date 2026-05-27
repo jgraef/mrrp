@@ -245,6 +245,9 @@ where
 }
 
 fn global_output_stream() -> Result<&'static rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+    // note: OnceLock or LazyLock don't work here (yet) because creation can fail
+    // and we can't clone the error.
+
     static OUTPUT_STREAM: Mutex<Option<&'static rodio::MixerDeviceSink>> = Mutex::new(None);
 
     let mut output_stream = OUTPUT_STREAM.lock();

@@ -137,7 +137,12 @@ where
     }
 }
 
-impl<L, R, S, T, Sc> FiniteStream for ZipWith<L, R, S, T, Sc> where L: FiniteStream {}
+impl<L, R, S, T, Sc> FiniteStream for ZipWith<L, R, S, T, Sc>
+where
+    L: FiniteStream,
+    R: FiniteStream,
+{
+}
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("zip stream error")]
@@ -203,7 +208,12 @@ where
     }
 }
 
-impl<L, R, S, T> FiniteStream for Summed<L, R, S, T> where L: FiniteStream {}
+impl<L, R, S, T> FiniteStream for Summed<L, R, S, T>
+where
+    L: FiniteStream,
+    R: FiniteStream,
+{
+}
 
 pin_project! {
     // todo: renamed to Mixed?
@@ -262,7 +272,12 @@ where
     }
 }
 
-impl<L, R, S, T> FiniteStream for Multiplied<L, R, S, T> where L: FiniteStream {}
+impl<L, R, S, T> FiniteStream for Multiplied<L, R, S, T>
+where
+    L: FiniteStream,
+    R: FiniteStream,
+{
+}
 
 #[cfg(test)]
 mod tests {

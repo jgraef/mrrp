@@ -6,6 +6,7 @@ use mrrp_widgets::{
     },
 };
 
+// todo: move this into mrrp
 pub trait SpectrumSink {
     fn push(&mut self, frame: &SpectrumFrame);
 }

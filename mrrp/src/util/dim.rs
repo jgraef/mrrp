@@ -10,6 +10,8 @@ use std::{
 use arraydeque::ArrayDeque;
 use arrayvec::ArrayVec;
 
+// todo: remove associated types. any type that needs these should have them as
+// generic parameters.
 pub trait Dim: Copy + Sized {
     /// Array with fixed size of the dimension
     type Array<T>: ArrayLike<Self, T>;

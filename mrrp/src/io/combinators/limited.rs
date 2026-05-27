@@ -103,4 +103,4 @@ where
     }
 }
 
-impl<R> FiniteStream for Limited<R> {}
+impl<R> FiniteStream for Limited<R> where R: StreamLength {}

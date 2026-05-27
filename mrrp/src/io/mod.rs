@@ -64,18 +64,6 @@ pub trait StreamLength {
     fn size_hint(&self) -> SizeHint {
         self.remaining().size_hint()
     }
-
-    #[inline]
-    fn len(&self) -> usize
-    where
-        Self: FiniteStream,
-    {
-        match self.remaining() {
-            Remaining::Finite { num_samples } => num_samples,
-            Remaining::Infinite => panic!("stream marked as finite returned infinite length"),
-            Remaining::Unknown => panic!("stream marked as finite returned unknown length"),
-        }
-    }
 }
 
 impl<T> StreamLength for &T
@@ -108,7 +96,16 @@ where
     }
 }
 
-pub trait FiniteStream {}
+pub trait FiniteStream: StreamLength {
+    #[inline]
+    fn len(&self) -> usize {
+        match self.remaining() {
+            Remaining::Finite { num_samples } => num_samples,
+            Remaining::Infinite => panic!("stream marked as finite returned infinite length"),
+            Remaining::Unknown => panic!("stream marked as finite returned unknown length"),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum Remaining {

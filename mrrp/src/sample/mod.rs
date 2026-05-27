@@ -1,7 +1,7 @@
 mod conversion;
 mod types;
 
-use num_complex::Complex;
+pub use num_complex::Complex;
 
 pub use self::types::{
     I11,

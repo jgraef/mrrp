@@ -1,7 +1,13 @@
 pub mod build_info;
 pub mod github_urls;
 
-use std::hash::Hash;
+use std::{
+    hash::Hash,
+    sync::atomic::{
+        AtomicUsize,
+        Ordering,
+    },
+};
 
 use indexmap::IndexSet;
 use serde::{
@@ -68,4 +74,15 @@ where
 
 pub fn bool_true() -> bool {
     true
+}
+
+#[derive(Debug, Default)]
+pub struct AtomicIds {
+    next: AtomicUsize,
+}
+
+impl AtomicIds {
+    pub fn next(&self) -> usize {
+        self.next.fetch_add(1, Ordering::Relaxed)
+    }
 }

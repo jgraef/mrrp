@@ -19,6 +19,7 @@ use crate::{
     io::{
         AsyncReadSamples,
         AsyncReadSamplesExt,
+        FiniteStream,
         GetSampleRate,
         ReadBuf,
         Remaining,

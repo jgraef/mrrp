@@ -969,7 +969,7 @@ where
     }
 }
 
-impl<B, S> FiniteStream for Cursor<B, S> {}
+impl<B, S> FiniteStream for Cursor<B, S> where B: AsRef<[S]> {}
 
 #[derive(Clone, Copy, Debug)]
 pub struct BufSource<B, S> {
@@ -1021,7 +1021,7 @@ where
     }
 }
 
-impl<B, S> FiniteStream for BufSource<B, S> {}
+impl<B, S> FiniteStream for BufSource<B, S> where B: SampleBuf<S> {}
 
 /// Helper to check if a value implements [`AsyncReadSamples`]
 pub fn assert_async_read<T, S>(_: &T)
