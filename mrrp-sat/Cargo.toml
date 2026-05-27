@@ -13,7 +13,7 @@ dotenvy = "0.15.7"
 humantime = "2.3.0"
 numeris = { version = "0.5.11", features = ["serde"] }
 reqwest = { version = "0.13.3", features = ["json"] }
-satkit = { version = "0.16.2", features = ["chrono"] }
+satkit = { version = "0.18.0", features = ["chrono"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 serde_with = "3.20.0"

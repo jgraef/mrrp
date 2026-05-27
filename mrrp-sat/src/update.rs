@@ -78,7 +78,9 @@ impl Updater {
 }
 
 async fn satkit_update() -> Result<(), Error> {
-    tokio::task::spawn_blocking(|| satkit::utils::update_datafiles(None, false))
-        .await
-        .unwrap()
+    Ok(
+        tokio::task::spawn_blocking(|| satkit::utils::update_datafiles(None, false))
+            .await
+            .unwrap()?,
+    )
 }

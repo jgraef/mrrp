@@ -453,7 +453,7 @@ impl<'a> SGP4Source for CachedTle<'a> {
         &mut self.cache.cached_satrec
     }
 
-    fn sgp4_init_args(&self) -> anyhow::Result<satkit::sgp4::SGP4InitArgs> {
+    fn sgp4_init_args(&self) -> Result<satkit::sgp4::SGP4InitArgs, satkit::sgp4::Error> {
         self.tle.sgp4_init_args()
     }
 }
