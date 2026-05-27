@@ -9,7 +9,6 @@ Thumbs.db
 # Rust
 /Cargo.lock
 /target
-/.cargo
 
 # Env vars
 .env
@@ -17,3 +16,4 @@ Thumbs.db
 /rustc-ice-*
 /mrrp-cli.log
 /tmp
+

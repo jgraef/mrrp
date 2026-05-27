@@ -1,0 +1,25 @@
+
+# Configures a radio named "RTL-SDR default", to use the rtl-sdr-rs backend.
+#
+# The key-value pairs below will try to match a device. It'll only match if everything matches.
+#
+# A reliable way to distinguish multiple RTL-SDRs is to give them different serial numbers using `rtl_eeprom -s`.
+[radios."RTL-SDR default".rtl_sdr]
+
+# Select by index. This is unreliable since the ordering of devices can change.
+# index = 0
+
+# Select by vendor ID
+# vendor_id = 0x0bda
+
+# Select by product ID
+# product_id = 0x2838
+
+# Select by manufacturer name
+#manufacturer = "RTLSDRRBlog"
+
+# Select by product name
+#product = "Blog V4"
+
+# By default all RTL-SDR Blog v4's have serial 00000001, but you can change them with `rtl_eeprom -s`. This way you can reliable distinguish multiple dongles.
+# serial = "00000001"
