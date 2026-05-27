@@ -15,6 +15,7 @@ use crate::io::{
     GetSampleRate,
     ReadBuf,
     Remaining,
+    SizeHint,
     StreamLength,
 };
 
@@ -138,7 +139,12 @@ where
 {
     #[inline]
     fn remaining(&self) -> Remaining {
-        self.inner.remaining()
+        self.inner.remaining() + self.buffer.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint() + self.buffer.remaining()
     }
 }
 

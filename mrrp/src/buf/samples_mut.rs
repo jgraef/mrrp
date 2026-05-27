@@ -167,6 +167,7 @@ impl<S> SampleBufMut<S> for SamplesMut<S> {
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut UninitSlice<S> {
+        self.reserve(1);
         self.spare_capacity_mut()
     }
 }

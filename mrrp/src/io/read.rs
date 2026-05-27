@@ -7,6 +7,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
     time::Duration,
 };
@@ -264,15 +265,6 @@ pub trait IntoReadSamples<S> {
 
 /// Extension trait for [`AsyncReadSamples`] with some useful methods.
 pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
-    #[inline]
-    fn poll_read_into<B: SampleBufMut<S>>(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        mut buffer: B,
-    ) -> Poll<Result<(), Self::Error>> {
-        buffer.with_read_buf(|read_buf| self.poll_read_samples(cx, read_buf))
-    }
-
     /// Read a single sample
     #[inline]
     fn read_sample(&mut self) -> ReadSample<'_, Self, S>
@@ -280,7 +272,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         Self: Unpin,
     {
         ReadSample {
-            read_samples: self,
+            read_samples: Pin::new(self),
             _phantom: PhantomData,
         }
     }
@@ -296,7 +288,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         Self: Unpin,
     {
         ReadSamples {
-            read_samples: self,
+            read_samples: Pin::new(self),
             buffer: ReadBuf::new(buffer),
         }
     }
@@ -312,19 +304,32 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         Self: Unpin,
     {
         ReadSamplesExact {
-            read_samples: self,
+            read_samples: Pin::new(self),
             buffer: ReadBuf::new(buffer),
         }
     }
 
+    // todo: remove this in favor of read_into_buf
     #[inline]
     fn read_to_end<'a>(&'a mut self, buffer: &'a mut Vec<S>) -> ReadToEnd<'a, Self, S>
     where
-        Self: Unpin + FiniteStream,
+        Self: Unpin,
     {
         ReadToEnd {
-            read_samples: self,
+            read_samples: Pin::new(self),
             buffer,
+        }
+    }
+
+    #[inline]
+    fn read_into_buf<'a, B>(&'a mut self, buffer: &'a mut B) -> ReadIntoBuf<'a, Self, B, S>
+    where
+        Self: Unpin,
+    {
+        ReadIntoBuf {
+            read_samples: Pin::new(self),
+            buffer,
+            _phantom: PhantomData,
         }
     }
 
@@ -588,13 +593,13 @@ pub struct ReadSample<'a, R, S>
 where
     R: ?Sized,
 {
-    read_samples: &'a mut R,
+    read_samples: Pin<&'a mut R>,
     _phantom: PhantomData<fn() -> S>,
 }
 
 impl<'a, R, S> Future for ReadSample<'a, R, S>
 where
-    R: AsyncReadSamples<S> + Unpin + ?Sized,
+    R: AsyncReadSamples<S> + ?Sized,
 {
     type Output = Result<S, EofError<R::Error>>;
 
@@ -602,7 +607,11 @@ where
         let mut buffer = [MaybeUninit::uninit(); 1];
         let mut read_buf = ReadBuf::uninit(UninitSlice::slice_mut_from_uninit(&mut buffer[..]));
 
-        match Pin::new(&mut *self.read_samples).poll_read_samples(cx, &mut read_buf) {
+        match self
+            .read_samples
+            .as_mut()
+            .poll_read_samples(cx, &mut read_buf)
+        {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(error)) => Poll::Ready(Err(error.into())),
             Poll::Ready(Ok(())) => {
@@ -632,19 +641,20 @@ pub struct ReadSamples<'a, R, S>
 where
     R: ?Sized,
 {
-    read_samples: &'a mut R,
+    read_samples: Pin<&'a mut R>,
     buffer: ReadBuf<'a, S>,
 }
 
 impl<'a, 'b, R, S> Future for ReadSamples<'a, R, S>
 where
-    R: AsyncReadSamples<S> + Unpin + ?Sized,
+    R: AsyncReadSamples<S> + ?Sized,
 {
     type Output = Result<usize, R::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
-        Pin::new(&mut this.read_samples)
+        this.read_samples
+            .as_mut()
             .poll_read_samples(cx, &mut this.buffer)
             .map_ok(|()| self.buffer.filled().len())
     }
@@ -657,7 +667,7 @@ pub struct ReadSamplesExact<'a, R, S>
 where
     R: ?Sized,
 {
-    read_samples: &'a mut R,
+    read_samples: Pin<&'a mut R>,
     buffer: ReadBuf<'a, S>,
 }
 
@@ -672,7 +682,11 @@ where
             let filled_before = self.buffer.filled().len();
             let this = &mut *self;
 
-            match Pin::new(&mut this.read_samples).poll_read_samples(cx, &mut this.buffer) {
+            match this
+                .read_samples
+                .as_mut()
+                .poll_read_samples(cx, &mut this.buffer)
+            {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(error)) => {
                     return Poll::Ready(Err(EofError::Other(error)));
@@ -704,20 +718,19 @@ pub struct ReadToEnd<'a, R, S>
 where
     R: ?Sized,
 {
-    read_samples: &'a mut R,
+    read_samples: Pin<&'a mut R>,
     buffer: &'a mut Vec<S>,
 }
 
 impl<'a, 'b, R, S> Future for ReadToEnd<'a, R, S>
 where
-    R: AsyncReadSamples<S> + Unpin + ?Sized,
+    R: AsyncReadSamples<S> + ?Sized,
 {
     type Output = Result<(), R::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         loop {
             let this = &mut *self;
-            let filled_before = this.buffer.len();
 
             let size_hint = this.read_samples.size_hint();
             if let Some(upper_bound) = size_hint.upper_bound {
@@ -727,20 +740,53 @@ where
                 this.buffer.reserve(size_hint.lower_bound);
             }
 
-            match this.buffer.with_read_buf(|read_buf| {
-                Pin::new(&mut this.read_samples).poll_read_samples(cx, read_buf)
-            }) {
-                Poll::Pending => return Poll::Pending,
-                Poll::Ready(Err(error)) => {
-                    return Poll::Ready(Err(error));
-                }
-                Poll::Ready(Ok(())) => {
-                    if this.buffer.len() == filled_before {
-                        return Poll::Ready(Ok(()));
-                    }
-                }
+            let (poll, num_samples_read) = this.buffer.with_read_buf(|read_buf| {
+                this.read_samples.as_mut().poll_read_samples(cx, read_buf)
+            });
+            ready!(poll)?;
+
+            if num_samples_read == 0 {
+                break;
             }
         }
+
+        Poll::Ready(Ok(()))
+    }
+}
+
+#[derive(Debug)]
+#[must_use]
+pub struct ReadIntoBuf<'a, R, B, S>
+where
+    R: ?Sized,
+{
+    read_samples: Pin<&'a mut R>,
+    buffer: &'a mut B,
+    _phantom: PhantomData<fn() -> S>,
+}
+
+impl<'a, 'b, R, B, S> Future for ReadIntoBuf<'a, R, B, S>
+where
+    R: AsyncReadSamples<S> + ?Sized,
+    B: SampleBufMut<S>,
+{
+    type Output = Result<(), R::Error>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        loop {
+            let this = &mut *self;
+
+            let (poll, num_samples_read) = this.buffer.with_read_buf(|read_buf| {
+                this.read_samples.as_mut().poll_read_samples(cx, read_buf)
+            });
+            ready!(poll)?;
+
+            if num_samples_read == 0 {
+                break;
+            }
+        }
+
+        Poll::Ready(Ok(()))
     }
 }
 

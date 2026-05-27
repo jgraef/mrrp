@@ -355,7 +355,7 @@ pub trait SampleBufMut<S> {
     }
 
     #[inline]
-    fn with_read_buf<F, R>(&mut self, f: F) -> R
+    fn with_read_buf<F, R>(&mut self, f: F) -> (R, usize)
     where
         F: FnOnce(&mut ReadBuf<S>) -> R,
     {
@@ -365,7 +365,7 @@ pub trait SampleBufMut<S> {
         unsafe {
             self.advance_mut(num_samples_read);
         }
-        output
+        (output, num_samples_read)
     }
 }
 

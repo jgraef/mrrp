@@ -23,6 +23,7 @@ use crate::{
         GetSampleRate,
         ReadBuf,
         Remaining,
+        SizeHint,
         StreamLength,
         combinators::{
             Scanner,
@@ -123,9 +124,16 @@ where
 {
     #[inline]
     fn remaining(&self) -> Remaining {
-        self.left_stream
-            .remaining()
-            .min(self.right_stream.remaining())
+        let left_remaining = self.left_stream.remaining() + self.left_buffer.remaining();
+        let right_remaining = self.right_stream.remaining() + self.left_buffer.remaining();
+        left_remaining.min(right_remaining)
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        let left_size_hint = self.left_stream.size_hint() + self.left_buffer.remaining();
+        let right_size_hint = self.right_stream.size_hint() + self.right_buffer.remaining();
+        left_size_hint.min(right_size_hint)
     }
 }
 

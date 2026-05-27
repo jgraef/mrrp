@@ -15,14 +15,16 @@ use color_eyre::eyre::{
 use futures_util::stream;
 use mrrp::{
     audio::play_audio,
+    buf::SamplesMut,
     filter::{
         GoertzelFilter,
         MovingAverage,
     },
     io::{
+        AsyncReadSamples,
         AsyncReadSamplesExt,
+        Cursor,
         GetSampleRate,
-        StreamLength,
         combinators::{
             Scanner,
             ScannerExt,
@@ -70,15 +72,17 @@ async fn main() -> Result<(), color_eyre::eyre::Error> {
     let _ = dotenvy::dotenv();
     color_eyre::install()?;
     tracing_subscriber::fmt::init();
-    tracing::info!("FM receiver example");
+    tracing::info!("DTFM example");
 
     let args = Args::parse();
 
     match args {
         Args::Encode {
             output,
+            plot,
             sample_rate,
             tone_duration,
+            pause,
             keys,
         } => {
             // parse symbols
@@ -96,13 +100,37 @@ async fn main() -> Result<(), color_eyre::eyre::Error> {
             );
 
             // encode
-            let encoded = DtmfEncoder::new(symbols, sample_rate, tone_duration);
+            let mut encoded = DtmfEncoder::new(symbols, sample_rate, tone_duration, pause);
 
-            if let Some(output) = output {
-                write_stream_to_wav(output, encoded).await?;
+            // we'll read all the generated samples into a buffer and create a new stream
+            // from it, so we can use it multiple times.
+            let mut samples = SamplesMut::new();
+            encoded.read_into_buf(&mut samples).await?;
+            let encoded = Cursor::new(samples.freeze()).with_sample_rate(sample_rate);
+
+            // write output to wav file
+            if let Some(output) = &output {
+                write_stream_to_wav(output, encoded.clone()).await?;
+            }
+
+            // or, plot the decoding
+            if let Some(output) = &plot {
+                plot_frequencies(encoded.clone(), output).await?;
+            }
+
+            // or play audio
+            if output.is_none() && plot.is_none() {
+                play_audio(encoded.map(|sample| sample.re), 0.5).await?;
+            }
+        }
+        Args::Decode { input, plot } => {
+            let signal = WavSource::from_path(input)?;
+
+            if let Some(output) = plot {
+                plot_frequencies(signal, output).await?;
             }
             else {
-                play_audio(encoded.map(|sample| sample.re), 0.5).await?;
+                todo!();
             }
         }
     }
@@ -116,23 +144,37 @@ enum Args {
         #[clap(short, long)]
         output: Option<PathBuf>,
 
+        #[clap(long)]
+        plot: Option<PathBuf>,
+
         #[clap(short, long, default_value = "44100")]
         sample_rate: f32,
 
         #[clap(short, long, default_value = "0.5")]
         tone_duration: f32,
 
+        #[clap(short, long, default_value = "0.2")]
+        pause: f32,
+
         keys: String,
+    },
+    Decode {
+        input: PathBuf,
+
+        #[clap(short, long)]
+        plot: Option<PathBuf>,
     },
 }
 
-async fn plot(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<(), Error> {
-    let source = WavSource::<_, Complex<f32>>::from_path(input)?;
+async fn plot_frequencies<R>(source: R, output: impl AsRef<Path>) -> Result<(), Error>
+where
+    R: AsyncReadSamples<Complex<f32>> + GetSampleRate + Unpin,
+    R::Error: Send + Sync + 'static,
+{
     let sample_rate = source.sample_rate();
-    let num_samples = source.len();
 
     println!("source sample rate: {sample_rate}");
-    println!("source num samples: {num_samples}");
+    println!("source num samples: {:?}", source.remaining());
 
     let frequency_shift = 0.0;
     //let norm = |x: Complex<f32>| x.norm_sqr().log10() * 10.0;
@@ -190,6 +232,7 @@ async fn plot(input: impl AsRef<Path>, output: impl AsRef<Path>) -> Result<(), E
 
     let mut tones = Vec::new();
     tone_detect.read_to_end(&mut tones).await?;
+    let num_samples = tones.len();
     let t_start = -0.05f32;
     let t_end = num_samples as f32 / sample_rate + 0.05;
     mins[7] = 1000.0;

@@ -164,6 +164,7 @@ impl Remaining {
         }
     }
 
+    #[inline]
     pub fn finite_length(&self) -> Option<usize> {
         match self {
             Remaining::Finite { num_samples } => Some(*num_samples),
@@ -175,6 +176,7 @@ impl Remaining {
 impl Add<Self> for Remaining {
     type Output = Self;
 
+    #[inline]
     fn add(self, rhs: Remaining) -> Self::Output {
         match (self, rhs) {
             (Self::Infinite, _) | (_, Self::Infinite) => Self::Infinite,
@@ -188,7 +190,25 @@ impl Add<Self> for Remaining {
     }
 }
 
+impl Add<usize> for Remaining {
+    type Output = Self;
+
+    #[inline]
+    fn add(self, rhs: usize) -> Self::Output {
+        match self {
+            Self::Finite { num_samples } => {
+                Self::Finite {
+                    num_samples: num_samples + rhs,
+                }
+            }
+            Self::Infinite => Self::Infinite,
+            Self::Unknown => Self::Unknown,
+        }
+    }
+}
+
 impl PartialEq<Self> for Remaining {
+    #[inline]
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Infinite, Self::Infinite) => true,
@@ -207,15 +227,28 @@ pub struct SizeHint {
 }
 
 impl SizeHint {
+    #[inline]
     pub fn buffer_size(&self, lower_bound_min: usize) -> usize {
         self.upper_bound
             .unwrap_or_else(|| self.lower_bound.max(lower_bound_min))
+    }
+
+    #[inline]
+    pub fn min(&self, other: Self) -> Self {
+        Self {
+            lower_bound: self.lower_bound.min(other.lower_bound),
+            upper_bound: self
+                .upper_bound
+                .zip(other.upper_bound)
+                .map(|(left, right)| left.min(right)),
+        }
     }
 }
 
 impl Add<Self> for SizeHint {
     type Output = Self;
 
+    #[inline]
     fn add(self, rhs: Self) -> Self::Output {
         Self {
             lower_bound: self.lower_bound + rhs.lower_bound,
@@ -223,6 +256,17 @@ impl Add<Self> for SizeHint {
                 .upper_bound
                 .zip(rhs.upper_bound)
                 .map(|(left, right)| left + right),
+        }
+    }
+}
+
+impl Add<usize> for SizeHint {
+    type Output = Self;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        Self {
+            lower_bound: self.lower_bound + rhs,
+            upper_bound: self.upper_bound.map(|upper_bound| upper_bound + rhs),
         }
     }
 }
@@ -429,6 +473,11 @@ impl<S> Buffer<S> {
             buffer: self,
             remaining,
         }
+    }
+
+    #[inline]
+    pub fn remaining(&self) -> usize {
+        self.write_pos - self.read_pos
     }
 }
 

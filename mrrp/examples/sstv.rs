@@ -73,7 +73,7 @@ async fn main() -> Result<(), color_eyre::eyre::Error> {
     let _ = dotenvy::dotenv();
     color_eyre::install()?;
     tracing_subscriber::fmt::init();
-    tracing::info!("FM receiver example");
+    tracing::info!("SSTV example");
 
     let args = Args::parse();
 

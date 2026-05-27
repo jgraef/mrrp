@@ -22,9 +22,11 @@ use crate::{
         GetSampleRate,
         ReadBuf,
         Remaining,
+        Silence,
         SizeHint,
         StreamLength,
         combinators::Limited,
+        silence,
     },
     source::{
         ComplexSinusoid,
@@ -39,19 +41,26 @@ pin_project! {
         #[pin]
         symbols: S,
         num_samples_per_tone: usize,
+        num_samples_per_pause: usize,
         sample_rate: f32,
-        current_tone: Option<Limited<SignalGeneratorReadSamples<DtmfTone>>>,
+        current_signal: Option<CurrentSignal>,
     }
 }
 
 impl<S> DtmfEncoder<S> {
-    pub fn new(symbols: S, sample_rate: f32, tone_duration: f32) -> Self {
+    pub fn new(symbols: S, sample_rate: f32, tone_duration: f32, pause: f32) -> Self {
         let num_samples_per_tone = (tone_duration * sample_rate).round() as usize;
+        let num_samples_per_pause = (pause * sample_rate).round() as usize;
+
+        // makes it easier to initialize the current signal
+        let current_signal = CurrentSignal::Silence(silence().limit(0));
+
         Self {
             symbols,
             num_samples_per_tone,
+            num_samples_per_pause,
             sample_rate,
-            current_tone: None,
+            current_signal: Some(current_signal),
         }
     }
 }
@@ -71,30 +80,44 @@ where
         loop {
             let this = self.as_mut().project();
 
-            if let Some(current_tone) = this.current_tone {
-                //dbg!(&current_tone);
-
+            if let Some(current_signal) = this.current_signal {
                 let filled_before = buffer.filled().len();
-                //dbg!(filled_before);
 
-                ready!(Pin::new(current_tone).poll_read_samples(cx, buffer))
-                    .unwrap_or_else(|e| match e {});
+                match current_signal {
+                    CurrentSignal::Tone(current_tone) => {
+                        ready!(Pin::new(current_tone).poll_read_samples(cx, buffer))
+                            .unwrap_or_else(|e| match e {});
 
-                //dbg!(buffer.filled().len());
+                        if buffer.filled().len() == filled_before {
+                            *this.current_signal = Some(CurrentSignal::Silence(
+                                silence().limit(*this.num_samples_per_pause),
+                            ));
+                        }
+                        else {
+                            break;
+                        }
+                    }
+                    CurrentSignal::Silence(silence) => {
+                        ready!(Pin::new(silence).poll_read_samples(cx, buffer))
+                            .unwrap_or_else(|e| match e {});
 
-                if buffer.filled().len() == filled_before {
-                    *this.current_tone = None;
+                        if buffer.filled().len() == filled_before {
+                            if let Some(symbol) = ready!(this.symbols.poll_next(cx)).transpose()? {
+                                tracing::debug!(?symbol);
+                                *this.current_signal = Some(CurrentSignal::Tone(
+                                    SignalGeneratorReadSamples::new(symbol.tone(*this.sample_rate))
+                                        .limit(*this.num_samples_per_tone),
+                                ));
+                            }
+                            else {
+                                *this.current_signal = None;
+                            }
+                        }
+                        else {
+                            break;
+                        }
+                    }
                 }
-                else {
-                    break;
-                }
-            }
-            else if let Some(symbol) = ready!(this.symbols.poll_next(cx)).transpose()? {
-                tracing::debug!(?symbol);
-                *this.current_tone = Some(
-                    SignalGeneratorReadSamples::new(symbol.tone(*this.sample_rate))
-                        .limit(*this.num_samples_per_tone),
-                );
             }
             else {
                 break;
@@ -122,25 +145,31 @@ where
             .filter(|upper_bound| *upper_bound == lower_bound)
             .map_or(Remaining::Unknown, |num_symbols| {
                 let current_tone_remaining = self
-                    .current_tone
+                    .current_signal
                     .as_ref()
                     .map_or(0, |current_tone| current_tone.len());
                 Remaining::Finite {
-                    num_samples: num_symbols * self.num_samples_per_tone + current_tone_remaining,
+                    num_samples: num_symbols
+                        * (self.num_samples_per_tone + self.num_samples_per_pause)
+                        + current_tone_remaining,
                 }
             })
     }
 
     fn size_hint(&self) -> SizeHint {
         let (lower_bound, upper_bound) = self.symbols.size_hint();
+
         let current_tone_remaining = self
-            .current_tone
+            .current_signal
             .as_ref()
             .map_or(0, |current_tone| current_tone.len());
+
         SizeHint {
-            lower_bound: lower_bound * self.num_samples_per_tone + current_tone_remaining,
+            lower_bound: lower_bound * (self.num_samples_per_tone + self.num_samples_per_pause)
+                + current_tone_remaining,
             upper_bound: upper_bound.map(|upper_bound| {
-                upper_bound * self.num_samples_per_tone + current_tone_remaining
+                upper_bound * (self.num_samples_per_tone + self.num_samples_per_pause)
+                    + current_tone_remaining
             }),
         }
     }
@@ -253,6 +282,21 @@ impl GetSampleRate for DtmfTone {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+enum CurrentSignal {
+    Tone(Limited<SignalGeneratorReadSamples<DtmfTone>>),
+    Silence(Limited<Silence<Complex<f32>>>),
+}
+
+impl CurrentSignal {
+    pub fn len(&self) -> usize {
+        match self {
+            CurrentSignal::Tone(limited) => limited.len(),
+            CurrentSignal::Silence(limited) => limited.len(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::convert::Infallible;
@@ -302,7 +346,7 @@ mod tests {
         );
 
         // encode
-        let encoded = DtmfEncoder::new(symbols, sample_rate, tone_duration);
+        let encoded = DtmfEncoder::new(symbols, sample_rate, tone_duration, 0.1);
 
         let stream = encoded.map(|sample| sample.re);
 
