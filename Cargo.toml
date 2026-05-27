@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["mrrp", "mrrp-cli", "mrrp-sdr", "mrrp-widgets"]
+members = ["mrrp", "mrrp-cli", "mrrp-sat", "mrrp-sdr", "mrrp-widgets"]
 
 #[profile.dev]
 #opt-level = 3
@@ -33,3 +33,4 @@ rtlsdr-async = { version = "0.1.0", git = "https://github.com/jgraef/rtlsdr-asyn
 num-complex = { git = "https://github.com/cuviper/num-complex.git", branch = "rand-0.10" }
 # bumps num-complex and rand dependencies
 rustfft = { git = "https://github.com/jgraef/RustFFT.git", branch = "num-complex-0.5.0" }
+
