@@ -14,13 +14,12 @@ use num_complex::{
 use pin_project_lite::pin_project;
 use rand::{
     Rng,
-    SeedableRng,
-    distributions::{
+    RngExt,
+    distr::{
         Distribution,
         Uniform,
     },
     rngs::SmallRng,
-    thread_rng,
 };
 
 use crate::io::{
@@ -76,7 +75,7 @@ pub fn white_noise<S: WhiteNoise>() -> Noise<SmallRng, S::Distribution> {
 }
 
 fn default_rng() -> SmallRng {
-    SmallRng::from_rng(thread_rng()).unwrap()
+    rand::make_rng()
 }
 
 pub trait WhiteNoise: Sized {
@@ -94,7 +93,7 @@ macro_rules! impl_white_noise {
             type Distribution = Uniform<$T>;
 
             fn distribution() -> Self::Distribution {
-                Uniform::new_inclusive($min, $max)
+                Uniform::new_inclusive($min, $max).expect(concat!("Could not create uniform random distribution for {}", stringify!($T)))
             }
         }
     };

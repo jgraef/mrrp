@@ -110,6 +110,7 @@ enum Args {
     },
 }
 
+#[allow(unused)]
 const TEST_MODE: ModeSpecification = ModeSpecification {
     num_lines: 8,
     pixels_per_line: 8,

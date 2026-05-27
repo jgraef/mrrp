@@ -2,6 +2,7 @@
 // sources.
 
 use std::{
+    num::NonZero,
     sync::{
         Arc,
         atomic::{
@@ -20,7 +21,10 @@ use std::{
 
 use futures_util::FutureExt;
 use parking_lot::Mutex;
-use rodio::Source as _;
+use rodio::{
+    Source as _,
+    source::AutomaticGainControlSettings,
+};
 use tokio::{
     runtime::Handle,
     sync::oneshot,
@@ -116,12 +120,12 @@ where
 
     #[inline]
     fn channels(&self) -> rodio::ChannelCount {
-        1
+        const { NonZero::new(1).unwrap() }
     }
 
     #[inline]
     fn sample_rate(&self) -> rodio::SampleRate {
-        self.read_samples.sample_rate() as u32
+        NonZero::new(self.read_samples.sample_rate() as u32).unwrap()
     }
 
     #[inline]
@@ -197,7 +201,7 @@ where
 #[derive(Debug, thiserror::Error)]
 #[error("audio error")]
 pub enum Error<S> {
-    Playback(#[from] rodio::StreamError),
+    Playback(#[from] rodio::DeviceSinkError),
     Stream(S),
     Dropped,
 }
@@ -215,7 +219,12 @@ where
 
     global_output_stream()?.mixer().add(
         source
-            .automatic_gain_control(1.0, 4.0, 0.0, 5.0)
+            .automatic_gain_control(AutomaticGainControlSettings {
+                target_level: 1.0,
+                attack_time: Duration::from_secs(4),
+                release_time: Duration::from_secs(0),
+                absolute_max_gain: 5.0,
+            })
             .amplify_normalized(volume),
     );
 
@@ -235,14 +244,14 @@ where
     }
 }
 
-fn global_output_stream() -> Result<&'static rodio::OutputStream, rodio::StreamError> {
-    static OUTPUT_STREAM: Mutex<Option<&'static rodio::OutputStream>> = Mutex::new(None);
+fn global_output_stream() -> Result<&'static rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+    static OUTPUT_STREAM: Mutex<Option<&'static rodio::MixerDeviceSink>> = Mutex::new(None);
 
     let mut output_stream = OUTPUT_STREAM.lock();
 
     if output_stream.is_none() {
         *output_stream = Some(Box::leak(Box::new(
-            rodio::OutputStreamBuilder::open_default_stream()?,
+            rodio::DeviceSinkBuilder::open_default_sink()?,
         )));
     }
 

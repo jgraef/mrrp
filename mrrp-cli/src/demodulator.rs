@@ -1,6 +1,7 @@
 use std::{
     collections::VecDeque,
     f32::consts::TAU,
+    num::NonZero,
     sync::Arc,
 };
 
@@ -180,11 +181,11 @@ impl rodio::Source for AudioSource {
     }
 
     fn channels(&self) -> rodio::ChannelCount {
-        1
+        NonZero::new(1).unwrap()
     }
 
     fn sample_rate(&self) -> rodio::SampleRate {
-        self.sample_rate
+        NonZero::new(self.sample_rate).unwrap()
     }
 
     fn total_duration(&self) -> Option<std::time::Duration> {

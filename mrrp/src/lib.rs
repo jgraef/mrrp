@@ -1,7 +1,5 @@
 #![feature(allocator_api)]
 #![feature(get_mut_unchecked)]
-#![feature(maybe_uninit_write_slice)]
-#![feature(maybe_uninit_slice)]
 
 #[cfg(feature = "audio")]
 pub mod audio;

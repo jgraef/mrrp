@@ -12,7 +12,10 @@ use biquad::{
     Q_BUTTERWORTH_F32,
     ToHertz,
 };
-use num_traits::Zero;
+use num_traits::{
+    ConstZero,
+    Zero,
+};
 
 use crate::io::combinators::Scanner;
 
@@ -44,7 +47,7 @@ where
 
 pub fn lowpass<T>(sample_rate: f32, cutoff_frequency: f32) -> DirectForm2Transposed<f32, T>
 where
-    T: Copy + Add<T, Output = T> + Sub<T, Output = T> + Zero,
+    T: Copy + Add<T, Output = T> + Sub<T, Output = T> + ConstZero,
     f32: Mul<T, Output = T>,
 {
     DirectForm2Transposed::new(

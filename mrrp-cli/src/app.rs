@@ -20,8 +20,9 @@ use ratatui::{
     prelude::CrosstermBackend,
 };
 use rodio::{
-    OutputStreamBuilder,
+    DeviceSinkBuilder,
     Source,
+    source::AutomaticGainControlSettings,
 };
 use rtlsdr_async::Backend;
 use serde::{
@@ -217,12 +218,19 @@ where
             FrequencyBand::from_center_and_bandwidth(6_020_000, 10000),
             self.state.sampled_frequency_band,
         );
-        let audio_output = OutputStreamBuilder::open_default_stream()?;
-        audio_output.mixer().add(
-            am_demod
-                .audio_source()
-                .automatic_gain_control(0.25, 4.0, 0.0, 5.0),
-        );
+        let audio_output = DeviceSinkBuilder::open_default_sink()?;
+        audio_output
+            .mixer()
+            .add(
+                am_demod
+                    .audio_source()
+                    .automatic_gain_control(AutomaticGainControlSettings {
+                        target_level: 0.25,
+                        attack_time: Duration::from_secs(4),
+                        release_time: Duration::from_secs(0),
+                        absolute_max_gain: 5.0,
+                    }),
+            );
 
         while !self.exit_requested {
             tokio::select! {
