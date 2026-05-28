@@ -2,7 +2,8 @@
 struct WaterfallConfig {
     min_db: f32,
     max_db: f32,
-    //_padding: [u32; 2],
+    start_frequency: f32,
+    end_frequency: f32,
     background_color: vec4f,
     foreground_color1: vec4f,
     foreground_color2: vec4f,

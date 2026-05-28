@@ -5,6 +5,11 @@ use std::ops::{
     RangeBounds,
 };
 
+use bytemuck::{
+    Pod,
+    Zeroable,
+};
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RingBufferAllocator {
     state: State,
@@ -19,7 +24,7 @@ impl RingBufferAllocator {
         }
     }
 
-    pub fn allocate(&mut self, mut size: u64) -> Option<Slice> {
+    pub fn allocate_back(&mut self, mut size: u64) -> Option<Slice> {
         if size == 0 {
             return Some(Slice::default());
         }
@@ -50,16 +55,42 @@ impl RingBufferAllocator {
             State::Full { start_and_end: _ } => None,
             State::Single { start, end } => {
                 if size <= *start + self.capacity - *end {
-                    let n = size.min(self.capacity - *end);
-                    let slice = Slice::new(Range::from_start_and_length(*end, n));
+                    if *end < self.capacity {
+                        let n = size.min(self.capacity - *end);
+                        let slice = Slice::new(Range::from_start_and_length(*end, n));
 
-                    *end += n;
-                    size -= n;
+                        *end += n;
+                        size -= n;
 
-                    if n > 0 {
-                        assert_eq!(*end, self.capacity);
+                        if size > 0 {
+                            assert_eq!(*end, self.capacity);
 
-                        if n == *start {
+                            if size == *start {
+                                self.state = State::Full {
+                                    start_and_end: *start,
+                                };
+                            }
+                            else {
+                                self.state = State::Split {
+                                    start: *start,
+                                    end: size,
+                                };
+                            }
+
+                            Some(slice.and(Range::new(0, size)))
+                        }
+                        else {
+                            if *start == 0 && *end == self.capacity {
+                                self.state = State::Full {
+                                    start_and_end: *start,
+                                };
+                            }
+
+                            Some(slice)
+                        }
+                    }
+                    else {
+                        if size == *start {
                             self.state = State::Full {
                                 start_and_end: *start,
                             };
@@ -67,14 +98,11 @@ impl RingBufferAllocator {
                         else {
                             self.state = State::Split {
                                 start: *start,
-                                end: n,
+                                end: size,
                             };
                         }
 
-                        Some(slice.and(Range::new(0, size)))
-                    }
-                    else {
-                        Some(slice)
+                        Some(Slice::new(Range::new(0, size)))
                     }
                 }
                 else {
@@ -101,7 +129,7 @@ impl RingBufferAllocator {
         }
     }
 
-    pub fn free(&mut self, slice: Slice) -> bool {
+    pub fn free_front(&mut self, slice: Slice) -> bool {
         if slice.parts[0].is_empty() {
             assert!(slice.parts[1].is_empty());
             return true;
@@ -116,39 +144,59 @@ impl RingBufferAllocator {
             State::Full {
                 start_and_end: start_end_end,
             } => {
-                if slice.parts[1].is_empty()
-                    && slice.parts[0].start == *start_end_end
-                    && slice.parts[0].end <= self.capacity
-                {
+                if slice.parts[0].start == *start_end_end && slice.parts[0].end <= self.capacity {
                     assert!(slice.parts[0].end > *start_end_end);
 
-                    if slice.parts[0].end == self.capacity {
-                        if *start_end_end == 0 {
-                            self.state = State::Empty;
-                        }
-                        else {
-                            self.state = State::Single {
-                                start: *start_end_end,
-                                end: slice.parts[0].end,
-                            };
-                        }
-                    }
-                    else {
-                        if *start_end_end == 0 {
-                            self.state = State::Single {
-                                start: slice.parts[0].end,
-                                end: self.capacity,
-                            };
-                        }
-                        else {
-                            self.state = State::Split {
-                                start: slice.parts[0].end,
-                                end: *start_end_end,
+                    if slice.parts[1].is_empty() {
+                        if slice.parts[0].end == self.capacity {
+                            if *start_end_end == 0 {
+                                self.state = State::Empty;
+                            }
+                            else {
+                                self.state = State::Single {
+                                    start: 0,
+                                    end: *start_end_end,
+                                };
                             }
                         }
-                    }
+                        else {
+                            if *start_end_end == 0 {
+                                self.state = State::Single {
+                                    start: slice.parts[0].end,
+                                    end: self.capacity,
+                                };
+                            }
+                            else {
+                                self.state = State::Split {
+                                    start: slice.parts[0].end,
+                                    end: *start_end_end,
+                                }
+                            }
+                        }
 
-                    true
+                        true
+                    }
+                    else {
+                        if slice.parts[0].end == self.capacity
+                            && slice.parts[1].start == 0
+                            && slice.parts[1].end <= *start_end_end
+                        {
+                            if slice.parts[1].end == *start_end_end {
+                                self.state = State::Empty;
+                            }
+                            else {
+                                self.state = State::Single {
+                                    start: slice.parts[1].end,
+                                    end: *start_end_end,
+                                };
+                            }
+
+                            true
+                        }
+                        else {
+                            false
+                        }
+                    }
                 }
                 else {
                     false
@@ -174,8 +222,8 @@ impl RingBufferAllocator {
             }
             State::Split { start, end } => {
                 if slice.parts[1].is_empty() {
-                    if slice.parts[0].start == *start && slice.parts[0].end <= *end {
-                        if slice.parts[0].end == *end {
+                    if slice.parts[0].start == *start && slice.parts[0].end <= self.capacity {
+                        if slice.parts[0].end == self.capacity {
                             self.state = State::Single {
                                 start: 0,
                                 end: *end,
@@ -263,6 +311,44 @@ impl RingBufferAllocator {
     pub fn capacity(&self) -> u64 {
         self.capacity
     }
+
+    pub fn contains(&self, slice: Slice) -> bool {
+        assert!(slice.iter().all(|range| range.start <= range.end));
+
+        match self.state {
+            State::Empty => false,
+            State::Full { start_and_end } => {
+                if slice.parts[1].is_empty() {
+                    slice.parts[0].end < start_and_end
+                        || (slice.parts[0].start >= start_and_end
+                            && slice.parts[0].end < self.capacity)
+                }
+                else {
+                    slice.parts[0].start > start_and_end
+                        && slice.parts[0].end == self.capacity
+                        && slice.parts[1].start == 0
+                        && slice.parts[1].end < start_and_end
+                }
+            }
+            State::Single { start, end } => {
+                slice.parts[1].is_empty()
+                    && slice.parts[0].start >= start
+                    && slice.parts[0].end < end
+            }
+            State::Split { start, end } => {
+                if slice.parts[1].is_empty() {
+                    slice.parts[0].end < end
+                        || (slice.parts[0].start >= start && slice.parts[0].end < self.capacity)
+                }
+                else {
+                    slice.parts[0].start >= start
+                        && slice.parts[0].end == self.capacity
+                        && slice.parts[1].start == 0
+                        && slice.parts[1].end < end
+                }
+            }
+        }
+    }
 }
 
 /// Tracks the allocated space
@@ -290,7 +376,7 @@ impl RingBufferAllocator {
 ///
 /// Or e.g. a `Single` could be defined such that the buffer is essentially
 /// full. This must be avoided and the state set to `Full` instead.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum State {
     /// +----------------------------------------------------------+
     /// |                                                          |
@@ -328,22 +414,27 @@ enum State {
     Split { start: u64, end: u64 },
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
 pub struct Slice {
     parts: [Range; 2],
 }
 
 impl Slice {
-    fn new(range: Range) -> Self {
+    pub fn new(range: Range) -> Self {
         Self {
             parts: [range, Default::default()],
         }
     }
 
-    fn and(mut self, range: Range) -> Self {
+    pub fn and(mut self, range: Range) -> Self {
         assert!(self.parts[1].is_empty());
         self.parts[1] = range;
         self
+    }
+
+    pub fn len(&self) -> u64 {
+        self.parts.iter().map(|range| range.len()).sum()
     }
 
     pub fn parts(&self) -> [Range; 2] {
@@ -367,18 +458,19 @@ impl Slice {
 }
 
 // this is basically std::ops::Range<u64>, but Copy!
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
+#[repr(C)]
 pub struct Range {
     pub start: u64,
     pub end: u64,
 }
 
 impl Range {
-    fn new(start: u64, end: u64) -> Self {
+    pub fn new(start: u64, end: u64) -> Self {
         Self { start, end }
     }
 
-    fn from_start_and_length(start: u64, length: u64) -> Self {
+    pub fn from_start_and_length(start: u64, length: u64) -> Self {
         Self::new(start, start + length)
     }
 
@@ -398,5 +490,297 @@ impl RangeBounds<u64> for Range {
 
     fn end_bound(&self) -> Bound<&u64> {
         Bound::Excluded(&self.end)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::util::ring_buffer::{
+        Range,
+        RingBufferAllocator,
+        Slice,
+        State,
+    };
+
+    #[test]
+    fn allocate_back_empty_to_full() {
+        let mut allocator = RingBufferAllocator::new(100);
+        let slice = allocator.allocate_back(100).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(0, 100)));
+        assert_eq!(allocator.state, State::Full { start_and_end: 0 });
+    }
+
+    #[test]
+    fn allocate_back_empty_to_single() {
+        let mut allocator = RingBufferAllocator::new(100);
+        let slice = allocator.allocate_back(50).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(0, 50)));
+        assert_eq!(allocator.state, State::Single { start: 0, end: 50 });
+    }
+
+    #[test]
+    fn allocate_back_single_to_full() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 0, end: 50 },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(50).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(50, 100)));
+        assert_eq!(allocator.state, State::Full { start_and_end: 0 });
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Single {
+                start: 50,
+                end: 100,
+            },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(50).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(0, 50)));
+        assert_eq!(allocator.state, State::Full { start_and_end: 50 });
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 10, end: 20 },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(90).unwrap();
+        assert_eq!(
+            slice,
+            Slice::new(Range::new(20, 100)).and(Range::new(0, 10))
+        );
+        assert_eq!(allocator.state, State::Full { start_and_end: 10 });
+    }
+
+    #[test]
+    fn allocate_back_single_to_split() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Single {
+                start: 90,
+                end: 100,
+            },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(10).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(0, 10)));
+        assert_eq!(allocator.state, State::Split { start: 90, end: 10 });
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 80, end: 90 },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(20).unwrap();
+        assert_eq!(
+            slice,
+            Slice::new(Range::new(90, 100)).and(Range::new(0, 10))
+        );
+        assert_eq!(allocator.state, State::Split { start: 80, end: 10 });
+    }
+
+    #[test]
+    fn allocate_back_single_to_single() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 0, end: 50 },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(10).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(50, 60)));
+        assert_eq!(allocator.state, State::Single { start: 0, end: 60 });
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 50, end: 60 },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(10).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(60, 70)));
+        assert_eq!(allocator.state, State::Single { start: 50, end: 70 });
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 50, end: 90 },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(10).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(90, 100)));
+        assert_eq!(
+            allocator.state,
+            State::Single {
+                start: 50,
+                end: 100
+            }
+        );
+    }
+
+    #[test]
+    fn allocate_back_split_to_full() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Split { start: 90, end: 10 },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(80).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(10, 90)));
+        assert_eq!(allocator.state, State::Full { start_and_end: 90 });
+    }
+
+    #[test]
+    fn allocate_back_split_to_split() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Split { start: 90, end: 10 },
+            capacity: 100,
+        };
+        let slice = allocator.allocate_back(10).unwrap();
+        assert_eq!(slice, Slice::new(Range::new(10, 20)));
+        assert_eq!(allocator.state, State::Split { start: 90, end: 20 });
+    }
+
+    #[test]
+    fn free_front_full_to_empty() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Full { start_and_end: 0 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(0, 100)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Empty);
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Full { start_and_end: 50 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(50, 100)).and(Range::new(0, 50)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Empty);
+    }
+
+    #[test]
+    fn free_front_full_to_single() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Full { start_and_end: 0 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(0, 50)));
+        assert!(success);
+        assert_eq!(
+            allocator.state,
+            State::Single {
+                start: 50,
+                end: 100,
+            },
+        );
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Full { start_and_end: 50 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(50, 100)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Single { start: 0, end: 50 });
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Full { start_and_end: 50 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(50, 100)).and(Range::new(0, 20)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Single { start: 20, end: 50 });
+    }
+
+    #[test]
+    fn free_front_full_to_split() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Full { start_and_end: 50 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(50, 60)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Split { start: 60, end: 50 });
+    }
+
+    #[test]
+    fn free_front_split_to_split() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Split { start: 90, end: 10 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(90, 95)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Split { start: 95, end: 10 });
+    }
+
+    #[test]
+    fn free_front_split_to_single() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Split { start: 90, end: 10 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(90, 100)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Single { start: 0, end: 10 });
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Split { start: 90, end: 10 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(90, 100)).and(Range::new(0, 5)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Single { start: 5, end: 10 });
+    }
+
+    #[test]
+    fn free_front_split_to_empty() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Split { start: 90, end: 10 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(90, 100)).and(Range::new(0, 10)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Empty);
+    }
+
+    #[test]
+    fn free_front_single_to_single() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 0, end: 50 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(0, 20)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Single { start: 20, end: 50 });
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 20, end: 50 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(20, 40)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Single { start: 40, end: 50 });
+    }
+
+    #[test]
+    fn free_front_single_to_empty() {
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 0, end: 50 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(0, 50)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Empty);
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Single { start: 20, end: 50 },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(20, 50)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Empty);
+
+        let mut allocator = RingBufferAllocator {
+            state: State::Single {
+                start: 20,
+                end: 100,
+            },
+            capacity: 100,
+        };
+        let success = allocator.free_front(Slice::new(Range::new(20, 100)));
+        assert!(success);
+        assert_eq!(allocator.state, State::Empty);
     }
 }

@@ -4,7 +4,6 @@ use std::{
     cmp::Ordering,
     collections::VecDeque,
     num::NonZero,
-    ops::Range,
     sync::Arc,
 };
 
@@ -32,6 +31,7 @@ use crate::{
     util::{
         color32_to_linrgba,
         ring_buffer::{
+            Range,
             RingBufferAllocator,
             Slice,
         },
@@ -49,6 +49,8 @@ pub struct WaterfallView<'a> {
     style: WaterfallStyle,
     min_db: f32,
     max_db: f32,
+    start_frequency: f32,
+    end_frequency: f32,
 }
 
 impl<'a> WaterfallView<'a> {
@@ -59,6 +61,8 @@ impl<'a> WaterfallView<'a> {
             style: Default::default(),
             min_db: -100.0,
             max_db: 0.0,
+            start_frequency: 0.0,
+            end_frequency: 1000000.0,
         }
     }
 
@@ -77,6 +81,12 @@ impl<'a> WaterfallView<'a> {
         self
     }
 
+    pub fn frequency_range(mut self, start_frequency: f32, end_frequency: f32) -> Self {
+        self.start_frequency = start_frequency;
+        self.end_frequency = end_frequency;
+        self
+    }
+
     pub fn style(mut self, style: WaterfallStyle) -> Self {
         self.style = style;
         self
@@ -91,11 +101,20 @@ impl<'a> egui::Widget for WaterfallView<'a> {
         );
 
         if !ui.is_sizing_pass() && ui.is_rect_visible(response.rect) {
+            let num_lines = response.rect.height() as usize;
+
             ui.painter().add(egui_wgpu::Callback::new_paint_callback(
                 response.rect,
                 PaintCallback {
                     shared_state: self.state.shared_state.clone(),
-                    config: ConfigData::new(&self.style, self.min_db, self.max_db),
+                    config: ConfigData::new(
+                        &self.style,
+                        self.min_db,
+                        self.max_db,
+                        self.start_frequency,
+                        self.end_frequency,
+                    ),
+                    num_lines,
                 },
             ));
         }
@@ -148,6 +167,7 @@ impl Default for WaterfallStyle {
 struct PaintCallback {
     shared_state: Arc<RwLock<State>>,
     config: ConfigData,
+    num_lines: usize,
 }
 
 impl egui_wgpu::CallbackTrait for PaintCallback {
@@ -167,7 +187,13 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
 
         // stream data to GPU
         let mut state = self.shared_state.write();
-        state.flush(device, egui_encoder, &pipeline, &self.config);
+        state.flush(
+            device,
+            egui_encoder,
+            &pipeline,
+            &self.config,
+            self.num_lines,
+        );
 
         vec![]
     }
@@ -324,6 +350,7 @@ impl State {
         mut command_encoder: &mut wgpu::CommandEncoder,
         pipeline: &Pipeline,
         config: &ConfigData,
+        num_lines: usize,
     ) {
         // we need a line first. otherwise we can't determine a good size for the
         // staging buffers. until then we can't even upload the config.
@@ -385,17 +412,19 @@ impl State {
             self.config = Some(*config);
         }
 
-        let buffers_reallocated =
-            self.ring_buffer
-                .push_back(&self.queued_lines, &mut command_encoder, &mut staging);
+        // update the line capacity
+        self.ring_buffer.set_line_capacity(num_lines);
 
-        if buffers_reallocated {
-            // if buffers have been reallocated, we need to recreate the bind group
-            self.bind_group = None;
-        }
+        let buffers_reallocated = self.ring_buffer.push_back(
+            &self.queued_lines,
+            device,
+            &mut command_encoder,
+            &mut staging,
+        );
+        self.queued_lines.clear();
 
         // create bind group
-        if self.bind_group.is_none()
+        if (buffers_reallocated || self.bind_group.is_none())
             && let (Some(config_buffer), Some(index_buffer), Some(data_buffer)) = (
                 &self.config_buffer,
                 &self.ring_buffer.index_buffer,
@@ -458,23 +487,31 @@ impl RingBuffer {
 
     fn truncate_front(&mut self, new_length: usize) {
         let num_drop = self.lines.len().saturating_sub(new_length);
-        for _ in 0..num_drop {
-            debug_assert!(self.pop_front().is_some());
+        if num_drop > 0 {
+            tracing::debug!(num_drop, "truncating");
+
+            for _ in 0..num_drop {
+                debug_assert!(self.pop_front().is_some());
+            }
         }
     }
 
     fn pop_front(&mut self) -> Option<Line> {
         let line = self.lines.pop_front()?;
-        assert!(self.allocator.free(line.slice));
+        assert!(
+            self.allocator.free_front(line.slice),
+            "failed to free front:\nline = {line:?}\nallocator = {:#?}",
+            self.allocator,
+        );
         Some(line)
     }
 
     fn push_back(
         &mut self,
         lines: &[WaterfallLine],
+        device: &wgpu::Device,
         command_encoder: &mut wgpu::CommandEncoder,
         staging: &mut StagingTransaction,
-        device: &wgpu::Device,
     ) -> bool {
         if self.line_capacity == 0 || lines.is_empty() {
             return false;
@@ -487,54 +524,177 @@ impl RingBuffer {
         // truncate from front to make enough room
         self.truncate_front(self.line_capacity - lines.len());
 
+        let mut reallocated = false;
+
+        let mut create_buffer = |capacity| {
+            tracing::debug!(capacity, "creating waterfall data buffer");
+            reallocated = true;
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("waterfall data buffer"),
+                size: capacity,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: false,
+            })
+        };
+
         // check available space
-        let total_required: u64 = lines.iter().map(|line| line.bytes_len()).sum();
-        if let Some(data_buffer) = &self.data_buffer
-            && total_required <= self.allocator.available()
-        {
-            // allocate new lines and write them to the staging buffer
-            for line in lines {
-                let slice = self
-                    .allocator
-                    .allocate(line.bytes_len())
-                    .expect("allocation failed");
+        let total_required =
+            lines.iter().map(|line| line.bytes_len()).sum::<u64>() + self.allocator.len();
 
-                self.lines.push_back(Line { slice });
-                let data = bytemuck::cast_slice(&line.data);
+        // this is the estimated total buffer capacity, if the buffer was filled to line
+        // capacity with a line size from the first line
+        let estimated_total_required =
+            lines.first().unwrap().bytes_len() * u64::try_from(self.line_capacity).unwrap();
 
-                for (source, destination) in slice.iter_with_source() {
-                    staging.write_buffer_from_slice(
-                        data_buffer.slice(destination),
-                        &data[source],
-                        device,
-                        command_encoder,
-                    );
-                }
-            }
+        // get data buffer, allocate a new one if needed
+        let data_buffer = self.data_buffer.get_or_insert_with(|| {
+            let capacity = estimated_total_required.max(total_required);
 
-            todo!("write index");
-            //false
-        }
-        else {
+            assert!(self.allocator.is_empty());
+            self.allocator = RingBufferAllocator::new(capacity);
+
+            create_buffer(capacity)
+        });
+
+        if total_required > self.allocator.capacity() {
             // need to reallocate
+            tracing::debug!(
+                total_required,
+                capacity = self.allocator.capacity(),
+                "need to reallocate data buffer"
+            );
 
-            let new_capacity = (self.allocator.capacity() * 2).min(total_required);
+            assert!(self.index_buffer.is_some());
+
+            let new_capacity = (self.allocator.capacity() * 2)
+                .max(total_required)
+                .max(estimated_total_required);
             let mut new_allocator = RingBufferAllocator::new(new_capacity);
 
+            // allocate new buffer
+            let new_buffer = create_buffer(new_capacity);
+
+            // copy from old to new buffer
             for range in self.allocator.allocated().iter() {
                 let [new_range, new_range_empty] = new_allocator
-                    .allocate(range.len())
+                    .allocate_back(range.len())
                     .expect("new allocator doesn't have enough space")
                     .parts();
                 assert!(new_range_empty.is_empty(), "new allocation not contigious");
+                assert_eq!(range.len(), new_range.len());
+
+                command_encoder.copy_buffer_to_buffer(
+                    data_buffer,
+                    range.start,
+                    &new_buffer,
+                    new_range.start,
+                    range.len(),
+                );
             }
 
-            todo!("realloc");
+            // fix index
+            // the new allocations should now be contiguous and in the same order as before
+            let mut cursor = 0;
+            for line in &mut self.lines {
+                let start = cursor;
+                let end = cursor + line.slice.len();
+                cursor = end;
+                line.slice = Slice::new(Range::new(start, end));
+                assert!(new_allocator.contains(line.slice));
+            }
+
+            self.allocator = new_allocator;
+            *data_buffer = new_buffer;
         }
+
+        // allocate new lines and write them to the staging buffer
+        for line in lines {
+            let slice = self
+                .allocator
+                .allocate_back(line.bytes_len())
+                .expect("allocation failed");
+
+            self.lines.push_back(Line { slice });
+            let data = bytemuck::cast_slice(&line.data);
+
+            for (source, destination) in slice.iter_with_source() {
+                // note: the destination offsets need to be aligned to
+                // wgpu::COPY_BUFFER_ALIGNMENT (4 bytes).
+                staging.write_buffer_from_slice(
+                    data_buffer.slice(destination),
+                    &data[source],
+                    device,
+                    command_encoder,
+                );
+            }
+        }
+
+        assert!(self.lines.len() <= self.line_capacity);
+
+        // todo: would be nicer if we only copied the new parts of the index buffer
+        let index_bytes: &[u8] = bytemuck::cast_slice(self.lines.make_contiguous());
+        let index_bytes_len = u64::try_from(index_bytes.len()).unwrap();
+
+        // either return the buffer if it exists and is large enough, or return the new
+        // buffer capacity
+        let estimated_total_required =
+            u64::try_from(self.line_capacity * size_of::<Line>()).unwrap();
+        let index_buffer = if let Some(index_buffer) = &self.index_buffer {
+            if index_bytes_len <= index_buffer.size() {
+                Ok(index_buffer)
+            }
+            else {
+                let new_capacity = (index_buffer.size() * 2)
+                    .max(index_bytes_len)
+                    .max(estimated_total_required);
+                Err(new_capacity)
+            }
+        }
+        else {
+            let new_capacity = index_bytes_len.max(estimated_total_required);
+            Err(new_capacity)
+        };
+
+        match index_buffer {
+            Ok(index_buffer) => {
+                // we can use the buffer we have
+
+                staging.write_buffer_from_slice(
+                    index_buffer.slice(..index_bytes_len),
+                    index_bytes,
+                    device,
+                    command_encoder,
+                );
+            }
+            Err(capacity) => {
+                // we need to allocate a new buffer
+
+                tracing::debug!(capacity, "creating waterfall index buffer");
+                reallocated = true;
+
+                let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("waterfall index buffer"),
+                    size: capacity,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: true,
+                });
+
+                index_buffer
+                    .get_mapped_range_mut(..index_bytes_len)
+                    .copy_from_slice(index_bytes);
+
+                index_buffer.unmap();
+
+                self.index_buffer = Some(index_buffer);
+            }
+        }
+
+        reallocated
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
 struct Line {
     slice: Slice,
 }
@@ -557,18 +717,26 @@ impl WaterfallLine {
 struct ConfigData {
     min_db: f32,
     max_db: f32,
-    _padding: [u32; 2],
+    start_frequency: f32,
+    end_frequency: f32,
     background_color: [f32; 4],
     foreground_color1: [f32; 4],
     foreground_color2: [f32; 4],
 }
 
 impl ConfigData {
-    pub fn new(style: &WaterfallStyle, min_db: f32, max_db: f32) -> Self {
+    pub fn new(
+        style: &WaterfallStyle,
+        min_db: f32,
+        max_db: f32,
+        start_frequency: f32,
+        end_frequency: f32,
+    ) -> Self {
         Self {
             min_db,
             max_db,
-            _padding: [0; 2],
+            start_frequency,
+            end_frequency,
             background_color: color32_to_linrgba(style.background_color),
             foreground_color1: color32_to_linrgba(style.foreground_color1),
             foreground_color2: color32_to_linrgba(style.foreground_color2),
