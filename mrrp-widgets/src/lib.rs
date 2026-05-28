@@ -17,13 +17,11 @@ pub fn initialize_wgpu_rendering(ctx: &egui::Context, render_state: &RenderState
         target_texture_format: render_state.target_format,
     };
 
+    let callback_resources = &mut render_state.renderer.write().callback_resources;
+
     // eframe doesn't give us some info we need in the paint callback, so we need to
     // store it in the callback resources.
-    render_state
-        .renderer
-        .write()
-        .callback_resources
-        .insert(widget_render_state.clone());
+    callback_resources.insert(widget_render_state.clone());
 
     // we also sometimes want access to the device and queue where we only have
     // access to egui's context.
@@ -31,13 +29,14 @@ pub fn initialize_wgpu_rendering(ctx: &egui::Context, render_state: &RenderState
 }
 
 #[derive(Clone, Debug)]
-pub struct WidgetRenderState {
+#[allow(unused)]
+pub(crate) struct WidgetRenderState {
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     pub target_texture_format: wgpu::TextureFormat,
 }
 
-pub trait GetWidgetRenderState {
+pub(crate) trait GetWidgetRenderState {
     fn widget_render_state(&self) -> Option<WidgetRenderState>;
 
     fn expect_widget_render_state(&self) -> WidgetRenderState {
