@@ -10,6 +10,10 @@ use bytemuck::{
     Zeroable,
 };
 
+/// For allocating slices in a ring buffer.
+///
+/// This only tracks the allocated region and doesn't allocate anything. This
+/// way it can also be used for e.g. file-backed ring buffers.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct RingBufferAllocator {
     state: State,

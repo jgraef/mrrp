@@ -1,7 +1,4 @@
-#![allow(unused)]
-
 use std::{
-    cmp::Ordering,
     collections::VecDeque,
     num::NonZero,
     sync::Arc,
@@ -16,18 +13,13 @@ use egui::{
     Vec2,
 };
 use parking_lot::{
-    Mutex,
     RwLock,
     RwLockWriteGuard,
 };
-use wgpu::util::{
-    DeviceExt,
-    StagingBelt,
-};
+use wgpu::util::DeviceExt;
 
 use crate::{
     GetWidgetRenderState,
-    RenderState,
     util::{
         color32_to_linrgba,
         ring_buffer::{
@@ -36,6 +28,7 @@ use crate::{
             Slice,
         },
         staging::{
+            ChunkSize,
             StagingPool,
             StagingTransaction,
         },
@@ -130,7 +123,7 @@ pub struct WaterfallState {
 
 impl WaterfallState {
     pub fn update(&self) -> WaterfallStateUpdateGuard<'_> {
-        let mut state = self.shared_state.write();
+        let state = self.shared_state.write();
         WaterfallStateUpdateGuard { state }
     }
 }
@@ -174,7 +167,7 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
     fn prepare(
         &self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
         egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
@@ -360,25 +353,25 @@ impl State {
         };
 
         // if the lines are empty, we can't really do anything either
-        let Some(chunk_size) = NonZero::new(first_line.bytes_len())
-        else {
+        if num_lines == 0 || first_line.data.len() == 0 {
             return;
-        };
+        }
 
         // get staging transaction
         let mut staging = self
             .staging_pool
             .get_or_insert_with(|| {
-                tracing::debug!(chunk_size, "creating staging buffer");
+                let estimated_index_size = u64::try_from(num_lines * size_of::<Line>()).unwrap();
+                let chunk_size = ChunkSize {
+                    chunk_size: first_line.bytes_len().max(estimated_index_size),
+                    adaptive: true,
+                };
+                tracing::debug!(?chunk_size, "creating staging buffer");
                 StagingPool::new(chunk_size, "waterfall-staging")
             })
             .begin();
 
         // update config buffer
-        let mut config_changed = self
-            .config
-            .as_ref()
-            .is_some_and(|current| config != current);
 
         let config_buffer = self.config_buffer.get_or_insert_with(|| {
             tracing::debug!("creating waterfall config buffer");
@@ -398,7 +391,9 @@ impl State {
             buffer
         });
 
-        if config_changed {
+        if let Some(current_config) = &self.config
+            && current_config != config
+        {
             tracing::debug!("writing waterfall config buffer");
 
             let config_bytes = bytemuck::bytes_of(config);
@@ -470,16 +465,6 @@ struct RingBuffer {
 }
 
 impl RingBuffer {
-    fn new(byte_capacity: u64, line_capacity: usize) -> Self {
-        Self {
-            line_capacity,
-            lines: VecDeque::new(),
-            allocator: RingBufferAllocator::new(byte_capacity),
-            index_buffer: None,
-            data_buffer: None,
-        }
-    }
-
     fn set_line_capacity(&mut self, line_capacity: usize) {
         self.truncate_front(line_capacity);
         self.line_capacity = line_capacity;
@@ -488,8 +473,6 @@ impl RingBuffer {
     fn truncate_front(&mut self, new_length: usize) {
         let num_drop = self.lines.len().saturating_sub(new_length);
         if num_drop > 0 {
-            tracing::debug!(num_drop, "truncating");
-
             for _ in 0..num_drop {
                 debug_assert!(self.pop_front().is_some());
             }
@@ -708,7 +691,7 @@ pub struct WaterfallLine {
 
 impl WaterfallLine {
     fn bytes_len(&self) -> u64 {
-        u64::try_from(std::mem::size_of::<f32>() * self.data.len()).unwrap()
+        u64::try_from(size_of::<f32>() * self.data.len()).unwrap()
     }
 }
 

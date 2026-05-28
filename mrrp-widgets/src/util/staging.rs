@@ -17,36 +17,68 @@ pub struct StagingPool {
 
 #[derive(Debug)]
 struct StagingPoolInner {
-    /// Minimum size of an individual chunk
-    chunk_size: wgpu::BufferSize,
     chunk_label: Cow<'static, str>,
     state: RwLock<StagingPoolState>,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct StagingPoolState {
+    /// Minimum size of an individual chunk
+    chunk_size: ChunkSize,
+
     /// Chunks that are back from the GPU and ready to be mapped for write and
     /// put into `active_chunks`.
     free_chunks: Vec<Chunk>,
+
+    /// How many chunks are currently not mapped
     in_flight_count: usize,
+
+    /// Total number of allocated chunks
     total_allocated_count: usize,
+
+    /// Total allocated size in bytes
     total_allocated_bytes: u64,
+
+    /// Total staged (in-flight) size in bytes
     total_staged_bytes: u64,
 }
 
-impl Default for StagingPool {
-    fn default() -> Self {
-        Self::new(wgpu::BufferSize::new(0x1000).unwrap(), "staging pool")
+#[derive(Clone, Copy, Debug)]
+pub struct ChunkSize {
+    pub chunk_size: u64,
+    pub adaptive: bool,
+}
+
+impl ChunkSize {
+    pub fn get(&mut self, required: u64) -> u64 {
+        if required > self.chunk_size {
+            if self.adaptive {
+                self.chunk_size = (2 * self.chunk_size).min(required);
+                self.chunk_size
+            }
+            else {
+                required
+            }
+        }
+        else {
+            self.chunk_size
+        }
     }
 }
 
 impl StagingPool {
-    pub fn new(chunk_size: wgpu::BufferSize, chunk_label: impl Into<Cow<'static, str>>) -> Self {
+    pub fn new(chunk_size: ChunkSize, chunk_label: impl Into<Cow<'static, str>>) -> Self {
         Self {
             inner: Arc::new(StagingPoolInner {
-                chunk_size,
                 chunk_label: chunk_label.into(),
-                state: RwLock::new(Default::default()),
+                state: RwLock::new(StagingPoolState {
+                    chunk_size,
+                    free_chunks: vec![],
+                    in_flight_count: 0,
+                    total_allocated_count: 0,
+                    total_allocated_bytes: 0,
+                    total_staged_bytes: 0,
+                }),
             }),
         }
     }
@@ -80,11 +112,7 @@ pub struct StagingTransaction {
 }
 
 impl StagingTransaction {
-    pub fn new(chunk_size: wgpu::BufferSize, chunk_label: impl Into<Cow<'static, str>>) -> Self {
-        Self::from_pool(StagingPool::new(chunk_size, chunk_label))
-    }
-
-    pub fn from_pool(pool: StagingPool) -> Self {
+    fn from_pool(pool: StagingPool) -> Self {
         Self {
             pool,
             active_chunks: vec![],
@@ -125,7 +153,7 @@ impl StagingTransaction {
                     state.free_chunks.swap_remove(index)
                 }
                 else {
-                    let size = self.pool.inner.chunk_size.get().max(size.get());
+                    let size = state.chunk_size.get(size.get());
                     state.total_allocated_count += 1;
                     state.total_allocated_bytes += size;
                     drop(state);
