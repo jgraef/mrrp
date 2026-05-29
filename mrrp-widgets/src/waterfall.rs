@@ -138,6 +138,24 @@ impl<'a> WaterfallStateUpdateGuard<'a> {
     }
 }
 
+impl<'a> Drop for WaterfallStateUpdateGuard<'a> {
+    fn drop(&mut self) {
+        // we don't want to flush on every line if possible, as it can be more efficient
+        // if data transfers can be batched. thus we prefer flushing this queue when
+        // rendering happens. but we also can't have this grow limitless. also the
+        // longer we delay a flush the larger/more staging buffers we need.
+
+        if self.state.queued_lines.len() >= 32 {
+            self.state.flush_background();
+
+            // normally flush_background should clear the queue, but it might not if it
+            // doesn't have a device/queue or can't create a staging transaction. but we
+            // absolutely don't want this queue to grow without bounds.
+            self.state.queued_lines.clear();
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct WaterfallStyle {
     pub background_color: Color32,
@@ -166,7 +184,7 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
     fn prepare(
         &self,
         device: &wgpu::Device,
-        _queue: &wgpu::Queue,
+        queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
         egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
@@ -177,8 +195,14 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
             .entry()
             .or_insert_with(|| Pipeline::new(device, render_state.target_texture_format));
 
-        // stream data to GPU
         let mut state = self.shared_state.write();
+
+        // we need to remember the device and queue so we can background flush
+        if state.device_and_queue.is_none() {
+            state.device_and_queue = Some((device.clone(), queue.clone()));
+        }
+
+        // stream data to GPU
         state.flush(
             device,
             egui_encoder,
@@ -332,10 +356,61 @@ struct State {
     /// Bind group of config and data buffer
     bind_group: Option<wgpu::BindGroup>,
 
+    /// pool of staging buffers
     staging_pool: Option<StagingPool>,
+
+    /// device and queue in case we need to flush buffers without the UI
+    /// rendering
+    device_and_queue: Option<(wgpu::Device, wgpu::Queue)>,
 }
 
 impl State {
+    fn flush_background(&mut self) {
+        // get the device
+        let Some((device, queue)) = &self.device_and_queue
+        else {
+            return;
+        };
+
+        // begin staging transaction
+        let Some(mut staging) =
+            begin_staging_transaction(&mut self.staging_pool, &self.queued_lines)
+        else {
+            return;
+        };
+
+        //tracing::debug!(count = self.queued_lines.len(), "background flush");
+
+        // we need to create our own command encoder
+        let mut command_encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("waterfall background flush"),
+        });
+
+        // flush new lines to gpu
+        let buffers_reallocated = self.ring_buffer.push_back(
+            &self.queued_lines,
+            device,
+            &mut command_encoder,
+            &mut staging,
+        );
+        self.queued_lines.clear();
+
+        // if buffers were reallocated we'll just remove the bind group. a visible flush
+        // can later create them
+        if buffers_reallocated {
+            self.bind_group = None;
+        }
+
+        // commit staging transaction
+        staging.commit(&mut command_encoder);
+
+        // submit command encoder
+        // fixme: this blocks when window is in background (https://github.com/jgraef/mrrp/issues/1)
+        queue.submit([command_encoder.finish()]);
+
+        //tracing::debug!("background flush complete");
+    }
+
     fn flush(
         &mut self,
         device: &wgpu::Device,
@@ -344,32 +419,12 @@ impl State {
         config: &ConfigData,
         num_lines: usize,
     ) {
-        // we need a line first. otherwise we can't determine a good size for the
-        // staging buffers. until then we can't even upload the config.
-        let Some(first_line) = self.queued_lines.first()
+        // begin staging transaction
+        let Some(mut staging) =
+            begin_staging_transaction(&mut self.staging_pool, &self.queued_lines)
         else {
             return;
         };
-
-        // if the lines are empty, we can't really do anything either
-        if num_lines == 0 || first_line.data.len() == 0 {
-            return;
-        }
-
-        // get staging transaction
-        let mut staging = self
-            .staging_pool
-            .get_or_insert_with(|| {
-                let estimated_index_size =
-                    u64::try_from(num_lines * size_of::<IndexBufferEntry>()).unwrap();
-                let chunk_size = ChunkSize {
-                    chunk_size: first_line.bytes_len().max(estimated_index_size),
-                    adaptive: true,
-                };
-                tracing::debug!(?chunk_size, "creating staging buffer");
-                StagingPool::new(chunk_size, "waterfall-staging")
-            })
-            .begin();
 
         // update config buffer
 
@@ -410,6 +465,7 @@ impl State {
         // update the line capacity
         self.ring_buffer.set_line_capacity(num_lines);
 
+        // flush new lines to gpu
         let buffers_reallocated = self.ring_buffer.push_back(
             &self.queued_lines,
             device,
@@ -451,6 +507,35 @@ impl State {
         // commit staging transaction
         staging.commit(&mut command_encoder);
     }
+}
+
+fn begin_staging_transaction<'a>(
+    staging_pool: &'a mut Option<StagingPool>,
+    lines: &[WaterfallLine],
+) -> Option<StagingTransaction> {
+    // we need a non-empty line to get an estimate of how large they are.
+    let line_length = lines.iter().find_map(|line| {
+        if line.data.len() > 0 {
+            Some(line.data.len())
+        }
+        else {
+            None
+        }
+    })?;
+
+    // get staging transaction
+    let staging = staging_pool
+        .get_or_insert_with(|| {
+            let chunk_size = ChunkSize {
+                chunk_size: u64::try_from((line_length * size_of::<f32>()).max(0x4000)).unwrap(),
+                adaptive: true,
+            };
+            tracing::debug!(?chunk_size, "creating staging buffer");
+            StagingPool::new(chunk_size, "waterfall-staging")
+        })
+        .begin();
+
+    Some(staging)
 }
 
 #[derive(Debug, Default)]
