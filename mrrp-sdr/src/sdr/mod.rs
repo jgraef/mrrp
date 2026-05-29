@@ -509,5 +509,15 @@ impl Fft {
         self.scratch.resize(scratch_len, Default::default());
 
         fft.process_with_scratch(data, &mut self.scratch);
+
+        // normalize
+        let s = 1.0 / (data.len() as f32).sqrt();
+        data.iter_mut().for_each(|v| *v *= s);
+
+        // swap halves so that DC is at center
+        let (left, right) = data.split_at_mut(data.len() / 2);
+        left.iter_mut()
+            .zip(right.iter_mut())
+            .for_each(|(left, right)| std::mem::swap(left, right));
     }
 }
