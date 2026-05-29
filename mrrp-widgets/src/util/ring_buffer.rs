@@ -1,13 +1,10 @@
 #![allow(dead_code)]
 
 use std::ops::{
+    Add,
     Bound,
+    Mul,
     RangeBounds,
-};
-
-use bytemuck::{
-    Pod,
-    Zeroable,
 };
 
 /// For allocating slices in a ring buffer.
@@ -418,8 +415,7 @@ enum State {
     Split { start: u64, end: u64 },
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
-#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Slice {
     parts: [Range; 2],
 }
@@ -459,11 +455,15 @@ impl Slice {
             (start..end, range)
         })
     }
+
+    pub fn unwrap_contiguous(&self) -> Range {
+        assert!(self.parts[1].is_empty());
+        self.parts[0]
+    }
 }
 
 // this is basically std::ops::Range<u64>, but Copy!
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Pod, Zeroable)]
-#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Range {
     pub start: u64,
     pub end: u64,
@@ -494,6 +494,28 @@ impl RangeBounds<u64> for Range {
 
     fn end_bound(&self) -> Bound<&u64> {
         Bound::Excluded(&self.end)
+    }
+}
+
+impl Add<u64> for Range {
+    type Output = Self;
+
+    fn add(self, rhs: u64) -> Self::Output {
+        Self {
+            start: self.start + rhs,
+            end: self.end + rhs,
+        }
+    }
+}
+
+impl Mul<u64> for Range {
+    type Output = Self;
+
+    fn mul(self, rhs: u64) -> Self::Output {
+        Self {
+            start: self.start * rhs,
+            end: self.end * rhs,
+        }
     }
 }
 

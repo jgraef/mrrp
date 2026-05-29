@@ -1,6 +1,5 @@
 use std::{
     collections::VecDeque,
-    num::NonZero,
     sync::Arc,
 };
 
@@ -361,7 +360,8 @@ impl State {
         let mut staging = self
             .staging_pool
             .get_or_insert_with(|| {
-                let estimated_index_size = u64::try_from(num_lines * size_of::<Line>()).unwrap();
+                let estimated_index_size =
+                    u64::try_from(num_lines * size_of::<IndexBufferEntry>()).unwrap();
                 let chunk_size = ChunkSize {
                     chunk_size: first_line.bytes_len().max(estimated_index_size),
                     adaptive: true,
@@ -456,22 +456,33 @@ impl State {
 #[derive(Debug, Default)]
 struct RingBuffer {
     line_capacity: usize,
-    lines: VecDeque<Line>,
 
-    allocator: RingBufferAllocator,
-
+    index_buffer_allocator: RingBufferAllocator,
+    index: VecDeque<IndexEntry>,
     index_buffer: Option<wgpu::Buffer>,
+    rebuild_index_buffer: bool,
+
+    data_buffer_allocator: RingBufferAllocator,
     data_buffer: Option<wgpu::Buffer>,
 }
 
 impl RingBuffer {
     fn set_line_capacity(&mut self, line_capacity: usize) {
-        self.truncate_front(line_capacity);
+        if line_capacity < self.line_capacity {
+            tracing::debug!(
+                current = self.line_capacity,
+                new = line_capacity,
+                "line capacity reduced"
+            );
+            self.truncate_front(line_capacity);
+            self.rebuild_index_buffer = true;
+        }
+
         self.line_capacity = line_capacity;
     }
 
     fn truncate_front(&mut self, new_length: usize) {
-        let num_drop = self.lines.len().saturating_sub(new_length);
+        let num_drop = self.index.len().saturating_sub(new_length);
         if num_drop > 0 {
             for _ in 0..num_drop {
                 debug_assert!(self.pop_front().is_some());
@@ -479,12 +490,22 @@ impl RingBuffer {
         }
     }
 
-    fn pop_front(&mut self) -> Option<Line> {
-        let line = self.lines.pop_front()?;
+    fn pop_front(&mut self) -> Option<IndexEntry> {
+        let line = self.index.pop_front()?;
         assert!(
-            self.allocator.free_front(line.slice),
+            self.data_buffer_allocator
+                .free_front(line.data_buffer_slice),
             "failed to free front:\nline = {line:?}\nallocator = {:#?}",
-            self.allocator,
+            self.data_buffer_allocator,
+        );
+        assert!(
+            self.index_buffer_allocator
+                .free_front(Slice::new(Range::from_start_and_length(
+                    line.index_buffer_position,
+                    1
+                ))),
+            "failed to free front:\nline = {line:?}\nallocator = {:#?}",
+            self.index_buffer_allocator,
         );
         Some(line)
     }
@@ -509,7 +530,48 @@ impl RingBuffer {
 
         let mut reallocated = false;
 
-        let mut create_buffer = |capacity| {
+        // check if the index buffer has correct capacity. if not, remove the current
+        // index buffer. we'll allocate it later.
+        let required_index_buffer_size = u64::try_from(
+            size_of::<IndexBufferHeader>() + size_of::<IndexBufferEntry>() * self.line_capacity,
+        )
+        .unwrap();
+        if self
+            .index_buffer
+            .as_ref()
+            .is_none_or(|index_buffer| index_buffer.size() < required_index_buffer_size)
+        {
+            // we'll also have to fix all entries on our side + the allocator
+            tracing::debug!(
+                ?self.line_capacity,
+                ?required_index_buffer_size,
+                index_buffer.size = ?self.index_buffer.as_ref().map(|index_buffer| index_buffer.size()),
+                "will rebuild index buffer because index buffer is too small"
+            );
+
+            self.rebuild_index_buffer = true;
+        }
+
+        // check if the index buffer allocator has correct capacity. if we're already
+        // rebuilding we need to reset it too.
+        if self.rebuild_index_buffer
+            || self.index_buffer_allocator.capacity() < u64::try_from(self.line_capacity).unwrap()
+        {
+            if !self.rebuild_index_buffer {
+                tracing::debug!(
+                    ?self.line_capacity,
+                    index_buffer_allocator.capacity = ?self.index_buffer_allocator.capacity(),
+                    "will rebuild index buffer because index buffer allocator is too small"
+                );
+            }
+
+            self.index_buffer_allocator =
+                RingBufferAllocator::new(u64::try_from(self.line_capacity).unwrap());
+
+            self.rebuild_index_buffer = true;
+        }
+
+        let mut create_data_buffer = |capacity| {
             tracing::debug!(capacity, "creating waterfall data buffer");
             reallocated = true;
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -520,45 +582,45 @@ impl RingBuffer {
             })
         };
 
-        // check available space
-        let total_required =
-            lines.iter().map(|line| line.bytes_len()).sum::<u64>() + self.allocator.len();
+        // check available space in data buffer
+        let required_data_buffer_size = lines.iter().map(|line| line.bytes_len()).sum::<u64>()
+            + self.data_buffer_allocator.len();
 
         // this is the estimated total buffer capacity, if the buffer was filled to line
         // capacity with a line size from the first line
-        let estimated_total_required =
+        let estimated_required_data_buffer_size =
             lines.first().unwrap().bytes_len() * u64::try_from(self.line_capacity).unwrap();
 
         // get data buffer, allocate a new one if needed
         let data_buffer = self.data_buffer.get_or_insert_with(|| {
-            let capacity = estimated_total_required.max(total_required);
+            let capacity = estimated_required_data_buffer_size.max(required_data_buffer_size);
 
-            assert!(self.allocator.is_empty());
-            self.allocator = RingBufferAllocator::new(capacity);
+            assert!(self.data_buffer_allocator.is_empty());
+            self.data_buffer_allocator = RingBufferAllocator::new(capacity);
 
-            create_buffer(capacity)
+            create_data_buffer(capacity)
         });
 
-        if total_required > self.allocator.capacity() {
+        if required_data_buffer_size > self.data_buffer_allocator.capacity() {
             // need to reallocate
             tracing::debug!(
-                total_required,
-                capacity = self.allocator.capacity(),
+                required_data_buffer_size,
+                capacity = self.data_buffer_allocator.capacity(),
                 "need to reallocate data buffer"
             );
 
             assert!(self.index_buffer.is_some());
 
-            let new_capacity = (self.allocator.capacity() * 2)
-                .max(total_required)
-                .max(estimated_total_required);
+            let new_capacity = (self.data_buffer_allocator.capacity() * 2)
+                .max(required_data_buffer_size)
+                .max(estimated_required_data_buffer_size);
             let mut new_allocator = RingBufferAllocator::new(new_capacity);
 
             // allocate new buffer
-            let new_buffer = create_buffer(new_capacity);
+            let new_buffer = create_data_buffer(new_capacity);
 
             // copy from old to new buffer
-            for range in self.allocator.allocated().iter() {
+            for range in self.data_buffer_allocator.allocated().iter() {
                 let [new_range, new_range_empty] = new_allocator
                     .allocate_back(range.len())
                     .expect("new allocator doesn't have enough space")
@@ -578,29 +640,72 @@ impl RingBuffer {
             // fix index
             // the new allocations should now be contiguous and in the same order as before
             let mut cursor = 0;
-            for line in &mut self.lines {
+            for line in &mut self.index {
                 let start = cursor;
-                let end = cursor + line.slice.len();
+                let end = cursor + line.data_buffer_slice.len();
                 cursor = end;
-                line.slice = Slice::new(Range::new(start, end));
-                assert!(new_allocator.contains(line.slice));
+                line.data_buffer_slice = Slice::new(Range::new(start, end));
+                assert!(new_allocator.contains(line.data_buffer_slice));
             }
 
-            self.allocator = new_allocator;
+            // we'll fix the index buffer later
+            tracing::debug!("will rebuild index buffer because data buffer was reallocated");
+            self.rebuild_index_buffer = true;
+
+            self.data_buffer_allocator = new_allocator;
             *data_buffer = new_buffer;
         }
 
-        // allocate new lines and write them to the staging buffer
+        // if we need to rebuild the index buffer we will need to add all existing index
+        // entries to the allocator now
+        if self.rebuild_index_buffer {
+            assert!(self.index_buffer_allocator.is_empty());
+
+            for entry in &mut self.index {
+                entry.index_buffer_position = self
+                    .index_buffer_allocator
+                    .allocate_back(1)
+                    .expect("allocation failed")
+                    .parts()[0]
+                    .start;
+            }
+        }
+
+        fn index_buffer_entry_slice(i: u64) -> std::ops::Range<u64> {
+            let start = i * u64::try_from(size_of::<IndexBufferEntry>()).unwrap()
+                + u64::try_from(size_of::<IndexBufferHeader>()).unwrap();
+            let end = start + u64::try_from(size_of::<IndexBufferEntry>()).unwrap();
+
+            start..end
+        }
+
+        // add new lines to index. this allocates space for them in the index and data
+        // buffers
         for line in lines {
-            let slice = self
-                .allocator
+            let index_buffer_position = self
+                .index_buffer_allocator
+                .allocate_back(1)
+                .expect("allocation failed")
+                .parts()[0]
+                .start;
+
+            let data_buffer_slice = self
+                .data_buffer_allocator
                 .allocate_back(line.bytes_len())
                 .expect("allocation failed");
 
-            self.lines.push_back(Line { slice });
+            // add index entry
+            let entry = self.index.push_back_mut(IndexEntry {
+                index_buffer_position,
+                data_buffer_slice,
+                start_frequency: line.start_frequency,
+                end_frequency: line.end_frequency,
+            });
+
+            // copy data to on-GPU ring buffer
             let data = bytemuck::cast_slice(&line.data);
 
-            for (source, destination) in slice.iter_with_source() {
+            for (source, destination) in data_buffer_slice.iter_with_source() {
                 // note: the destination offsets need to be aligned to
                 // wgpu::COPY_BUFFER_ALIGNMENT (4 bytes).
                 staging.write_buffer_from_slice(
@@ -610,76 +715,73 @@ impl RingBuffer {
                     command_encoder,
                 );
             }
-        }
 
-        assert!(self.lines.len() <= self.line_capacity);
-
-        // todo: would be nicer if we only copied the new parts of the index buffer
-        let index_bytes: &[u8] = bytemuck::cast_slice(self.lines.make_contiguous());
-        let index_bytes_len = u64::try_from(index_bytes.len()).unwrap();
-
-        // either return the buffer if it exists and is large enough, or return the new
-        // buffer capacity
-        let estimated_total_required =
-            u64::try_from(self.line_capacity * size_of::<Line>()).unwrap();
-        let index_buffer = if let Some(index_buffer) = &self.index_buffer {
-            if index_bytes_len <= index_buffer.size() {
-                Ok(index_buffer)
-            }
-            else {
-                let new_capacity = (index_buffer.size() * 2)
-                    .max(index_bytes_len)
-                    .max(estimated_total_required);
-                Err(new_capacity)
-            }
-        }
-        else {
-            let new_capacity = index_bytes_len.max(estimated_total_required);
-            Err(new_capacity)
-        };
-
-        match index_buffer {
-            Ok(index_buffer) => {
-                // we can use the buffer we have
+            if !self.rebuild_index_buffer {
+                // we have an index buffer that we can immediately write the new entries to
+                let index_buffer = self.index_buffer.as_ref().unwrap();
 
                 staging.write_buffer_from_slice(
-                    index_buffer.slice(..index_bytes_len),
-                    index_bytes,
+                    index_buffer.slice(index_buffer_entry_slice(index_buffer_position)),
+                    bytemuck::bytes_of(&entry.buffer_entry()),
                     device,
                     command_encoder,
                 );
             }
-            Err(capacity) => {
-                // we need to allocate a new buffer
+        }
 
-                tracing::debug!(capacity, "creating waterfall index buffer");
-                reallocated = true;
+        assert!(self.index.len() <= self.line_capacity);
 
-                let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("waterfall index buffer"),
-                    size: capacity,
-                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-                    mapped_at_creation: true,
-                });
+        if self.rebuild_index_buffer {
+            // we need to ship the whole index buffer. instead of copying to a possibly
+            // existing one through staging we might as well create a new one.
 
-                index_buffer
-                    .get_mapped_range_mut(..index_bytes_len)
-                    .copy_from_slice(index_bytes);
+            let capacity = u64::try_from(size_of::<IndexBufferHeader>()).unwrap()
+                + u64::try_from(size_of::<IndexBufferEntry>()).unwrap()
+                    * self.index_buffer_allocator.capacity();
+            tracing::debug!(capacity, "creating waterfall index buffer");
 
-                index_buffer.unmap();
+            let index_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("waterfall data buffer"),
+                size: capacity,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+                mapped_at_creation: true,
+            });
 
-                self.index_buffer = Some(index_buffer);
+            {
+                let mut view_mut = index_buffer.get_mapped_range_mut(..);
+
+                let allocated = self.index_buffer_allocator.allocated();
+                view_mut
+                    .slice(..size_of::<IndexBufferHeader>())
+                    .copy_from_slice(bytemuck::bytes_of(&IndexBufferHeader {
+                        capacity: self.index_buffer_allocator.capacity().try_into().unwrap(),
+                        start: allocated.parts()[0].start.try_into().unwrap(),
+                        length: allocated.len().try_into().unwrap(),
+                        _padding: 0,
+                    }));
+
+                for line in &self.index {
+                    let slice = index_buffer_entry_slice(line.index_buffer_position);
+                    let slice = std::ops::Range {
+                        start: usize::try_from(slice.start).unwrap(),
+                        end: usize::try_from(slice.end).unwrap(),
+                    };
+
+                    view_mut
+                        .slice(slice)
+                        .copy_from_slice(bytemuck::bytes_of(&line.buffer_entry()));
+                }
             }
+
+            index_buffer.unmap();
+
+            self.index_buffer = Some(index_buffer);
+            self.rebuild_index_buffer = false;
+            reallocated = true;
         }
 
         reallocated
     }
-}
-
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-#[repr(C)]
-struct Line {
-    slice: Slice,
 }
 
 #[derive(Clone, Debug)]
@@ -693,6 +795,52 @@ impl WaterfallLine {
     fn bytes_len(&self) -> u64 {
         u64::try_from(size_of::<f32>() * self.data.len()).unwrap()
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct IndexEntry {
+    index_buffer_position: u64,
+    data_buffer_slice: Slice,
+    start_frequency: f32,
+    end_frequency: f32,
+}
+
+impl IndexEntry {
+    fn buffer_entry(&self) -> IndexBufferEntry {
+        let slice = self.data_buffer_slice.parts();
+
+        let (start_offset, end_offset) = if slice.is_empty() {
+            (slice[0].start, slice[0].end)
+        }
+        else {
+            (slice[0].start, slice[1].end)
+        };
+
+        IndexBufferEntry {
+            start_offset: u32::try_from(start_offset).unwrap(),
+            end_offset: u32::try_from(end_offset).unwrap(),
+            start_frequency: self.start_frequency,
+            end_frequency: self.end_frequency,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
+struct IndexBufferHeader {
+    capacity: u32,
+    start: u32,
+    length: u32,
+    _padding: u32,
+}
+
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
+struct IndexBufferEntry {
+    start_offset: u32,
+    end_offset: u32,
+    start_frequency: f32,
+    end_frequency: f32,
 }
 
 #[derive(Clone, Copy, Debug, Pod, Zeroable, Default, PartialEq)]
