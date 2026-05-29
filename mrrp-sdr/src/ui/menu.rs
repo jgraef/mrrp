@@ -83,7 +83,6 @@ impl<'a> egui::Widget for MainMenu<'a> {
 
                 ui.menu_button("View", |ui| {
                     if ui.button("Command Palette").clicked() {
-
                         // todo
                     }
 
@@ -92,6 +91,14 @@ impl<'a> egui::Widget for MainMenu<'a> {
                             &mut self.app_state,
                             &mut self.command_buffer,
                         ));
+                    });
+
+                    ui.menu_button("Zoom", |ui| {
+                        if ui.button("Fill view with signal").clicked() {
+                            // todo
+                        }
+
+                        // come up with more
                     });
                 });
 

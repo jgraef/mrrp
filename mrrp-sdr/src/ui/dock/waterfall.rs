@@ -14,6 +14,9 @@ use crate::sdr::{
     ensure_spectrum_sink_is_linked,
 };
 
+// todo: merge waterfall and spectrum dock. this allow unified controls for
+// min/max_db / start/end_frequency, colors, etc.
+
 #[derive(Debug)]
 pub struct WaterfallDock<'a> {
     state: &'a mut WaterfallDockState,
@@ -38,10 +41,8 @@ impl<'a> WaterfallDock<'a> {
                 .frequency_range(center - 0.5 * width, center + 0.5 * width)
                 .style(WaterfallStyle {
                     background_color: Color32::TRANSPARENT,
-                    //foreground_color1: Color32::RED,
-                    //foreground_color2: Color32::GREEN,
-                    foreground_color1: Color32::from_rgba_unmultiplied(200, 0, 200, 255),
-                    foreground_color2: Color32::from_rgba_unmultiplied(64, 0, 64, 255),
+                    foreground_color1: Color32::BLACK,
+                    foreground_color2: Color32::MAGENTA,
                 }),
         );
     }

@@ -124,8 +124,6 @@ fn log10(value: f32) -> f32 {
     // uses change-of-base identity to implement log10
     // note: we think log2 is faster than ln, because IEEE-754 floats can do this pretty well.
 
-    // log_2(10)
-    const LOG2_10: f32 = log2(10.0);
-
-    return log2(value) / LOG2_10;
+    const LOG2_10: f32 = 1.0 / log2(10.0);
+    return log2(value) * LOG2_10;
 }
