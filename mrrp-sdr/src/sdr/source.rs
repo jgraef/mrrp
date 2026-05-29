@@ -124,17 +124,18 @@ where
 
 #[derive(Debug)]
 pub struct LoopedFileSource {
-    inner: Converted<WavSource<BufReader<File>, Complex<i16>>, Complex<i16>, Complex<f32>>,
+    inner:
+        Throttled<Converted<WavSource<BufReader<File>, Complex<i16>>, Complex<i16>, Complex<f32>>>,
     center_frequency: f32,
 }
 
 impl LoopedFileSource {
     pub fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let inner = WavSource::from_path(path)?.convert::<Iq>();
-        tracing::debug!(
-            sample_rate = inner.inner().spec().sample_rate,
-            "opened wav file"
-        );
+        let inner = WavSource::from_path(path)?
+            .convert::<Iq>()
+            .throttle_to_sample_rate();
+
+        tracing::debug!(sample_rate = ?inner.sample_rate(), "opened wav file");
 
         Ok(Self {
             inner,
@@ -164,9 +165,13 @@ impl AsyncReadSamples<Iq> for LoopedFileSource {
                 Poll::Ready(Ok(())) => {
                     if before == buffer.filled().len() {
                         // nothing was read, end of file
-                        self.inner.inner_mut().seek(0)?;
+                        self.inner.inner_mut().inner_mut().seek(0)?;
                     }
                     else {
+                        buffer.filled_mut().iter_mut().for_each(|v| {
+                            *v *= 0.001;
+                        });
+
                         return Poll::Ready(Ok(()));
                     }
                 }

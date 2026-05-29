@@ -45,6 +45,14 @@ impl<R> Throttled<R> {
             delay: Box::pin(Fuse::terminated()),
         }
     }
+
+    pub fn inner(&self) -> &R {
+        &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut R {
+        &mut self.inner
+    }
 }
 
 impl<R> Clone for Throttled<R>
