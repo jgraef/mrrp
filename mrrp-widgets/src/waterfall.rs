@@ -545,7 +545,6 @@ struct RingBuffer {
     index_buffer_allocator: RingBufferAllocator,
     index: VecDeque<IndexEntry>,
     index_buffer: Option<wgpu::Buffer>,
-    rebuild_index_buffer: bool,
 
     data_buffer_allocator: RingBufferAllocator,
     data_buffer: Option<wgpu::Buffer>,
@@ -553,15 +552,8 @@ struct RingBuffer {
 
 impl RingBuffer {
     fn set_line_capacity(&mut self, line_capacity: usize) {
-        if line_capacity < self.line_capacity {
-            tracing::debug!(
-                current = self.line_capacity,
-                new = line_capacity,
-                "line capacity reduced"
-            );
-            self.truncate_front(line_capacity);
-            self.rebuild_index_buffer = true;
-        }
+        // note: we don't need to check if the index buffer is still large enough. this
+        // will be done in `Self::push_back`
 
         self.line_capacity = line_capacity;
     }
@@ -614,6 +606,7 @@ impl RingBuffer {
         self.truncate_front(self.line_capacity - lines.len());
 
         let mut reallocated = false;
+        let mut rebuild_index_buffer = false;
 
         // check if the index buffer has correct capacity. if not, remove the current
         // index buffer. we'll allocate it later.
@@ -634,15 +627,15 @@ impl RingBuffer {
                 "will rebuild index buffer because index buffer is too small"
             );
 
-            self.rebuild_index_buffer = true;
+            rebuild_index_buffer = true;
         }
 
         // check if the index buffer allocator has correct capacity. if we're already
         // rebuilding we need to reset it too.
-        if self.rebuild_index_buffer
+        if rebuild_index_buffer
             || self.index_buffer_allocator.capacity() < u64::try_from(self.line_capacity).unwrap()
         {
-            if !self.rebuild_index_buffer {
+            if !rebuild_index_buffer {
                 tracing::debug!(
                     ?self.line_capacity,
                     index_buffer_allocator.capacity = ?self.index_buffer_allocator.capacity(),
@@ -653,7 +646,7 @@ impl RingBuffer {
             self.index_buffer_allocator =
                 RingBufferAllocator::new(u64::try_from(self.line_capacity).unwrap());
 
-            self.rebuild_index_buffer = true;
+            rebuild_index_buffer = true;
         }
 
         let mut create_data_buffer = |capacity| {
@@ -739,7 +732,7 @@ impl RingBuffer {
 
             // we'll fix the index buffer later
             tracing::debug!("will rebuild index buffer because data buffer was reallocated");
-            self.rebuild_index_buffer = true;
+            rebuild_index_buffer = true;
 
             self.data_buffer_allocator = new_allocator;
             *data_buffer = new_buffer;
@@ -747,7 +740,7 @@ impl RingBuffer {
 
         // if we need to rebuild the index buffer we will need to add all existing index
         // entries to the allocator now
-        if self.rebuild_index_buffer {
+        if rebuild_index_buffer {
             assert!(self.index_buffer_allocator.is_empty());
 
             for entry in &mut self.index {
@@ -805,7 +798,7 @@ impl RingBuffer {
                 );
             }
 
-            if !self.rebuild_index_buffer {
+            if !rebuild_index_buffer {
                 // we have an index buffer that we can immediately write the new entries to
                 let index_buffer = self.index_buffer.as_ref().unwrap();
 
@@ -831,7 +824,7 @@ impl RingBuffer {
             }
         };
 
-        if self.rebuild_index_buffer {
+        if rebuild_index_buffer {
             // we need to ship the whole index buffer. instead of copying to a possibly
             // existing one through staging we might as well create a new one.
 
@@ -870,7 +863,6 @@ impl RingBuffer {
             index_buffer.unmap();
 
             self.index_buffer = Some(index_buffer);
-            self.rebuild_index_buffer = false;
             reallocated = true;
         }
         else {
