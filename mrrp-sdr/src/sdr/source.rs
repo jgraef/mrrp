@@ -1,5 +1,8 @@
 use std::{
     f32::consts::TAU,
+    fs::File,
+    io::BufReader,
+    path::Path,
     pin::Pin,
     task::{
         Context,
@@ -13,11 +16,18 @@ use mrrp::{
     io::{
         AsyncReadSamples,
         AsyncReadSamplesExt,
+        GetSampleRate,
         ReadBuf,
         StreamLength,
-        combinators::Throttled,
+        combinators::{
+            Converted,
+            Throttled,
+        },
     },
-    source::Noise,
+    source::{
+        Noise,
+        file::WavSource,
+    },
 };
 use num_complex::Complex;
 use num_traits::Float;
@@ -43,8 +53,8 @@ pub trait Source: AsyncReadSamples<Iq, Error = Error> {
 
 #[derive(Clone, Copy, Debug)]
 pub struct SourceInfo {
-    pub center_frequency: u64,
-    pub sample_rate: u64,
+    pub center_frequency: f32,
+    pub sample_rate: f32,
 }
 
 #[derive(Clone, Debug)]
@@ -109,5 +119,73 @@ where
 {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Complex<T> {
         Complex::from_polar(self.amplitude.sample(rng), self.phase.sample(rng))
+    }
+}
+
+#[derive(Debug)]
+pub struct LoopedFileSource {
+    inner: Converted<WavSource<BufReader<File>, Complex<i16>>, Complex<i16>, Complex<f32>>,
+    center_frequency: f32,
+}
+
+impl LoopedFileSource {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, Error> {
+        let inner = WavSource::from_path(path)?.convert::<Iq>();
+        tracing::debug!(
+            sample_rate = inner.inner().spec().sample_rate,
+            "opened wav file"
+        );
+
+        Ok(Self {
+            inner,
+            center_frequency: 0.0,
+        })
+    }
+
+    pub fn with_center_frequency(mut self, center_frequency: f32) -> Self {
+        self.center_frequency = center_frequency;
+        self
+    }
+}
+
+impl AsyncReadSamples<Iq> for LoopedFileSource {
+    type Error = Error;
+
+    fn poll_read_samples(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<Iq>,
+    ) -> Poll<Result<(), Self::Error>> {
+        loop {
+            let before = buffer.filled().len();
+            match Pin::new(&mut self.inner).poll_read_samples(cx, buffer) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error.into())),
+                Poll::Ready(Ok(())) => {
+                    if before == buffer.filled().len() {
+                        // nothing was read, end of file
+                        self.inner.inner_mut().seek(0)?;
+                    }
+                    else {
+                        return Poll::Ready(Ok(()));
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl Source for LoopedFileSource {
+    fn info(&self) -> SourceInfo {
+        SourceInfo {
+            center_frequency: self.center_frequency,
+            sample_rate: self.inner.sample_rate(),
+        }
+    }
+}
+
+impl StreamLength for LoopedFileSource {
+    fn remaining(&self) -> mrrp::io::Remaining {
+        mrrp::io::Remaining::Infinite
     }
 }

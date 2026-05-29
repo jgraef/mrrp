@@ -71,6 +71,10 @@ where
     pub fn from_reader(reader: R) -> Result<Self, Error> {
         Self::new(hound::WavReader::new(reader)?)
     }
+
+    pub fn spec(&self) -> &hound::WavSpec {
+        &self.spec
+    }
 }
 
 impl<S> WavSource<BufReader<File>, S>
@@ -80,6 +84,18 @@ where
     #[inline]
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
         Self::new(hound::WavReader::open(path)?)
+    }
+}
+
+impl<R, S> WavSource<R, S>
+where
+    R: std::io::Read + std::io::Seek,
+{
+    pub fn seek(&mut self, time: u32) -> Result<(), Error> {
+        self.inner
+            .seek(time)
+            .map_err(|error| Error::Hound(error.into()))?;
+        Ok(())
     }
 }
 

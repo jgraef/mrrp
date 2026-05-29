@@ -8,6 +8,7 @@ use crate::{
     sdr::{
         initialize_sdr_runtime,
         source::{
+            LoopedFileSource,
             MockSource,
             SourceInfo,
         },
@@ -43,6 +44,7 @@ pub struct App {
     /// buffer for deferred commands that can mutate the app state
     command_buffer: CommandBuffer,
 
+    #[allow(unused)]
     span: EnteredSpan,
 }
 
@@ -56,11 +58,28 @@ impl App {
     ) -> Self {
         // start SDR runtime
         let sdr = initialize_sdr_runtime(ctx);
-        sdr.add_source(MockSource::new(SourceInfo {
-            center_frequency: 7_000_000,
-            sample_rate: 2_400_000,
-        }))
-        .leak();
+        /*
+        .leak();*/
+
+        let center_frequency = command.center_frequency.unwrap_or(7000000.0);
+        let sample_rate = command.center_frequency.unwrap_or(2400000.0);
+
+        let source = if let Some(test_file) = &command.file {
+            tracing::debug!(?center_frequency, "test: LoopedFileSource");
+            sdr.add_source(
+                LoopedFileSource::new(test_file)
+                    .unwrap()
+                    .with_center_frequency(center_frequency),
+            )
+        }
+        else {
+            tracing::debug!(?center_frequency, ?sample_rate, "test: noise");
+            sdr.add_source(MockSource::new(SourceInfo {
+                center_frequency,
+                sample_rate,
+            }))
+        };
+        source.leak();
 
         let span = tracing::info_span!("app").entered();
 

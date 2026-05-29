@@ -68,15 +68,15 @@ where
 
 #[derive(Clone, Copy, Debug)]
 pub struct SpectrumFrame<B> {
-    pub center_frequency: u64,
-    pub sample_rate: u64,
+    pub center_frequency: f32,
+    pub sample_rate: f32,
     pub data: B,
 }
 
 impl<B> SpectrumFrame<B> {
     pub fn frequency_range(&self) -> (f32, f32) {
-        let c = self.center_frequency as f32;
-        let d = self.sample_rate as f32 / 2.0;
+        let c = self.center_frequency;
+        let d = self.sample_rate / 2.0;
         (c - d, c + d)
     }
 }

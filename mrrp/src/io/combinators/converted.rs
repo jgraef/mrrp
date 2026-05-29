@@ -39,6 +39,14 @@ impl<R, S, Q> Converted<R, S, Q> {
             inner: ScanWith::new(inner, ConvertScanner::new()),
         }
     }
+
+    pub fn inner(&self) -> &R {
+        self.inner.inner()
+    }
+
+    pub fn inner_mut(&mut self) -> &mut R {
+        self.inner.inner_mut()
+    }
 }
 
 impl<R, S, Q> AsyncReadSamples<Q> for Converted<R, S, Q>

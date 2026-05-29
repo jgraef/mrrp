@@ -57,6 +57,14 @@ impl<R, S, Sc> ScanWith<R, S, Sc> {
         self.max_buffer_size = max_buffer_size;
         self
     }
+
+    pub fn inner(&self) -> &R {
+        &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut R {
+        &mut self.inner
+    }
 }
 
 impl<R, S, Sc> AsyncReadSamples<Sc::Output> for ScanWith<R, S, Sc>
