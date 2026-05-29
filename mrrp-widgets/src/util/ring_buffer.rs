@@ -273,8 +273,8 @@ impl RingBufferAllocator {
             State::Full {
                 start_and_end: start_end_end,
             } => {
-                Slice::new(Range::new(0, start_end_end))
-                    .and(Range::new(start_end_end, self.capacity))
+                Slice::new(Range::new(start_end_end, self.capacity))
+                    .and(Range::new(0, start_end_end))
             }
             State::Single { start, end } => Slice::new(Range::new(start, end)),
             State::Split { start, end } => {
@@ -459,6 +459,19 @@ impl Slice {
     pub fn unwrap_contiguous(&self) -> Range {
         assert!(self.parts[1].is_empty());
         self.parts[0]
+    }
+
+    pub fn start(&self) -> u64 {
+        self.parts[0].start
+    }
+
+    pub fn end(&self) -> u64 {
+        if self.parts[1].is_empty() {
+            self.parts[0].end
+        }
+        else {
+            self.parts[1].end
+        }
     }
 }
 

@@ -1,5 +1,7 @@
+use egui::Color32;
 use mrrp_widgets::waterfall::{
     WaterfallState,
+    WaterfallStyle,
     WaterfallView,
 };
 use serde::{
@@ -29,7 +31,19 @@ impl<'a> WaterfallDock<'a> {
             &mut self.state.sdr_link_handle,
         );
 
-        ui.add(WaterfallView::new(&self.state.view_state));
+        let center = 7000000.0;
+        let width = 2400000.0;
+        ui.add(
+            WaterfallView::new(&self.state.view_state)
+                .frequency_range(center - 0.5 * width, center + 0.5 * width)
+                .style(WaterfallStyle {
+                    background_color: Color32::TRANSPARENT,
+                    //foreground_color1: Color32::RED,
+                    //foreground_color2: Color32::GREEN,
+                    foreground_color1: Color32::from_rgba_unmultiplied(200, 0, 200, 255),
+                    foreground_color2: Color32::from_rgba_unmultiplied(64, 0, 64, 255),
+                }),
+        );
     }
 }
 

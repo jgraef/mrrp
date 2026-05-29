@@ -148,7 +148,7 @@ pub struct WaterfallStyle {
 impl Default for WaterfallStyle {
     fn default() -> Self {
         Self {
-            background_color: Color32::BLACK,
+            background_color: Color32::TRANSPARENT,
             foreground_color1: Color32::from_rgba_unmultiplied(200, 0, 200, 255),
             foreground_color2: Color32::from_rgba_unmultiplied(64, 0, 64, 255),
         }
@@ -300,7 +300,7 @@ impl Pipeline {
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: target_texture_format,
-                    blend: None,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::all(),
                 })],
             }),
@@ -731,6 +731,17 @@ impl RingBuffer {
 
         assert!(self.index.len() <= self.line_capacity);
 
+        let index_header = {
+            let allocated = self.index_buffer_allocator.allocated();
+
+            IndexBufferHeader {
+                capacity: self.index_buffer_allocator.capacity().try_into().unwrap(),
+                start: allocated.start().try_into().unwrap(),
+                end: allocated.end().try_into().unwrap(),
+                length: allocated.len().try_into().unwrap(),
+            }
+        };
+
         if self.rebuild_index_buffer {
             // we need to ship the whole index buffer. instead of copying to a possibly
             // existing one through staging we might as well create a new one.
@@ -750,15 +761,9 @@ impl RingBuffer {
             {
                 let mut view_mut = index_buffer.get_mapped_range_mut(..);
 
-                let allocated = self.index_buffer_allocator.allocated();
                 view_mut
                     .slice(..size_of::<IndexBufferHeader>())
-                    .copy_from_slice(bytemuck::bytes_of(&IndexBufferHeader {
-                        capacity: self.index_buffer_allocator.capacity().try_into().unwrap(),
-                        start: allocated.parts()[0].start.try_into().unwrap(),
-                        length: allocated.len().try_into().unwrap(),
-                        _padding: 0,
-                    }));
+                    .copy_from_slice(bytemuck::bytes_of(&index_header));
 
                 for line in &self.index {
                     let slice = index_buffer_entry_slice(line.index_buffer_position);
@@ -778,6 +783,17 @@ impl RingBuffer {
             self.index_buffer = Some(index_buffer);
             self.rebuild_index_buffer = false;
             reallocated = true;
+        }
+        else {
+            // we still need to update the header
+
+            let index_buffer = self.index_buffer.as_ref().unwrap();
+            staging.write_buffer_from_slice(
+                index_buffer.slice(..u64::try_from(size_of::<IndexBufferHeader>()).unwrap()),
+                bytemuck::bytes_of(&index_header),
+                device,
+                command_encoder,
+            );
         }
 
         reallocated
@@ -807,18 +823,15 @@ struct IndexEntry {
 
 impl IndexEntry {
     fn buffer_entry(&self) -> IndexBufferEntry {
-        let slice = self.data_buffer_slice.parts();
-
-        let (start_offset, end_offset) = if slice.is_empty() {
-            (slice[0].start, slice[0].end)
-        }
-        else {
-            (slice[0].start, slice[1].end)
-        };
-
         IndexBufferEntry {
-            start_offset: u32::try_from(start_offset).unwrap(),
-            end_offset: u32::try_from(end_offset).unwrap(),
+            start_offset: u32::try_from(
+                self.data_buffer_slice.start() / u64::try_from(size_of::<f32>()).unwrap(),
+            )
+            .unwrap(),
+            end_offset: u32::try_from(
+                self.data_buffer_slice.end() / u64::try_from(size_of::<f32>()).unwrap(),
+            )
+            .unwrap(),
             start_frequency: self.start_frequency,
             end_frequency: self.end_frequency,
         }
@@ -830,8 +843,8 @@ impl IndexEntry {
 struct IndexBufferHeader {
     capacity: u32,
     start: u32,
+    end: u32,
     length: u32,
-    _padding: u32,
 }
 
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
