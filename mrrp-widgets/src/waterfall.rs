@@ -11,6 +11,11 @@ use egui::{
     Color32,
     Vec2,
 };
+use nalgebra::{
+    Matrix4,
+    Rotation3,
+    Vector3,
+};
 use parking_lot::{
     RwLock,
     RwLockWriteGuard,
@@ -99,14 +104,23 @@ impl<'a> egui::Widget for WaterfallView<'a> {
                 response.rect,
                 PaintCallback {
                     shared_state: self.state.shared_state.clone(),
-                    config: ConfigData::new(
-                        &self.style,
-                        self.min_db,
-                        self.max_db,
-                        self.start_frequency,
-                        self.end_frequency,
-                    ),
-                    num_lines,
+                    config: ConfigData {
+                        view_matrix: make_view_matrix(
+                            self.start_frequency,
+                            self.end_frequency,
+                            0,
+                            num_lines,
+                            [false, false],
+                            0.0,
+                        ),
+                        background_color: color32_to_linrgba(self.style.background_color),
+                        foreground_color1: color32_to_linrgba(self.style.foreground_color1),
+                        foreground_color2: color32_to_linrgba(self.style.foreground_color2),
+                        min_db: self.min_db,
+                        max_db: self.max_db,
+                        _padding: [0; 2],
+                    },
+                    line_capacity: num_lines,
                 },
             ));
         }
@@ -177,7 +191,7 @@ impl Default for WaterfallStyle {
 struct PaintCallback {
     shared_state: Arc<RwLock<State>>,
     config: ConfigData,
-    num_lines: usize,
+    line_capacity: usize,
 }
 
 impl egui_wgpu::CallbackTrait for PaintCallback {
@@ -208,7 +222,7 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
             egui_encoder,
             &pipeline,
             &self.config,
-            self.num_lines,
+            self.line_capacity,
         );
 
         vec![]
@@ -257,7 +271,7 @@ impl Pipeline {
                 // config
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -417,7 +431,7 @@ impl State {
         mut command_encoder: &mut wgpu::CommandEncoder,
         pipeline: &Pipeline,
         config: &ConfigData,
-        num_lines: usize,
+        line_capacity: usize,
     ) {
         // begin staging transaction
         let Some(mut staging) =
@@ -449,7 +463,7 @@ impl State {
         if let Some(current_config) = &self.config
             && current_config != config
         {
-            tracing::debug!("writing waterfall config buffer");
+            tracing::trace!("writing waterfall config buffer");
 
             let config_bytes = bytemuck::bytes_of(config);
             staging.write_buffer_from_slice(
@@ -463,7 +477,7 @@ impl State {
         }
 
         // update the line capacity
-        self.ring_buffer.set_line_capacity(num_lines);
+        self.ring_buffer.set_line_capacity(line_capacity);
 
         // flush new lines to gpu
         let buffers_reallocated = self.ring_buffer.push_back(
@@ -940,31 +954,53 @@ struct IndexBufferEntry {
 #[derive(Clone, Copy, Debug, Pod, Zeroable, Default, PartialEq)]
 #[repr(C)]
 struct ConfigData {
-    min_db: f32,
-    max_db: f32,
-    start_frequency: f32,
-    end_frequency: f32,
+    view_matrix: Matrix4<f32>,
+
     background_color: [f32; 4],
     foreground_color1: [f32; 4],
     foreground_color2: [f32; 4],
+
+    min_db: f32,
+    max_db: f32,
+
+    _padding: [u32; 2],
 }
 
-impl ConfigData {
-    pub fn new(
-        style: &WaterfallStyle,
-        min_db: f32,
-        max_db: f32,
-        start_frequency: f32,
-        end_frequency: f32,
-    ) -> Self {
-        Self {
-            min_db,
-            max_db,
-            start_frequency,
-            end_frequency,
-            background_color: color32_to_linrgba(style.background_color),
-            foreground_color1: color32_to_linrgba(style.foreground_color1),
-            foreground_color2: color32_to_linrgba(style.foreground_color2),
-        }
+fn make_view_matrix(
+    start_frequency: f32,
+    end_frequency: f32,
+    line_offset: usize,
+    num_lines: usize,
+    flip: [bool; 2],
+    rotate: f32,
+) -> Matrix4<f32> {
+    let mut matrix = Matrix4::identity();
+
+    // rotate
+    if rotate != 0.0 {
+        matrix = Rotation3::from_axis_angle(&Vector3::z_axis(), rotate).to_homogeneous() * matrix;
     }
+
+    // flip
+    matrix.append_nonuniform_scaling_mut(&Vector3::new(
+        if flip[0] { -1.0 } else { 1.0 },
+        if flip[1] { 1.0 } else { -1.0 },
+        1.0,
+    ));
+
+    // non-uniform scaling
+    matrix.append_nonuniform_scaling_mut(&Vector3::new(
+        0.5 * (end_frequency - start_frequency),
+        0.5 * (num_lines - 1) as f32,
+        1.0,
+    ));
+
+    // translation
+    matrix.append_translation_mut(&Vector3::new(
+        0.5 * (start_frequency + end_frequency),
+        line_offset as f32 + 0.5 * num_lines as f32,
+        0.0,
+    ));
+
+    matrix
 }

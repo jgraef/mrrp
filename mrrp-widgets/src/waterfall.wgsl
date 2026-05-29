@@ -1,12 +1,11 @@
 
 struct Config {
-    min_db: f32,
-    max_db: f32,
-    start_frequency: f32,
-    end_frequency: f32,
+    view_matrix: mat4x4f,
     background_color: vec4f,
     foreground_color1: vec4f,
     foreground_color2: vec4f,
+    min_db: f32,
+    max_db: f32,
 }
 
 struct Index {
@@ -30,7 +29,7 @@ struct VertexInput {
 
 struct VertexOutput {
     @builtin(position) fragment_position: vec4f,
-    @location(0) uv: vec2f,
+    @location(0) position: vec4f,
 }
 
 struct FragmentOutput {
@@ -53,19 +52,16 @@ var<storage, read> waterfall_data: array<f32>;
 fn vertex_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
 
-    let uv = vec2f(
-        f32((input.vertex_index & 1) << 1),
-        f32((input.vertex_index & 2))
-    );
-
     // draw screen-filling tri
-    output.fragment_position = vec4f(
-        uv * 2.0 - 1.0,
-        1.0, // that's what egui_wgpu clears the depth buffer to
+    let vertex = vec4f(
+        f32((input.vertex_index & 1) << 2) - 1.0,
+        f32((input.vertex_index & 2) << 1) - 1.0,
+        0.0,
         1.0,
     );
 
-    output.uv = vec2f(uv.x, 1.0 - uv.y);
+    output.fragment_position = vertex;
+    output.position = waterfall_config.view_matrix * vertex;
 
     return output;
 }
@@ -76,7 +72,7 @@ fn fragment_main(input: VertexOutput) -> FragmentOutput {
     output.color = waterfall_config.background_color;
 
     // get index entry for line
-    let line_index = u32(input.uv.y * f32(waterfall_index.capacity - 1));
+    let line_index = u32(input.position.y);
 
     if line_index < waterfall_index.length {
         // caculate entry index. the extra +capacity term is to avoid wrapping around into negative numbers.
@@ -84,11 +80,8 @@ fn fragment_main(input: VertexOutput) -> FragmentOutput {
 
         let entry = waterfall_index.entries[entry_index];
 
-        // the frequency displayed at this pixel
-        let f = mix(waterfall_config.start_frequency, waterfall_config.end_frequency, input.uv.x);
-
         // calculate where inside or outside of the data for the line we fall.
-        let k = (f - entry.start_frequency) / (entry.end_frequency - entry.start_frequency);
+        let k = (input.position.x - entry.start_frequency) / (entry.end_frequency - entry.start_frequency);
         if k > 0.0 && k < 1.0 {
             // data index
             let data_index = (u32(k * f32(entry.end_offset - entry.start_offset - 1)) + entry.start_offset) % arrayLength(&waterfall_data);
