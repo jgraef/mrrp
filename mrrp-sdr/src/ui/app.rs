@@ -3,8 +3,6 @@ use tracing::span::EnteredSpan;
 
 use crate::{
     cli::UiCommand,
-    config::Config,
-    directories::Directories,
     sdr::{
         initialize_sdr_runtime,
         source::{
@@ -18,10 +16,6 @@ use crate::{
         debug_window::DebugWindow,
         dock::DockPanel,
         menu::MainMenuPanel,
-        radio::{
-            RadioConfigWindow,
-            RadioUiState,
-        },
         state::{
             AppState,
             CommandBuffer,
@@ -31,12 +25,6 @@ use crate::{
 
 #[derive(Debug)]
 pub struct App {
-    directories: Directories,
-    config: Config,
-
-    // todo: move into app state
-    radio_state: RadioUiState,
-
     /// app state. this will be serialized and stored. some of it may be reset
     /// when the app is loaded.
     app_state: AppState,
@@ -49,18 +37,19 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(
-        directories: Directories,
-        config: Config,
-        command: UiCommand,
-        ctx: &egui::Context,
-        storage: &dyn Storage,
-    ) -> Self {
+    pub fn new(command: UiCommand, ctx: &egui::Context, storage: &dyn Storage) -> Self {
         // start SDR runtime
         let sdr = initialize_sdr_runtime(ctx);
-        /*
-        .leak();*/
 
+        // tracing span for whole app (not sdr runtime)
+        let span = tracing::info_span!("app").entered();
+
+        // configure style
+        ctx.all_styles_mut(|style| {
+            style.url_in_tooltip = true;
+        });
+
+        // create a nock source
         let center_frequency = command.center_frequency.unwrap_or(7000000.0);
         let sample_rate = command.center_frequency.unwrap_or(2400000.0);
 
@@ -81,23 +70,10 @@ impl App {
         };
         source.leak();
 
-        let span = tracing::info_span!("app").entered();
-
-        // todo: remove
-        let radio_state = RadioUiState::new(&config, &command);
-
         // load app state
         let app_state = AppState::load(storage, &command);
 
-        // configure style
-        ctx.all_styles_mut(|style| {
-            style.url_in_tooltip = true;
-        });
-
         Self {
-            directories,
-            config,
-            radio_state,
             app_state,
             command_buffer: Default::default(),
             span,
@@ -120,7 +96,7 @@ impl eframe::App for App {
         ));
 
         // show windows
-        RadioConfigWindow::new(&mut self.radio_state).show(ui.ctx());
+        //RadioConfigWindow::new(&mut self.radio_state).show(ui.ctx());
         AboutWindow::new(&mut self.app_state).show(ui.ctx());
         DebugWindow::new(&mut self.app_state).show(ui.ctx());
 

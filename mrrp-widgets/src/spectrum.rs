@@ -1,6 +1,9 @@
 #![allow(unused)]
 
-use std::sync::Arc;
+use std::{
+    ops::RangeInclusive,
+    sync::Arc,
+};
 
 use bytemuck::{
     Pod,
@@ -30,8 +33,7 @@ pub struct SpectrumView<'a> {
     state: &'a SpectrumState,
     desired_size: Vec2,
     style: SpectrumStyle,
-    min_db: f32,
-    max_db: f32,
+    db_range: RangeInclusive<f32>,
 }
 
 impl<'a> SpectrumView<'a> {
@@ -40,8 +42,7 @@ impl<'a> SpectrumView<'a> {
             state,
             desired_size: Vec2::INFINITY,
             style: Default::default(),
-            min_db: -100.0,
-            max_db: 0.0,
+            db_range: -100.0..=0.0,
         }
     }
 
@@ -57,6 +58,11 @@ impl<'a> SpectrumView<'a> {
 
     pub fn desired_height(mut self, height: f32) -> Self {
         self.desired_size.y = height;
+        self
+    }
+
+    pub fn db_range(mut self, range: RangeInclusive<f32>) -> Self {
+        self.db_range = range;
         self
     }
 
@@ -78,7 +84,7 @@ impl<'a> egui::Widget for SpectrumView<'a> {
                 response.rect,
                 PaintCallback {
                     shared_state: self.state.shared_state.clone(),
-                    config: ConfigData::new(&self.style, self.min_db, self.max_db),
+                    config: ConfigData::new(&self.style, &self.db_range),
                 },
             ));
         }
@@ -338,7 +344,7 @@ impl State {
         });
 
         if config_changed {
-            tracing::debug!("writing spectrum config buffer");
+            tracing::trace!("writing spectrum config buffer");
 
             queue.write_buffer(&config_buffer, 0, bytemuck::bytes_of(config));
 
@@ -446,10 +452,10 @@ struct ConfigData {
 }
 
 impl ConfigData {
-    pub fn new(style: &SpectrumStyle, min_db: f32, max_db: f32) -> Self {
+    pub fn new(style: &SpectrumStyle, db_range: &RangeInclusive<f32>) -> Self {
         Self {
-            min_db,
-            max_db,
+            min_db: *db_range.start(),
+            max_db: *db_range.end(),
             _padding: [0; 2],
             background_color: color32_to_linrgba(style.background_color),
             foreground_color1: color32_to_linrgba(style.foreground_color1),

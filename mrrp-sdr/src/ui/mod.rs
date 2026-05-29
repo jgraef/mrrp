@@ -18,7 +18,7 @@ use crate::{
     ui::app::App,
 };
 
-pub fn run_app(directories: Directories, config: Config, command: UiCommand) -> Result<(), Error> {
+pub fn run_app(directories: Directories, _config: Config, command: UiCommand) -> Result<(), Error> {
     let egui_persist_path = directories.state_dir().join("egui.json");
     tracing::debug!(?egui_persist_path);
 
@@ -45,6 +45,14 @@ pub fn run_app(directories: Directories, config: Config, command: UiCommand) -> 
             ..Default::default()
         },
         Box::new(|cc| {
+            // reset egui memory if we want a clean slate
+            //
+            // do this before storing anything important in there!
+            if command.reset_app_state {
+                cc.egui_ctx
+                    .memory_mut(|memory| *memory = Default::default());
+            }
+
             mrrp_widgets::initialize_wgpu_rendering(
                 &cc.egui_ctx,
                 cc.wgpu_render_state
@@ -55,7 +63,6 @@ pub fn run_app(directories: Directories, config: Config, command: UiCommand) -> 
             let mut fonts = egui::FontDefinitions::default();
 
             // add phosphor icons
-
             egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
             // add dseg font
@@ -74,8 +81,6 @@ pub fn run_app(directories: Directories, config: Config, command: UiCommand) -> 
             cc.egui_ctx.set_fonts(fonts);
 
             Ok(Box::new(App::new(
-                directories,
-                config,
                 command,
                 &cc.egui_ctx,
                 cc.storage.expect("persist"),

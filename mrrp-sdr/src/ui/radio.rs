@@ -24,7 +24,7 @@ pub struct RadioUiState {
     selected: Option<usize>,
     connected: Option<Connected>,
 
-    recent_radios: Lru<usize>,
+    _recent_radios: Lru<usize>,
 
     config_window: Option<RadioConfigWindowState>,
 }
@@ -66,7 +66,7 @@ impl RadioUiState {
                         radios.push(Radio {
                             name: name.clone(),
                             config: Some(config.clone()),
-                            descriptor: Some(descriptor),
+                            _descriptor: Some(descriptor),
                             configured: true,
                             detected: true,
                         });
@@ -78,7 +78,7 @@ impl RadioUiState {
                         radios.push(Radio {
                             name,
                             config: None,
-                            descriptor: Some(descriptor),
+                            _descriptor: Some(descriptor),
                             configured: false,
                             detected: true,
                         });
@@ -97,7 +97,7 @@ impl RadioUiState {
                 radios.push(Radio {
                     name: name.clone(),
                     config: Some(config.clone()),
-                    descriptor: None,
+                    _descriptor: None,
                     configured: true,
                     detected: false,
                 })
@@ -138,7 +138,7 @@ impl RadioUiState {
             radios,
             selected,
             connected: None,
-            recent_radios: Lru::with_limit(10),
+            _recent_radios: Lru::with_limit(10),
             config_window: None,
         }
     }
@@ -148,7 +148,7 @@ impl RadioUiState {
 struct Radio {
     name: String,
     config: Option<RadioConfig>,
-    descriptor: Option<RadioDescriptor>,
+    _descriptor: Option<RadioDescriptor>,
     configured: bool,
     detected: bool,
 }

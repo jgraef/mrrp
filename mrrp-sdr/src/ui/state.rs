@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AppState {
     /// If this state should be persisted
     ///

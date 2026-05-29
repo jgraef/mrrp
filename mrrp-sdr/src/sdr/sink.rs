@@ -44,6 +44,8 @@ impl SpectrumSink for WaterfallState {
     }
 }
 
+/// A wrapper arorund a SpectrumSink that will trigger a UI repaint when data is
+/// pushed to it.
 #[derive(Clone, Debug)]
 pub struct RepaintOnPush<S> {
     inner: S,

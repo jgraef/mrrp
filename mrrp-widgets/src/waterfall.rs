@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    ops::RangeInclusive,
     sync::Arc,
 };
 
@@ -44,10 +45,8 @@ pub struct WaterfallView<'a> {
     state: &'a WaterfallState,
     desired_size: Vec2,
     style: WaterfallStyle,
-    min_db: f32,
-    max_db: f32,
-    start_frequency: f32,
-    end_frequency: f32,
+    db_range: RangeInclusive<f32>,
+    frequency_range: RangeInclusive<f32>,
 }
 
 impl<'a> WaterfallView<'a> {
@@ -56,10 +55,8 @@ impl<'a> WaterfallView<'a> {
             state,
             desired_size: Vec2::INFINITY,
             style: Default::default(),
-            min_db: -100.0,
-            max_db: 0.0,
-            start_frequency: 0.0,
-            end_frequency: 1000000.0,
+            db_range: -100.0..=0.0,
+            frequency_range: 0.0..=1000000.0,
         }
     }
 
@@ -78,9 +75,13 @@ impl<'a> WaterfallView<'a> {
         self
     }
 
-    pub fn frequency_range(mut self, start_frequency: f32, end_frequency: f32) -> Self {
-        self.start_frequency = start_frequency;
-        self.end_frequency = end_frequency;
+    pub fn frequency_range(mut self, range: RangeInclusive<f32>) -> Self {
+        self.frequency_range = range;
+        self
+    }
+
+    pub fn db_range(mut self, range: RangeInclusive<f32>) -> Self {
+        self.db_range = range;
         self
     }
 
@@ -106,8 +107,8 @@ impl<'a> egui::Widget for WaterfallView<'a> {
                     shared_state: self.state.shared_state.clone(),
                     config: ConfigData {
                         view_matrix: make_view_matrix(
-                            self.start_frequency,
-                            self.end_frequency,
+                            *self.frequency_range.start(),
+                            *self.frequency_range.end(),
                             0,
                             num_lines,
                             [false, false],
@@ -116,8 +117,8 @@ impl<'a> egui::Widget for WaterfallView<'a> {
                         background_color: color32_to_linrgba(self.style.background_color),
                         foreground_color1: color32_to_linrgba(self.style.foreground_color1),
                         foreground_color2: color32_to_linrgba(self.style.foreground_color2),
-                        min_db: self.min_db,
-                        max_db: self.max_db,
+                        min_db: *self.db_range.start(),
+                        max_db: *self.db_range.end(),
                         _padding: [0; 2],
                     },
                     line_capacity: num_lines,
@@ -755,7 +756,7 @@ impl RingBuffer {
         // if we need to rebuild the index buffer we will need to add all existing index
         // entries to the allocator now
         if rebuild_index_buffer {
-            assert!(self.index_buffer_allocator.is_empty());
+            self.index_buffer_allocator.clear();
 
             for entry in &mut self.index {
                 entry.index_buffer_position = self

@@ -1,3 +1,5 @@
+use egui::Frame;
+
 use crate::{
     ui::{
         dock::DockAddTabMenu,
@@ -27,6 +29,7 @@ impl<'a> MainMenuPanel<'a> {
 impl<'a> egui::Widget for MainMenuPanel<'a> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         egui::Panel::top("menu_panel")
+            .frame(Frame::side_top_panel(ui.style()).fill(ui.style().visuals.extreme_bg_color))
             .show_inside(ui, |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     ui.add(MainMenu::new(&mut self.app_state, &mut self.command_buffer))

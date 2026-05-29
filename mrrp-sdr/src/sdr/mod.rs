@@ -34,7 +34,6 @@ use tracing::Instrument;
 use crate::{
     sdr::{
         sink::{
-            RepaintOnPush,
             SpectrumFrame,
             SpectrumSink,
         },
@@ -469,19 +468,6 @@ pub fn initialize_sdr_runtime(ctx: &egui::Context) -> SdrHandle {
     let sdr_handle = SdrRuntime::spawn();
     ctx.data_mut(|data| data.insert_temp(egui::Id::NULL, sdr_handle.clone()));
     sdr_handle
-}
-
-pub fn ensure_spectrum_sink_is_linked<S>(
-    ctx: &egui::Context,
-    sink: &S,
-    handle: &mut Option<SpectrumSinkHandle>,
-) where
-    S: SpectrumSink + Send + Clone + 'static,
-{
-    if handle.is_none() {
-        let sdr = ctx.expect_sdr_handle();
-        *handle = Some(sdr.add_spectrum_sink(RepaintOnPush::new(sink.clone(), ctx.clone())));
-    }
 }
 
 #[derive(derive_more::Debug)]

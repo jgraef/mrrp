@@ -69,7 +69,7 @@ impl MockSource {
             noise: Noise::new(
                 rand::make_rng(),
                 PolarDistribution {
-                    amplitude: Normal::new(0.0, 0.0002).unwrap(),
+                    amplitude: Normal::new(0.0, 0.005).unwrap(),
                     phase: Uniform::new(0.0, TAU).unwrap(),
                 },
             )

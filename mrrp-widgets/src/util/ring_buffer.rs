@@ -312,6 +312,10 @@ impl RingBufferAllocator {
     pub fn capacity(&self) -> u64 {
         self.capacity
     }
+
+    pub fn clear(&mut self) {
+        self.state = State::Empty
+    }
 }
 
 /// Tracks the allocated space

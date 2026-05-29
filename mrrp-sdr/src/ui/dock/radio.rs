@@ -9,14 +9,15 @@ use mrrp_widgets::frequency_dial::{
 };
 
 #[derive(Debug)]
-pub struct RadioDock;
+pub struct RadioDockView;
 
-impl RadioDock {
+impl RadioDockView {
     pub fn show(self, ui: &mut egui::Ui) {
         // test
         let id = egui::Id::new("test_frequency");
         let mut frequency = ui.data(|data| data.get_temp(id).unwrap_or(7250000));
 
+        // todo: use theme
         let response = Frame::dark_canvas(ui.style())
             .inner_margin(Margin::symmetric(8, 4))
             .show(ui, |ui| {
