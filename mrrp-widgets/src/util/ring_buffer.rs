@@ -312,44 +312,6 @@ impl RingBufferAllocator {
     pub fn capacity(&self) -> u64 {
         self.capacity
     }
-
-    pub fn contains(&self, slice: Slice) -> bool {
-        assert!(slice.iter().all(|range| range.start <= range.end));
-
-        match self.state {
-            State::Empty => false,
-            State::Full { start_and_end } => {
-                if slice.parts[1].is_empty() {
-                    slice.parts[0].end < start_and_end
-                        || (slice.parts[0].start >= start_and_end
-                            && slice.parts[0].end < self.capacity)
-                }
-                else {
-                    slice.parts[0].start > start_and_end
-                        && slice.parts[0].end == self.capacity
-                        && slice.parts[1].start == 0
-                        && slice.parts[1].end < start_and_end
-                }
-            }
-            State::Single { start, end } => {
-                slice.parts[1].is_empty()
-                    && slice.parts[0].start >= start
-                    && slice.parts[0].end < end
-            }
-            State::Split { start, end } => {
-                if slice.parts[1].is_empty() {
-                    slice.parts[0].end < end
-                        || (slice.parts[0].start >= start && slice.parts[0].end < self.capacity)
-                }
-                else {
-                    slice.parts[0].start >= start
-                        && slice.parts[0].end == self.capacity
-                        && slice.parts[1].start == 0
-                        && slice.parts[1].end < end
-                }
-            }
-        }
-    }
 }
 
 /// Tracks the allocated space

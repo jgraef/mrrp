@@ -662,7 +662,9 @@ impl RingBuffer {
             device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("waterfall data buffer"),
                 size: capacity,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+                usage: wgpu::BufferUsages::COPY_SRC
+                    | wgpu::BufferUsages::COPY_DST
+                    | wgpu::BufferUsages::STORAGE,
                 mapped_at_creation: false,
             })
         };
@@ -725,13 +727,15 @@ impl RingBuffer {
             // fix index
             // the new allocations should now be contiguous and in the same order as before
             let mut cursor = 0;
+            assert_eq!(new_allocator.allocated().start(), 0);
             for line in &mut self.index {
                 let start = cursor;
                 let end = cursor + line.data_buffer_slice.len();
                 cursor = end;
                 line.data_buffer_slice = Slice::new(Range::new(start, end));
-                assert!(new_allocator.contains(line.data_buffer_slice));
+                //assert!(new_allocator.contains(line.data_buffer_slice));
             }
+            assert_eq!(new_allocator.allocated().end(), cursor);
 
             // we'll fix the index buffer later
             tracing::debug!("will rebuild index buffer because data buffer was reallocated");
