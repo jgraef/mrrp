@@ -30,6 +30,7 @@ rand = { version = "0.10.1", default-features = false, features = [
     "sys_rng",
 ] }
 rodio = { version = "0.22.2", default-features = false, optional = true }
+rtl-sdr-rs = { version = "0.3.1", optional = true }
 rtlsdr-async = { workspace = true, optional = true, features = ["tcp"] }
 rustfft = "6.4.1"
 thiserror = "2.0.12"
@@ -60,7 +61,7 @@ tracing-subscriber = "0.3.19"
 [features]
 default = ["rtlsdr", "audio"]
 adsb = []
-rtlsdr = ["dep:rtlsdr-async"]
+rtlsdr = ["dep:rtlsdr-async", "dep:rtl-sdr-rs"]
 audio = ["dep:rodio"]
 
 [[bench]]
