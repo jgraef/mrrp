@@ -81,14 +81,14 @@ fn fragment_main(input: VertexOutput) -> FragmentOutput {
     let line_index = u32(input.position.y);
 
     if line_index < waterfall_index.length {
-        // caculate entry index. the extra +capacity term is to avoid wrapping around into negative numbers.
+        // caclulate entry index. the extra +capacity term is to avoid wrapping around into negative numbers.
         let entry_index = (waterfall_index.end + waterfall_index.capacity - line_index - 1) % waterfall_index.capacity;
 
         let entry = waterfall_index.entries[entry_index];
 
         // calculate where inside or outside of the data for the line we fall.
         let k = (input.position.x - entry.start_frequency) / (entry.end_frequency - entry.start_frequency);
-        if k > 0.0 && k < 1.0 {
+        if k >= 0.0 && k <= 1.0 {
             // data index
             let data_index = (u32(k * f32(entry.end_offset - entry.start_offset - 1)) + entry.start_offset) % arrayLength(&waterfall_data);
 

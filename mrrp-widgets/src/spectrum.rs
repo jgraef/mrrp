@@ -1,6 +1,7 @@
 #![allow(unused)]
 
 use std::{
+    num::NonZero,
     ops::RangeInclusive,
     sync::Arc,
 };
@@ -12,6 +13,11 @@ use bytemuck::{
 use egui::{
     Color32,
     Vec2,
+};
+use nalgebra::{
+    Matrix4,
+    Rotation3,
+    Vector3,
 };
 use parking_lot::{
     Mutex,
@@ -25,8 +31,15 @@ use wgpu::{
 
 use crate::{
     GetWidgetRenderState,
+    SpectrumFrame,
     colormap::ColorMap,
-    util::color32_to_linrgba,
+    util::{
+        color32_to_linrgba,
+        staging::{
+            ChunkSize,
+            StagingPool,
+        },
+    },
 };
 
 #[derive(Debug)]
@@ -34,6 +47,7 @@ pub struct SpectrumView<'a> {
     state: &'a SpectrumState,
     desired_size: Vec2,
     style: SpectrumStyle,
+    frequency_range: RangeInclusive<f32>,
     db_range: RangeInclusive<f32>,
 }
 
@@ -43,6 +57,7 @@ impl<'a> SpectrumView<'a> {
             state,
             desired_size: Vec2::INFINITY,
             style: Default::default(),
+            frequency_range: 0.0..=1000000.0,
             db_range: -100.0..=0.0,
         }
     }
@@ -59,6 +74,11 @@ impl<'a> SpectrumView<'a> {
 
     pub fn desired_height(mut self, height: f32) -> Self {
         self.desired_size.y = height;
+        self
+    }
+
+    pub fn frequency_range(mut self, range: RangeInclusive<f32>) -> Self {
+        self.frequency_range = range;
         self
     }
 
@@ -85,7 +105,23 @@ impl<'a> egui::Widget for SpectrumView<'a> {
                 response.rect,
                 PaintCallback {
                     shared_state: self.state.shared_state.clone(),
-                    config: ConfigData::new(&self.style, &self.db_range),
+                    config: ConfigData {
+                        view_matrix: make_view_matrix(
+                            *self.frequency_range.start(),
+                            *self.frequency_range.end(),
+                            *self.db_range.start(),
+                            *self.db_range.end(),
+                            [false, false],
+                            0.0,
+                        ),
+                        background_color: color32_to_linrgba(self.style.background_color),
+                        background_color_signal: color32_to_linrgba(
+                            self.style.background_color_signal,
+                        ),
+                        min_db: *self.db_range.start(),
+                        max_db: *self.db_range.end(),
+                        _padding: [0; 2],
+                    },
                     color_map: self.style.color_map.clone(),
                 },
             ));
@@ -101,20 +137,6 @@ pub struct SpectrumState {
 }
 
 impl SpectrumState {
-    pub fn new(data: Vec<f32>) -> Self {
-        Self {
-            shared_state: Arc::new(RwLock::new(State {
-                config: None,
-                config_buffer: None,
-                queued_data: data,
-                queued_dirty: true,
-                data_buffer: None,
-                bind_group: None,
-                color_map_in_bind_group: None,
-            })),
-        }
-    }
-
     pub fn update(&self) -> SpectrumStateUpdateGuard<'_> {
         let mut state = self.shared_state.write();
         SpectrumStateUpdateGuard { state }
@@ -127,22 +149,41 @@ pub struct SpectrumStateUpdateGuard<'a> {
 }
 
 impl<'a> SpectrumStateUpdateGuard<'a> {
-    pub fn data_mut(&mut self) -> &mut Vec<f32> {
+    pub fn spectrum_frame_mut(&mut self) -> &mut SpectrumFrame {
         self.state.queued_dirty = true;
-        &mut self.state.queued_data
+        self.state.queued_data.get_or_insert_with(Default::default)
+    }
+
+    pub fn data_mut(&mut self) -> &mut Vec<f32> {
+        &mut self.spectrum_frame_mut().data
+    }
+
+    pub fn set_frequency_range(&mut self, range: RangeInclusive<f32>) {
+        let frame = self.spectrum_frame_mut();
+        frame.start_frequency = *range.start();
+        frame.end_frequency = *range.end();
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct SpectrumStyle {
+    /// The background color where there is no signal
     pub background_color: Color32,
+
+    /// The background color where there is a signal.
+    ///
+    /// This is the color used above the shown signal level.
+    pub background_color_signal: Color32,
+
+    /// The color map to use for signal levels
     pub color_map: ColorMap,
 }
 
 impl Default for SpectrumStyle {
     fn default() -> Self {
         Self {
-            background_color: Color32::BLACK,
+            background_color: Color32::TRANSPARENT,
+            background_color_signal: Color32::BLACK,
             color_map: ColorMap::default(),
         }
     }
@@ -161,7 +202,7 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         _screen_descriptor: &egui_wgpu::ScreenDescriptor,
-        _egui_encoder: &mut wgpu::CommandEncoder,
+        egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         // create the render pipeline, if it doesn't exist
@@ -174,7 +215,7 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
 
         // stream data to GPU
         let mut state = self.shared_state.write();
-        state.flush(device, queue, &pipeline, &self.config, color_map);
+        state.flush(device, egui_encoder, &pipeline, &self.config, color_map);
 
         vec![]
     }
@@ -222,7 +263,7 @@ impl Pipeline {
                 // config
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::VERTEX,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -313,7 +354,7 @@ struct State {
     config_buffer: Option<wgpu::Buffer>,
 
     /// Host-side data buffer
-    queued_data: Vec<f32>,
+    queued_data: Option<SpectrumFrame>,
 
     /// If the host-side data buffer has been changed since it was last sent to
     /// the GPU
@@ -328,17 +369,46 @@ struct State {
     /// the color map buffer that is currently in the bind group. this is so
     /// that we can check if this changes later
     color_map_in_bind_group: Option<wgpu::Buffer>,
+
+    staging_pool: Option<StagingPool>,
 }
 
 impl State {
     fn flush(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        command_encoder: &mut wgpu::CommandEncoder,
         pipeline: &Pipeline,
         config: &ConfigData,
         color_map: wgpu::Buffer,
     ) {
+        // if we don't have any data yet, we can't estimate buffer requirements and thus
+        // not get a staging transaction. so better wait
+        let Some(frame) = &self.queued_data
+        else {
+            return;
+        };
+        if frame.data.is_empty() {
+            return;
+        }
+
+        let required_buffer_size_bytes =
+            u64::try_from(frame.data.len() * size_of::<f32>() + size_of::<SpectrumDataHeader>())
+                .expect("usize -> u64 overflow");
+
+        let mut staging = self
+            .staging_pool
+            .get_or_insert_with(|| {
+                StagingPool::new(
+                    ChunkSize {
+                        chunk_size: required_buffer_size_bytes,
+                        adaptive: true,
+                    },
+                    "spectrum",
+                )
+            })
+            .begin();
+
         // update config buffer
         let mut config_changed = self
             .config
@@ -359,6 +429,7 @@ impl State {
             assert!(self.bind_group.is_none());
 
             self.config = Some(*config);
+            config_changed = false;
 
             buffer
         });
@@ -366,7 +437,12 @@ impl State {
         if config_changed {
             tracing::trace!("writing spectrum config buffer");
 
-            queue.write_buffer(&config_buffer, 0, bytemuck::bytes_of(config));
+            staging.write_buffer_from_slice(
+                config_buffer.slice(..),
+                bytemuck::bytes_of(config),
+                device,
+                command_encoder,
+            );
 
             self.config = Some(*config);
         }
@@ -381,68 +457,68 @@ impl State {
             self.color_map_in_bind_group = Some(color_map.clone());
         }
 
-        let buffer_size = self.queued_data.len();
-        let buffer_size_bytes =
-            u64::try_from(buffer_size * size_of::<f32>()).expect("usize -> u64 overflow");
-
-        if buffer_size != 0 {
+        if self.queued_dirty {
             // if the the host-buffer is now bigger than the gpu buffer, we need to
             // reallocate
             if self
                 .data_buffer
                 .as_ref()
-                .is_some_and(|buffer| buffer.size() < buffer_size_bytes)
+                .is_some_and(|buffer| buffer.size() < required_buffer_size_bytes)
             {
                 self.data_buffer = None;
+                self.bind_group = None;
             }
 
-            // upload data to gpu if dirty
-            if self.queued_dirty {
-                let data_bytes = bytemuck::cast_slice(&self.queued_data);
+            // upload data to gpu
 
-                // data doesn't fit, so we'll have to get a new one anyway.
-                if let Some(data_buffer) = &self.data_buffer
-                    && u64::try_from(data_bytes.len()).expect("usize -> u64 overflow")
-                        > data_buffer.size()
-                {
-                    self.data_buffer = None;
-                    self.bind_group = None;
-                }
+            let header = SpectrumDataHeader {
+                start_frequency: frame.start_frequency,
+                end_frequency: frame.end_frequency,
+            };
 
-                // create buffer if we don't have one
-                let mut data_written = false;
-                let data_buffer = self.data_buffer.get_or_insert_with(|| {
-                    tracing::debug!("creating spectrum data buffer");
+            let header_bytes = bytemuck::bytes_of(&header);
+            let data_bytes = bytemuck::cast_slice(&frame.data);
 
-                    let data_buffer =
-                        device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                            label: Some("spectrum config"),
-                            contents: data_bytes,
-                            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-                        });
+            let write_to_buffer = |mut view_mut: wgpu::BufferViewMut| {
+                view_mut
+                    .slice(..header_bytes.len())
+                    .copy_from_slice(header_bytes);
+                view_mut
+                    .slice(header_bytes.len()..header_bytes.len() + data_bytes.len())
+                    .copy_from_slice(data_bytes);
+            };
 
-                    // when we create the buffer we can always initialize it right away, so we don't
-                    // need to write to it anymore.
-                    data_written = true;
+            if let Some(data_buffer) = &self.data_buffer {
+                // copy to existing buffer
 
-                    data_buffer
+                let view_mut = staging.write_buffer(
+                    data_buffer.slice(..required_buffer_size_bytes),
+                    device,
+                    command_encoder,
+                );
+                write_to_buffer(view_mut);
+            }
+            else {
+                // need to create a new buffer
+                tracing::debug!("creating spectrum data buffer");
+
+                let data_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                    label: Some("spectrum config"),
+                    size: required_buffer_size_bytes,
+                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
+                    mapped_at_creation: true,
                 });
 
-                if !data_written {
-                    queue.write_buffer(data_buffer, 0, data_bytes);
-                }
+                let mut view_mut = data_buffer.get_mapped_range_mut(..);
+                write_to_buffer(view_mut);
 
-                self.queued_dirty = false;
+                data_buffer.unmap();
+
+                self.data_buffer = Some(data_buffer);
+                self.bind_group = None;
             }
-            // if we don't have data, we still want to have a data buffer, so we can render
-            else if self.data_buffer.is_none() {
-                self.data_buffer = Some(device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("spectrum config"),
-                    size: buffer_size_bytes,
-                    usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::STORAGE,
-                    mapped_at_creation: false,
-                }));
-            }
+
+            self.queued_dirty = false;
         }
 
         // create bind group
@@ -471,25 +547,64 @@ impl State {
                 ],
             }));
         }
+
+        staging.commit(command_encoder);
     }
 }
 
-#[derive(Clone, Copy, Debug, Pod, Zeroable, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable)]
+#[repr(C)]
+struct SpectrumDataHeader {
+    start_frequency: f32,
+    end_frequency: f32,
+}
+
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq)]
 #[repr(C)]
 struct ConfigData {
+    view_matrix: Matrix4<f32>,
+    background_color: [f32; 4],
+    background_color_signal: [f32; 4],
     min_db: f32,
     max_db: f32,
     _padding: [u32; 2],
-    background_color: [f32; 4],
 }
 
-impl ConfigData {
-    pub fn new(style: &SpectrumStyle, db_range: &RangeInclusive<f32>) -> Self {
-        Self {
-            min_db: *db_range.start(),
-            max_db: *db_range.end(),
-            _padding: [0; 2],
-            background_color: color32_to_linrgba(style.background_color),
-        }
+fn make_view_matrix(
+    start_frequency: f32,
+    end_frequency: f32,
+    min_db: f32,
+    max_db: f32,
+    flip: [bool; 2],
+    rotate: f32,
+) -> Matrix4<f32> {
+    let mut matrix = Matrix4::identity();
+
+    // rotate
+    if rotate != 0.0 {
+        matrix = Rotation3::from_axis_angle(&Vector3::z_axis(), rotate).to_homogeneous() * matrix;
     }
+
+    // flip
+    matrix.append_nonuniform_scaling_mut(&Vector3::new(
+        if flip[0] { 1.0 } else { -1.0 },
+        if flip[1] { -1.0 } else { 1.0 },
+        1.0,
+    ));
+
+    // non-uniform scaling
+    matrix.append_nonuniform_scaling_mut(&Vector3::new(
+        0.5 * (end_frequency - start_frequency),
+        0.5 * (max_db - min_db),
+        1.0,
+    ));
+
+    // translation
+    matrix.append_translation_mut(&Vector3::new(
+        0.5 * (start_frequency + end_frequency),
+        0.5 * (min_db + max_db),
+        0.0,
+    ));
+
+    matrix
 }

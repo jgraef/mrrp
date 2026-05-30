@@ -59,3 +59,10 @@ impl GetWidgetRenderState for CallbackResources {
         self.get().cloned()
     }
 }
+
+#[derive(Debug, Default)]
+pub struct SpectrumFrame {
+    pub start_frequency: f32,
+    pub end_frequency: f32,
+    pub data: Vec<f32>,
+}

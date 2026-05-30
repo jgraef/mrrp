@@ -24,6 +24,9 @@ impl SpectrumSink for SpectrumState {
         let data = guard.data_mut();
         data.clear();
         data.extend(frame.data);
+
+        let (start_frequency, end_frequency) = frame.frequency_range();
+        guard.set_frequency_range(start_frequency..=end_frequency);
     }
 }
 

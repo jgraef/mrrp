@@ -225,7 +225,11 @@ impl<S> PanelState<S> {
 
 impl PanelState<SpectrumState> {
     fn show(&mut self, ui: &mut egui::Ui, shared: &SharedState) {
-        ui.add(SpectrumView::new(&self.state).db_range(shared.db_range()));
+        ui.add(
+            SpectrumView::new(&self.state)
+                .frequency_range(shared.start_frequency..=shared.end_frequency)
+                .db_range(shared.db_range()),
+        );
     }
 }
 

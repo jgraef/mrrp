@@ -46,8 +46,8 @@ pub struct WaterfallView<'a> {
     state: &'a WaterfallState,
     desired_size: Vec2,
     style: WaterfallStyle,
-    db_range: RangeInclusive<f32>,
     frequency_range: RangeInclusive<f32>,
+    db_range: RangeInclusive<f32>,
 }
 
 impl<'a> WaterfallView<'a> {
@@ -56,8 +56,8 @@ impl<'a> WaterfallView<'a> {
             state,
             desired_size: Vec2::INFINITY,
             style: Default::default(),
-            db_range: -100.0..=0.0,
             frequency_range: 0.0..=1000000.0,
+            db_range: -100.0..=0.0,
         }
     }
 
@@ -987,7 +987,7 @@ struct IndexBufferEntry {
     end_frequency: f32,
 }
 
-#[derive(Clone, Copy, Debug, Pod, Zeroable, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Pod, Zeroable, PartialEq)]
 #[repr(C)]
 struct ConfigData {
     view_matrix: Matrix4<f32>,
