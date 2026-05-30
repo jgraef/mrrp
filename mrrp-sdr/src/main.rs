@@ -31,13 +31,13 @@ fn main() -> Result<(), Error> {
     let config = Config::read_or_default(directories.config_path())?;
 
     match args.command.unwrap_or_default() {
+        Command::Ui(command) => {
+            run_app(directories, config, command)?;
+        }
         Command::ListRadios => {
             for device in hal::radio::list_devices()? {
                 println!("{device:?}");
             }
-        }
-        Command::Ui(command) => {
-            run_app(directories, config, command)?;
         }
     }
 
