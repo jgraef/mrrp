@@ -49,11 +49,7 @@ fn main() -> Result<(), Error> {
                 let format: Box<dyn FnOnce(&ColorMap, &mut Box<dyn Write>) -> Result<(), Error>> =
                     if code {
                         Box::new(|colormap: &ColorMap, mut writer: &mut Box<dyn Write>| {
-                            write!(
-                                &mut writer,
-                                "const {}: &[[f32; 4]] = &[",
-                                name.to_uppercase()
-                            )?;
+                            write!(&mut writer, "const {}: &[Color] = &[", name.to_uppercase())?;
                             for color in colormap.lut() {
                                 write!(&mut writer, "{color:?}, ",)?;
                             }

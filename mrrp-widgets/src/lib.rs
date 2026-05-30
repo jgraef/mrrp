@@ -10,7 +10,7 @@ use egui_wgpu::{
 };
 
 pub fn initialize_wgpu_rendering(ctx: &egui::Context, render_state: &RenderState) {
-    tracing::debug!(adapter = ?render_state.device.adapter_info());
+    tracing::debug!(adapter = ?render_state.device.adapter_info(), target_texture_format = ?render_state.target_format);
 
     let widget_render_state = WidgetRenderState {
         device: render_state.device.clone(),
