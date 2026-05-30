@@ -1,8 +1,9 @@
 [package]
 name = "mrrp-sdr"
 version = "0.1.0"
-edition = "2024"
-repository = "https://github.com/jgraef/mrrp-sdr/"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 anyhow = "1.0.102"
