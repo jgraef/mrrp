@@ -8,6 +8,7 @@ use egui::{
     containers::menu::menu_style,
 };
 use mrrp_widgets::{
+    colormap::ColorMap,
     spectrum::{
         SpectrumState,
         SpectrumView,
@@ -236,8 +237,7 @@ impl PanelState<WaterfallState> {
                 .db_range(shared.db_range())
                 .style(WaterfallStyle {
                     background_color: Color32::TRANSPARENT,
-                    foreground_color1: Color32::BLACK,
-                    foreground_color2: Color32::MAGENTA,
+                    color_map: ColorMap::default(),
                 }),
         );
     }

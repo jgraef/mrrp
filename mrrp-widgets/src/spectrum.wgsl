@@ -4,8 +4,10 @@ struct SpectrumConfig {
     max_db: f32,
     //_padding: [u32; 2],
     background_color: vec4f,
-    foreground_color1: vec4f,
-    foreground_color2: vec4f,
+}
+
+struct ColorMap {
+    lut: array<vec4f>,
 }
 
 struct SpectrumData {
@@ -31,6 +33,11 @@ var<uniform> spectrum_config: SpectrumConfig;
 
 @group(0)
 @binding(1)
+var<storage, read> spectrum_colormap: ColorMap;
+
+
+@group(0)
+@binding(2)
 var<storage, read> spectrum_data: SpectrumData;
 
 @vertex
@@ -63,7 +70,7 @@ fn fragment_main(input: VertexOutput) -> FragmentOutput {
     let y = input.uv.y;
     let is_background = step(value, y);
 
-    let foreground_color = mix(spectrum_config.foreground_color1, spectrum_config.foreground_color2, y / value);
+    let foreground_color = map_color(y);
 
     output.color = mix(foreground_color, spectrum_config.background_color, is_background);
 
@@ -81,4 +88,15 @@ fn log10(value: f32) -> f32 {
 
     const LOG2_10: f32 = 1.0 / log2(10.0);
     return log2(value) * LOG2_10;
+}
+
+fn map_color(t: f32) -> vec4f {
+    let n = arrayLength(&(spectrum_colormap.lut));
+    let x = t * f32(n - 1);
+
+    return mix(
+        spectrum_colormap.lut[clamp(u32(x), 0, n - 1)],
+        spectrum_colormap.lut[clamp(u32(x + 1), 0, n - 1)],
+        fract(x)
+    );
 }

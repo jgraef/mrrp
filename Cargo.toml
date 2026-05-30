@@ -1,6 +1,13 @@
 [workspace]
 resolver = "3"
-members = ["mrrp", "mrrp-cli", "mrrp-sat", "mrrp-sdr", "mrrp-widgets"]
+members = [
+    "mrrp",
+    "mrrp-cli",
+    "mrrp-sat",
+    "mrrp-sdr",
+    "mrrp-widgets",
+    "mrrp-xtask",
+]
 
 # Include debug info in release, so we can investigate bugs better
 [profile.release]

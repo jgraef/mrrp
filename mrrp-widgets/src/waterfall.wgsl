@@ -2,10 +2,12 @@
 struct Config {
     view_matrix: mat4x4f,
     background_color: vec4f,
-    foreground_color1: vec4f,
-    foreground_color2: vec4f,
     min_db: f32,
     max_db: f32,
+}
+
+struct ColorMap {
+    lut: array<vec4f>,
 }
 
 struct Index {
@@ -42,10 +44,14 @@ var<uniform> waterfall_config: Config;
 
 @group(0)
 @binding(1)
-var<storage, read> waterfall_index: Index;
+var<storage, read> waterfall_colormap: ColorMap;
 
 @group(0)
 @binding(2)
+var<storage, read> waterfall_index: Index;
+
+@group(0)
+@binding(3)
 var<storage, read> waterfall_data: array<f32>;
 
 @vertex
@@ -94,14 +100,9 @@ fn fragment_main(input: VertexOutput) -> FragmentOutput {
             //let value_clamped = clamp(value_linear, 0.0, 1.0);
 
             // for now the color will just be a linear mix
-            output.color = mix(waterfall_config.foreground_color1, waterfall_config.foreground_color2, value_clamped);
-            //output.color = mix(waterfall_config.foreground_color1, waterfall_config.foreground_color2, k);
+            //output.color = mix(waterfall_config.foreground_color1, waterfall_config.foreground_color2, value_clamped);
 
-            //let test = f32(data_index) / f32(arrayLength(&waterfall_data));
-            //let test = f32(entry_index) / f32(waterfall_index.capacity);
-            //output.color = mix(waterfall_config.foreground_color1, waterfall_config.foreground_color2, test);
-
-            //output.color = vec4f(1.0, 0.0, 0.0, 1.0);
+            output.color = map_color(value_clamped);
         }
     }
 
@@ -119,4 +120,15 @@ fn log10(value: f32) -> f32 {
 
     const LOG2_10: f32 = 1.0 / log2(10.0);
     return log2(value) * LOG2_10;
+}
+
+fn map_color(t: f32) -> vec4f {
+    let n = arrayLength(&(waterfall_colormap.lut));
+    let x = t * f32(n - 1);
+
+    return mix(
+        waterfall_colormap.lut[clamp(u32(x), 0, n - 1)],
+        waterfall_colormap.lut[clamp(u32(x + 1), 0, n - 1)],
+        fract(x)
+    );
 }

@@ -25,6 +25,7 @@ use wgpu::{
 
 use crate::{
     GetWidgetRenderState,
+    colormap::ColorMap,
     util::color32_to_linrgba,
 };
 
@@ -85,6 +86,7 @@ impl<'a> egui::Widget for SpectrumView<'a> {
                 PaintCallback {
                     shared_state: self.state.shared_state.clone(),
                     config: ConfigData::new(&self.style, &self.db_range),
+                    color_map: self.style.color_map.clone(),
                 },
             ));
         }
@@ -108,6 +110,7 @@ impl SpectrumState {
                 queued_dirty: true,
                 data_buffer: None,
                 bind_group: None,
+                color_map_in_bind_group: None,
             })),
         }
     }
@@ -133,16 +136,14 @@ impl<'a> SpectrumStateUpdateGuard<'a> {
 #[derive(Clone, Debug)]
 pub struct SpectrumStyle {
     pub background_color: Color32,
-    pub foreground_color1: Color32,
-    pub foreground_color2: Color32,
+    pub color_map: ColorMap,
 }
 
 impl Default for SpectrumStyle {
     fn default() -> Self {
         Self {
             background_color: Color32::BLACK,
-            foreground_color1: Color32::from_rgba_unmultiplied(200, 0, 200, 255),
-            foreground_color2: Color32::from_rgba_unmultiplied(64, 0, 64, 255),
+            color_map: ColorMap::default(),
         }
     }
 }
@@ -151,6 +152,7 @@ impl Default for SpectrumStyle {
 struct PaintCallback {
     shared_state: Arc<RwLock<State>>,
     config: ConfigData,
+    color_map: ColorMap,
 }
 
 impl egui_wgpu::CallbackTrait for PaintCallback {
@@ -168,9 +170,11 @@ impl egui_wgpu::CallbackTrait for PaintCallback {
             .entry()
             .or_insert_with(|| Pipeline::new(device, render_state.target_texture_format));
 
+        let color_map = self.color_map.buffer(device);
+
         // stream data to GPU
         let mut state = self.shared_state.write();
-        state.flush(device, queue, &pipeline, &self.config);
+        state.flush(device, queue, &pipeline, &self.config, color_map);
 
         vec![]
     }
@@ -226,9 +230,20 @@ impl Pipeline {
                     },
                     count: None,
                 },
-                // data
+                // colormap
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // data
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: true },
@@ -309,6 +324,10 @@ struct State {
 
     /// Bind group of config and data buffer
     bind_group: Option<wgpu::BindGroup>,
+
+    /// the color map buffer that is currently in the bind group. this is so
+    /// that we can check if this changes later
+    color_map_in_bind_group: Option<wgpu::Buffer>,
 }
 
 impl State {
@@ -318,6 +337,7 @@ impl State {
         queue: &wgpu::Queue,
         pipeline: &Pipeline,
         config: &ConfigData,
+        color_map: wgpu::Buffer,
     ) {
         // update config buffer
         let mut config_changed = self
@@ -349,6 +369,16 @@ impl State {
             queue.write_buffer(&config_buffer, 0, bytemuck::bytes_of(config));
 
             self.config = Some(*config);
+        }
+
+        // check if color map changed
+        if self
+            .color_map_in_bind_group
+            .as_ref()
+            .is_none_or(|current| current != &color_map)
+        {
+            self.bind_group = None;
+            self.color_map_in_bind_group = Some(color_map.clone());
         }
 
         let buffer_size = self.queued_data.len();
@@ -432,6 +462,10 @@ impl State {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
+                        resource: color_map.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
                         resource: data_buffer.as_entire_binding(),
                     },
                 ],
@@ -447,8 +481,6 @@ struct ConfigData {
     max_db: f32,
     _padding: [u32; 2],
     background_color: [f32; 4],
-    foreground_color1: [f32; 4],
-    foreground_color2: [f32; 4],
 }
 
 impl ConfigData {
@@ -458,8 +490,6 @@ impl ConfigData {
             max_db: *db_range.end(),
             _padding: [0; 2],
             background_color: color32_to_linrgba(style.background_color),
-            foreground_color1: color32_to_linrgba(style.foreground_color1),
-            foreground_color2: color32_to_linrgba(style.foreground_color2),
         }
     }
 }

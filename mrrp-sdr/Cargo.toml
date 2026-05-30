@@ -9,6 +9,7 @@ anyhow = "1.0.102"
 bytemuck = "1.25.0"
 chrono = { version = "0.4.44", features = ["serde"] }
 clap = { version = "4.6.1", features = ["derive"] }
+colorgrad = { version = "0.8.0", features = ["preset"] }
 const_format = "0.2.36"
 derive_more = { version = "2.1.1", features = ["debug"] }
 directories = "6.0.0"
@@ -21,7 +22,7 @@ egui_extras = { version = "0.34.2", features = ["all_loaders"] }
 futures-util = "0.3.32"
 indexmap = { version = "2.14.0", features = ["serde"] }
 mrrp.workspace = true
-mrrp-widgets.workspace = true
+mrrp-widgets = { workspace = true, features = ["colorgrad", "serde"] }
 num-complex = "0.4.6"
 num-traits = "0.2.19"
 parking_lot = "0.12.5"

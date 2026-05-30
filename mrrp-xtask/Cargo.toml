@@ -1,0 +1,15 @@
+[package]
+name = "mrrp-xtask"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+colorgrad = { version = "0.8.0", features = ["preset"] }
+dotenvy = "0.15.7"
+mrrp-widgets = { workspace = true, features = ["colorgrad", "serde"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.150"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"

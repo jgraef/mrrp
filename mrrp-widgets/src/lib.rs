@@ -1,3 +1,4 @@
+pub mod colormap;
 pub mod frequency_dial;
 pub mod spectrum;
 pub(crate) mod util;
