@@ -1,0 +1,13 @@
+[package]
+name = "mrrp-rtl-sdr"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+bitfield = "0.19.4"
+derive_more = { version = "2.1.1", features = ["debug"] }
+nusb = { version = "0.2.3", features = ["tokio"] }
+thiserror = "2.0.18"
+tracing = "0.1.44"

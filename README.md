@@ -42,9 +42,10 @@ TODO: Merge from adsbee repo.
 
 TODO: Merge code
 
-## Important TODOs
+## Random TODOs
 
 - Fix `Samples`/`SamplesMut` to actually be useful (`freeze`/`thaw`)
+- `tracing`/`log` integration: some of our dependencies log using `log` crate, we want to forward that to tracing
 
 ## Planned features:
 

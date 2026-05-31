@@ -2,8 +2,8 @@ pub mod file;
 mod noise;
 #[cfg(feature = "rtlsdr")]
 pub mod rtlsdr;
-#[cfg(feature = "rtlsdr")]
-pub mod rtlsdr_new;
+// #[cfg(feature = "rtlsdr")]
+// pub mod rtlsdr_new;
 mod sine;
 
 use std::{
