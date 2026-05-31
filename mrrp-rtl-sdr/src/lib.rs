@@ -1,6 +1,6 @@
 pub mod enumerate;
 pub mod i2c;
-pub mod rtl283u;
+pub mod rtl2832u;
 
 use std::time::Duration;
 
@@ -8,7 +8,7 @@ pub use enumerate::enumerate_devices;
 
 use crate::{
     enumerate::DeviceInfo,
-    rtl283u::Rtl283u,
+    rtl2832u::Rtl2832u,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -58,7 +58,7 @@ impl Default for OpenOptions {
 #[derive(Debug)]
 pub struct Device {
     device_info: DeviceInfo,
-    rtl283u: Rtl283u,
+    rtl2832u: Rtl2832u,
 }
 
 impl Device {
@@ -71,23 +71,24 @@ impl Device {
 
         let usb_interface = usb_device.claim_interface(INTERFACE).await?;
 
-        for interface_descriptor in usb_interface.descriptors() {
-            tracing::debug!("{interface_descriptor:#?}");
-        }
-
-        let mut rtl283u = Rtl283u::new(usb_interface, options.control_timeout);
+        let rtl283u = Rtl2832u::new(usb_interface, options.control_timeout);
 
         //rtl283u.initialize_baseband().await?;
-        rtl283u.test().await?;
+        //rtl283u.test().await?;
 
         Ok(Self {
             device_info,
-            rtl283u,
+            rtl2832u: rtl283u,
         })
     }
 
     pub fn device_info(&self) -> &DeviceInfo {
         &self.device_info
+    }
+
+    // todo: only for testing
+    pub fn rtl2832u(&mut self) -> &mut Rtl2832u {
+        &mut self.rtl2832u
     }
 }
 

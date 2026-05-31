@@ -7,7 +7,9 @@ use std::{
 use crate::{
     Device,
     Error,
+    INTERFACE,
     OpenOptions,
+    rtl2832u::Rtl2832u,
 };
 
 pub async fn enumerate_devices() -> Result<EnumerateDevices<'static>, Error> {
