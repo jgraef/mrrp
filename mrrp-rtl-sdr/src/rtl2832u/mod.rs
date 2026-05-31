@@ -129,6 +129,10 @@ impl Rtl2832u {
     }
 
     pub async fn initialize_baseband(&mut self) -> Result<(), Error> {
+        // check librtlsdr, but also [linux driver][1]
+        //
+        // [1]: https://github.com/jaredquinn/DVB-Realtek-RTL2832U/blob/3c9e21225d2292fe0e6b885cd861fbebb890918a/src/rtl2832u_fe.c#L658
+
         // initialize USB
 
         // enable DMA and enable full packet mode
@@ -183,6 +187,13 @@ impl Rtl2832u {
         self.write_register(iic_repeat).await?;
         iic_repeat.set_soft_rst(false);
         self.write_register(iic_repeat).await?;
+
+        // disable spectrum inversion and adjacent channel rejection
+        self.write_register_with::<reg::demod::SPEC_INV>(|spec_inv| {
+            spec_inv.set_spec_inv(false);
+            spec_inv.set_en_aci(false);
+        })
+        .await?;
 
         Ok(())
     }

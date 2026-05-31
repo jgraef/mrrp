@@ -67,7 +67,7 @@ impl Register {
             control_type: ControlType::Vendor,
             // bmRequestType, endpoint
             recipient: Recipient::Endpoint,
-            // bmRequest
+            // bRequest
             request: 0,
             // wValue
             value: self.w_value(),
@@ -84,7 +84,7 @@ impl Register {
             control_type: ControlType::Vendor,
             // bmRequestType, endpoint
             recipient: Recipient::Endpoint,
-            // bmRequest
+            // bRequest
             request: 0,
             // wValue
             value: self.w_value(),
@@ -140,37 +140,29 @@ impl Bits for u8 {
     }
 }
 
-impl Bits for u16 {
-    type Bytes = [u8; 2];
+macro_rules! impl_bits {
+    ($ty:ty, $bytes:expr) => {
+        impl Bits for $ty {
+            type Bytes = [u8; $bytes];
 
-    const LENGTH: u16 = 2;
+            const LENGTH: u16 = $bytes;
 
-    #[inline(always)]
-    fn from_bytes(buffer: &[u8]) -> Self {
-        u16::from_le_bytes(buffer.try_into().unwrap())
-    }
+            #[inline(always)]
+            fn from_bytes(buffer: &[u8]) -> Self {
+                Self::from_le_bytes(buffer.try_into().unwrap())
+            }
 
-    #[inline(always)]
-    fn into_bytes(&self) -> Self::Bytes {
-        self.to_le_bytes()
-    }
+            #[inline(always)]
+            fn into_bytes(&self) -> Self::Bytes {
+                self.to_le_bytes()
+            }
+        }
+    };
 }
 
-impl Bits for u32 {
-    type Bytes = [u8; 4];
-
-    const LENGTH: u16 = 4;
-
-    #[inline(always)]
-    fn from_bytes(buffer: &[u8]) -> Self {
-        u32::from_le_bytes(buffer.try_into().unwrap())
-    }
-
-    #[inline(always)]
-    fn into_bytes(&self) -> Self::Bytes {
-        self.to_le_bytes()
-    }
-}
+impl_bits!(u16, 2);
+impl_bits!(u32, 4);
+impl_bits!(u64, 8);
 
 /// Macro that lets us define registers more easily
 macro_rules! registers {
@@ -429,6 +421,8 @@ pub mod demod {
     registers! {
         OPT_ADC_IQ_MPEG_IO_OPT_2_2: u8 = demod(0, 0x06) {
             /// OPT_ADC_IQ: 0, 0x06
+            ///
+            /// Exchange ADC_I and ADC_Q datapath
             pub u8, opt_adc_iq, set_opt_adc_iq: 5, 4;
             /// MPEG_IO_OPT_2_2: 0, 0x06
             pub bool, mpeg_io_opt_2_2, set_mpeg_io_opt_2_2: 7;
@@ -439,8 +433,12 @@ pub mod demod {
         };
         AD_EN_REG1_AD_EN_REG: u8 = demod(0, 0x08) {
             /// AD_EN_REG1: 0, 0x08
+            ///
+            /// Enable ADC_Q
             pub bool, ad_en_reg1, set_ad_en_reg1: 6;
             /// AD_EN_REG: 0, 0x08
+            ///
+            /// Enable ADC_I
             pub bool, ad_en_reg, set_ad_en_reg: 7;
         };
         AD_AVI_AD_AVQ_AD_AV_REF: u8 = demod(0, 0x09) {
@@ -585,6 +583,8 @@ pub mod demod {
         SPEC_INV: u8 = demod(1, 0x15) {
             /// SPEC_INV: 1, 0x15
             pub bool, spec_inv, set_spec_inv: 0;
+            /// En_aci
+            pub bool, en_aci, set_en_aci: 1;
         };
         PSET_IFFREQ: u32 = demod(1, 0x19) {
             /// PSET_IFFREQ: 1, 0x19
@@ -603,6 +603,22 @@ pub mod demod {
         KB_P3: u8 = demod(1, 0x65) {
             /// KB_P3: 1, 0x65
             pub u8, kb_p3, set_kb_p3: 2, 0;
+        };
+        EST_KQ: u16 = demod(1, 0x66) {
+            /// Est_kq
+            ///
+            /// Estimated Gain for IQ Gain Mismatch, u(12, 11f)
+            ///
+            /// read-only
+            pub u16, est_kq, set_est_kq: 11, 0;
+        };
+        EST_SIN: u16 = demod(1, 0x68) {
+            /// Est_sin
+            ///
+            /// Estimated Sin for IQ `\theta` Mismatch, u(12, 10f)
+            ///
+            /// read-only
+            pub u16, est_kq, set_est_kq: 11, 0;
         };
         TRK_KS_P2: u8 = demod(1, 0x6f) {
             /// TRK_KS_P2: 1, 0x6f
@@ -700,10 +716,23 @@ pub mod demod {
             /// MGD_THD7: 1, 0x9c
             pub u8, mgd_thd7, set_mgd_thd7: 7, 0;
         };
-            // VERIFY
-        CFREQ_OFF_RATIO_RSAMP_RATIO: u32 = demod(1, 0x9f) {
+        /// These two overlap in a very confusing way. Can't be combined into 32bit either.
+        ///
+        /// ```
+        ///        76543210
+        /// 0x9b   --------
+        /// 0x9c   --------
+        /// 0x9d   cccccccc
+        /// 0x9e   cccccccc
+        /// 0x9f   ccccrrrr
+        /// 0xa0   rrrrrrrr
+        /// 0xa1   rrrrrrrr
+        /// 0xa2   rrrrrr--
+        ///
+        /// ```
+        CFREQ_OFF_RATIO_RSAMP_RATIO: u64 = demod(1, 0x9b) {
             /// CFREQ_OFF_RATIO: 1, 0x9d
-            pub u32, cfreq_off_ratio, set_cfreq_off_ratio: 23, 4;
+            pub u32, cfreq_off_ratio, set_cfreq_off_ratio: 47, 28;
             /// RSAMP_RATIO: 1, 0x9f
             pub u32, rsamp_ratio, set_rsamp_ratio: 27, 2;
         };
@@ -713,7 +742,24 @@ pub mod demod {
         };
         EN_BBIN: u8 = demod(1, 0xb1) {
             /// EN_BBIN: 1, 0xb1
+            ///
+            /// Enable Zero-IF input
             pub bool, en_bbin, set_en_bbin: 0;
+
+            /// en_dc_est
+            ///
+            /// Enable DC estimation and cancellation
+            pub bool, en_dc_est, set_en_dc_est: 1;
+
+            /// en_iq_comp
+            ///
+            /// Enable IQ compensation
+            pub bool, en_iq_comp, set_en_iq_comp: 3;
+
+            /// en_iq_est
+            ///
+            /// Enable IQ estimation for compensation
+            pub bool, en_iq_est, set_en_iq_est: 4;
         };
         AAGC_LOOP_GAIN: u8 = demod(1, 0xc7) {
             /// AAGC_LOOP_GAIN: 1, 0xc7

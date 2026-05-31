@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 #[derive(Debug)]
 struct DemodReg {
     pub name: &'static str,
@@ -13,6 +11,10 @@ struct DemodReg {
 }
 
 pub fn demod_regs() {
+    // NOTE: this produces wrong layouts for registers that overlap and have
+    // different starting addresses. it's only really. This is really only an issue
+    // with `cfreq_off_ratio` and `rsamp_ratio`, so we fixed it manually.
+
     let mut regs = vec![];
 
     for line in SOURCE.lines() {
