@@ -26,7 +26,7 @@ pub enum Error {
         "Invalid control response: expected {expected_length} bytes, but received {response_length} bytes."
     )]
     InvalidControlResponse {
-        expected_length: usize,
+        expected_length: u16,
         response_length: usize,
     },
 }

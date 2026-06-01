@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use bitfield::bitfield;
 use nusb::transfer::{
     ControlIn,
@@ -5,6 +7,49 @@ use nusb::transfer::{
     ControlType,
     Recipient,
 };
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Block {
+    Demod { page: u8 },
+    Usb,
+    System,
+    Tuner,
+    Rom,
+    I2c,
+}
+
+impl Block {
+    /// Returns base address where applicable.
+    ///
+    /// Some blocks (usb and system) have a base address. This is already taken
+    /// care of when you get a [`Register`], but might be interesting to know.
+    pub fn base_address(&self) -> Option<u16> {
+        match self {
+            Block::Demod { page: _ } => None,
+            Block::Usb => Some(0x2000),
+            Block::System => Some(0x3000),
+            Block::Tuner => todo!("not in datasheet"),
+            Block::Rom => None,
+            Block::I2c => None,
+        }
+    }
+
+    pub fn with_address(&self, address: u16) -> Register {
+        match self {
+            Block::Demod { page } => {
+                Register::Demod {
+                    page: *page,
+                    address: address.try_into().unwrap(),
+                }
+            }
+            Block::Usb => Register::Usb { address },
+            Block::System => Register::System { address },
+            Block::Tuner => Register::Tuner { address },
+            Block::Rom => Register::Rom { address },
+            Block::I2c => Register::I2c { address },
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Register {
@@ -17,6 +62,28 @@ pub enum Register {
 }
 
 impl Register {
+    pub fn block(&self) -> Block {
+        match self {
+            Register::Demod { page, address: _ } => Block::Demod { page: *page },
+            Register::Usb { address: _ } => Block::Usb,
+            Register::System { address: _ } => Block::System,
+            Register::Tuner { address: _ } => Block::Tuner,
+            Register::Rom { address: _ } => Block::Rom,
+            Register::I2c { address: _ } => Block::I2c,
+        }
+    }
+
+    pub fn address(&self) -> u16 {
+        match self {
+            Register::Demod { page: _, address } => (*address).into(),
+            Register::Usb { address } => *address,
+            Register::System { address } => *address,
+            Register::Tuner { address } => *address,
+            Register::Rom { address } => *address,
+            Register::I2c { address } => *address,
+        }
+    }
+
     pub fn w_value(&self) -> u16 {
         match self {
             Register::Demod { page: _, address } => {
@@ -108,7 +175,7 @@ impl Register {
     }
 }
 
-pub trait RegisterValue {
+pub trait RegisterValue: Debug {
     const ADDRESS: Register;
     type Bits: Bits;
 
@@ -120,7 +187,7 @@ pub trait Bits {
     type Bytes: AsRef<[u8]>;
     const LENGTH: u16;
 
-    fn from_bytes(buffer: &[u8]) -> Self;
+    fn from_bytes(bytes: &[u8]) -> Self;
     fn into_bytes(&self) -> Self::Bytes;
 }
 
@@ -130,8 +197,8 @@ impl Bits for u8 {
     const LENGTH: u16 = 1;
 
     #[inline(always)]
-    fn from_bytes(buffer: &[u8]) -> Self {
-        buffer[0]
+    fn from_bytes(bytes: &[u8]) -> Self {
+        bytes[0]
     }
 
     #[inline(always)]
@@ -148,8 +215,8 @@ macro_rules! impl_bits {
             const LENGTH: u16 = $bytes;
 
             #[inline(always)]
-            fn from_bytes(buffer: &[u8]) -> Self {
-                Self::from_le_bytes(buffer.try_into().unwrap())
+            fn from_bytes(bytes: &[u8]) -> Self {
+                Self::from_le_bytes(bytes.try_into().unwrap())
             }
 
             #[inline(always)]
@@ -164,6 +231,59 @@ impl_bits!(u16, 2);
 impl_bits!(u32, 4);
 impl_bits!(u64, 8);
 
+pub trait Visitor {
+    fn visit<R>(&mut self)
+    where
+        R: RegisterValue;
+}
+
+impl<T> Visitor for &mut T
+where
+    T: Visitor,
+{
+    #[inline(always)]
+    fn visit<R>(&mut self)
+    where
+        R: RegisterValue,
+    {
+        <T as Visitor>::visit::<R>(self)
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct FilterVisitor<V, F> {
+    pub inner: V,
+    pub filter: F,
+}
+
+impl<V, F> FilterVisitor<V, F> {
+    pub fn new(inner: V, filter: F) -> Self {
+        Self { inner, filter }
+    }
+}
+
+impl<V, F> Visitor for FilterVisitor<V, F>
+where
+    V: Visitor,
+    F: FnMut(Register) -> bool,
+{
+    fn visit<R>(&mut self)
+    where
+        R: RegisterValue,
+    {
+        if (self.filter)(R::ADDRESS) {
+            self.inner.visit::<R>();
+        }
+    }
+}
+
+pub fn visit(mut visitor: impl Visitor) {
+    demod::visit(&mut visitor);
+    sys::visit(&mut visitor);
+    usb::visit(&mut visitor);
+    // todo: others
+}
+
 /// Macro that lets us define registers more easily
 macro_rules! registers {
     {
@@ -176,6 +296,12 @@ macro_rules! registers {
         )*
 
         pub const ALL: &[Register] = &[$($name::ADDRESS),*];
+
+        pub fn visit(mut visitor: impl Visitor) {
+            $(
+                visitor.visit::<$name>();
+            )*
+        }
     };
     (@parse_address(demod, ($page:expr, $address:expr))) => {
         Register::demod($page, $address)

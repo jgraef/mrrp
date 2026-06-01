@@ -24,6 +24,7 @@ use crate::{
     rtl2832u::register::{
         self as reg,
         Bits,
+        Register,
         RegisterValue,
     },
 };
@@ -60,18 +61,44 @@ impl Rtl2832u {
         I2cRepeater::new(&mut self.usb_interface)
     }
 
+    pub async fn read(&mut self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
+        let request = address.control_in(length);
+
+        tracing::debug!(?request, "sending control request");
+
+        // wish they didn't allocate
+        let response_data = self
+            .usb_interface
+            .control_in(request, self.control_timeout)
+            .await?;
+
+        if response_data.len() != response_data.len() {
+            return Err(Error::InvalidControlResponse {
+                expected_length: length,
+                response_length: response_data.len(),
+            });
+        }
+
+        Ok(response_data)
+    }
+
+    pub async fn write(&mut self, address: Register, data: &[u8]) -> Result<(), Error> {
+        let request = address.control_out(data);
+
+        tracing::debug!(?request, "sending control request");
+
+        self.usb_interface
+            .control_out(request, self.control_timeout)
+            .await?;
+        Ok(())
+    }
+
     pub async fn read_register<R>(&mut self) -> Result<R, Error>
     where
         R: RegisterValue + Debug,
     {
-        let request = R::ADDRESS.control_in(<R::Bits as register::Bits>::LENGTH);
-
-        tracing::debug!(?request);
-
-        // wish they didn't allocate
         let data = self
-            .usb_interface
-            .control_in(request, self.control_timeout)
+            .read(R::ADDRESS, <R::Bits as register::Bits>::LENGTH)
             .await?;
 
         let bits = <R::Bits as register::Bits>::from_bytes(&data);
@@ -86,17 +113,12 @@ impl Rtl2832u {
     where
         R: RegisterValue + Debug,
     {
-        let bits = value.as_bits();
-
         tracing::debug!(address = ?R::ADDRESS, ?value, "writing register");
 
+        let bits = value.as_bits();
         let data = bits.into_bytes();
 
-        self.usb_interface
-            .control_out(R::ADDRESS.control_out(data.as_ref()), self.control_timeout)
-            .await?;
-
-        Ok(())
+        self.write(R::ADDRESS, data.as_ref()).await
     }
 
     pub async fn write_register_with<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
@@ -176,10 +198,6 @@ impl Rtl2832u {
             demod_ctl.set_adc_q_enable(true);
         })
         .await?;
-
-        let _i2c_repeat = self
-            .read_register::<reg::demod::SOFT_RST_IIC_REPEAT>()
-            .await?;
 
         // reset demod
         let mut iic_repeat = reg::demod::SOFT_RST_IIC_REPEAT(0x10);
