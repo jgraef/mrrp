@@ -19,6 +19,8 @@
 pub mod filter;
 pub mod register;
 
+#[cfg(feature = "embedded-hal")]
+use std::convert::Infallible;
 use std::{
     fmt::Debug,
     time::Duration,
@@ -26,7 +28,6 @@ use std::{
 
 use crate::{
     Error,
-    i2c::I2cRepeater,
     rtl2832u::{
         filter::FirFilter,
         register::{
@@ -50,24 +51,6 @@ impl Rtl2832u {
             usb_interface,
             control_timeout,
         }
-    }
-
-    pub fn i2c_repeater(&mut self) -> I2cRepeater<'_> {
-        // notes:
-        //
-        // it seems the i2c_repeater enable bit only needs to be set for accessing the
-        // tuner. it's usually disconnected.
-        //
-        // but e.g. the eeprom can be via I2C block with the eeproms I2C address (0xa0?)
-        // as address, and then:
-        //  - write a 1 byte address for reading
-        //  - write a 2 bytes, address and value for writing
-        // (see read/write eeprom librtlsdr code)
-        //
-        // also grepping for rtlsdr_set_i2c_repeater shows that it's only enabled for
-        // tuner access.
-        //
-        I2cRepeater::new(&mut self.usb_interface)
     }
 
     pub async fn read(&mut self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
@@ -141,25 +124,7 @@ impl Rtl2832u {
         self.write_register(value).await
     }
 
-    pub async fn reset(&mut self) -> Result<(), Error> {
-        tracing::debug!("resetting device");
-
-        self.write_register_with::<reg::sys::DEMOD_CTL>(|demod_ctl| {
-            demod_ctl.set_hardware_reset(false); // 1=reset
-        })
-        .await?;
-
-        tokio::time::sleep(Duration::from_millis(5)).await;
-
-        self.write_register_with::<reg::sys::DEMOD_CTL>(|demod_ctl| {
-            demod_ctl.set_hardware_reset(true); // 1=release
-        })
-        .await?;
-
-        Ok(())
-    }
-
-    pub async fn initialize_baseband(&mut self) -> Result<(), Error> {
+    pub async fn initialize(&mut self) -> Result<(), Error> {
         // todo: these should be options that are passed in
         let fir_filter = &FirFilter::DEFAULT;
 
@@ -321,7 +286,37 @@ impl Rtl2832u {
 
         Ok(())
     }
+
+    pub async fn reset(&mut self) -> Result<(), Error> {
+        tracing::debug!("resetting device");
+
+        // todo: reset tuner
+
+        // `rtlsdr_deinit_baseband` sets DEMOD_CTL to 0x20, meaning PLL, ADC I/Q are
+        // disabled, but the reset flag is inverted, so it's released. I think the PLL
+        // enable actually determines if the demod chip is powered.
+
+        // disable demod PLL, ADC I and Q
+        self.write_register_with::<reg::sys::DEMOD_CTL>(|demod_ctl| {
+            demod_ctl.set_hardware_reset(true);
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn read_i2c(&mut self, i2c_address: I2cAddress) -> Result<(), Error> {
+        self.read(Register::I2c { address: i2c_address.0 }, length)
+        todo!();
+    }
+
+    pub async fn write_i2c(&mut self, i2c_address: I2cAddress) -> Result<(), Error> {
+        todo!();
+    }
 }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct I2cAddress(pub u8);
 
 /// # Arguments
 ///
@@ -330,6 +325,22 @@ impl Rtl2832u {
 pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
     let f = -((f_if_d / f_crystal) * 4194304.0).floor();
     (f as i32).cast_unsigned() & 0x003fffff
+}
+
+#[cfg(feature = "embedded-hal")]
+impl embedded_hal_async::i2c::ErrorType for Rtl2832u {
+    type Error = Infallible; // todo
+}
+
+#[cfg(feature = "embedded-hal")]
+impl embedded_hal_async::i2c::I2c for Rtl2832u {
+    async fn transaction(
+        &mut self,
+        address: u8,
+        operations: &mut [embedded_hal_async::i2c::Operation<'_>],
+    ) -> Result<(), Self::Error> {
+        todo!()
+    }
 }
 
 #[cfg(test)]

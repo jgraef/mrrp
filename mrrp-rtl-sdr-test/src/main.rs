@@ -49,7 +49,7 @@ async fn main() -> Result<(), Error> {
             let mut device = open_device(serial.as_deref()).await?;
             let rtl2832u = device.rtl2832u();
 
-            rtl2832u.initialize_baseband().await?;
+            rtl2832u.initialize().await?;
         }
         Command::Reset { serial } => {
             let mut device = open_device(serial.as_deref()).await?;

@@ -1,5 +1,4 @@
 pub mod enumerate;
-pub mod i2c;
 pub mod rtl2832u;
 
 use std::time::Duration;
