@@ -1,6 +1,9 @@
 //! Low-level interface for the RTL2832U
 //!
-//! [Datasheet][1], [`librtlsdr` (blog)][2]
+//! - [Overview][3]
+//! - [Datasheet][1]
+//! - [`librtlsdr` (blog)][2],
+//! - [linux 'rtl2832_sdr.c``][4]
 //!
 //! # Note
 //!
@@ -10,11 +13,14 @@
 //!
 //! [1]: https://homepages.uni-regensburg.de/~erc24492/SDR/Data_rtl2832u.pdf
 //! [2]: https://github.com/rtlsdrblog/rtl-sdr-blog/blob/master/src/librtlsdr.c
+//! [3]: https://homepages.uni-regensburg.de/~erc24492/SDR/RTL2832U.pdf
+//! [4]: https://code.googlesource.com/linux/torvalds/linux/+/6d36c728bc2e2d632f4b0dea00df5532e20dfdab/drivers/media/dvb-frontends/rtl2832_sdr.c
 
 pub mod register;
 
 use std::{
     fmt::Debug,
+    ops::Deref,
     time::Duration,
 };
 
@@ -213,6 +219,238 @@ impl Rtl2832u {
         })
         .await?;
 
+        // librtlsdr mentions clearing DDC shift registers starting at 0x16, but these
+        // are not documented.
+        //
+        // they already cleared 0x16, 0x17, and pfset_iffreq starts is at 0x19, 0x1a,
+        // 0x1b
+
+        // clear ddc offset
+        self.write_register_with::<reg::demod::UNK_DDC_OFFSET>(|ddc_offset| {
+            ddc_offset.0 = 0;
+        })
+        .await?;
+
+        // clear pset_iffreq (librtlsdr)
+        self.write_register_with::<reg::demod::PSET_IFFREQ>(|pset_iffreq| {
+            pset_iffreq.set_pset_iffreq(0)
+        })
+        .await?;
+
+        // set filter
+        self.write_register_with::<reg::demod::UNK_FIR_FILTER>(|fir_filter| {
+            // todo
+        })
+        .await?;
+
         Ok(())
+    }
+}
+
+/// # Arguments
+///
+/// - `f_if_d`: Intermediate frequency (IF) after sub-sampling
+/// - `f_crystal`: Crystal frequency
+pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
+    let f = -((f_if_d / f_crystal) * 4194304.0).floor();
+    (f as i32).cast_unsigned() & 0x003fffff
+}
+
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+pub enum InvalidFilter {
+    #[error("FIR Filter coefficient out of range at index {index}")]
+    CoefficientOutOfRange { index: usize },
+
+    #[error("FIR Filter has incorrect length of {length} (instead of 16)")]
+    InvalidLength { length: usize },
+}
+
+/// Linux uses
+/// `\xca\xdc\xd7\xd8\xe0\xf2\x0e\x35\x06\x50\x9c\x0d\x71\x11\x14\x71\x74\x19\
+/// x41\xa5`.
+///
+/// librtlsdr generates the bytes from proper filter coefficients:
+///
+/// ```c
+/// /*
+///  * FIR coefficients.
+///  *
+///  * The filter is running at XTal frequency. It is symmetric filter with 32
+///  * coefficients. Only first 16 coefficients are specified, the other 16
+///  * use the same values but in reversed order. The first coefficient in
+///  * the array is the outer one, the last, the last is the inner one.
+///  * First 8 coefficients are 8 bit signed integers, the next 8 coefficients
+///  * are 12 bit signed integers. All coefficients have the same weight.
+///  *
+///  * Default FIR coefficients used for DAB/FM by the Windows driver,
+///  * the DVB driver uses different ones
+///  */
+/// static const int fir_default[16] = {
+/// 	-54, -36, -41, -40, -32, -14, 14, 53,	/* 8 bit signed */
+/// 	101, 156, 215, 273, 327, 372, 404, 421	/* 12 bit signed */
+/// };
+/// ```
+///
+/// This is what it writes to memory (starting at 0x1c):
+///
+/// ```plain
+/// │00000010│                         ┊             ca dc d7 d8 │        ┊    ××××│
+/// │00000020│ e0 f2 0e 35 06 50 9c 0d ┊ 71 11 14 71 74 19 41 a5 │××•5•P×_┊q••qt•A×│
+/// ```
+///
+/// So they both use the same filter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FirFilter {
+    coefficients: [i16; 16],
+}
+
+impl FirFilter {
+    pub const DEFAULT: Self = Self {
+        coefficients: [
+            -54, -36, -41, -40, -32, -14, 14, 53, 101, 156, 215, 273, 327, 372, 404, 421,
+        ],
+    };
+
+    pub fn decode(buffer: &[u8; 20]) -> Self {
+        let mut coefficients = [0; 16];
+
+        for i in 0..8 {
+            coefficients[i] = buffer[i].cast_signed().into();
+        }
+
+        for i in 0..4 {
+            let x = u16::from(buffer[i * 3 + 8]);
+            let y = u16::from(buffer[i * 3 + 9]);
+            let z = u16::from(buffer[i * 3 + 10]);
+
+            let mut a = (x << 4) | (y >> 4);
+            let mut b = ((y & 0xf) << 8) | z;
+
+            // sign-extend
+            if a & 0x800 != 0 {
+                a |= 0xf00;
+            }
+            if b & 0x800 != 0 {
+                b |= 0xf00;
+            }
+
+            coefficients[i * 2 + 8] = a.cast_signed();
+            coefficients[i * 2 + 9] = b.cast_signed();
+        }
+
+        Self { coefficients }
+    }
+
+    pub fn encode(&self, buffer: &mut [u8; 20]) {
+        for i in 0..8 {
+            buffer[i] = i8::try_from(self.coefficients[i]).unwrap().cast_unsigned();
+        }
+
+        // each iteration puts 2 i12 into 3 u8
+        // input   fedcba987654 3210 fedcba98 76543210
+        //         ----xxxxxxxx xxxx ----yyyy yyyyyyyy
+        // output      76543210 7654     3210 76543210
+        for i in 0..4 {
+            let x = self.coefficients[i * 2 + 8].cast_unsigned();
+            let y = self.coefficients[i * 2 + 9].cast_unsigned();
+
+            buffer[i * 3 + 8] = (x >> 4).try_into().unwrap();
+            buffer[i * 3 + 9] = (((x & 0x00f) << 4) | (y >> 8)).try_into().unwrap();
+            buffer[i * 3 + 10] = (y & 0x0ff).try_into().unwrap();
+        }
+    }
+}
+
+impl Default for FirFilter {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+impl Deref for FirFilter {
+    type Target = [i16];
+
+    fn deref(&self) -> &Self::Target {
+        &self.coefficients
+    }
+}
+
+impl AsRef<[i16]> for FirFilter {
+    fn as_ref(&self) -> &[i16] {
+        &self.coefficients
+    }
+}
+
+impl TryFrom<[i16; 16]> for FirFilter {
+    type Error = InvalidFilter;
+
+    fn try_from(value: [i16; 16]) -> Result<Self, Self::Error> {
+        for i in 0..8 {
+            if i8::try_from(value[i]).is_err() {
+                return Err(InvalidFilter::CoefficientOutOfRange { index: i });
+            }
+        }
+
+        for i in 0..4 {
+            let x = value[i * 2 + 8].cast_unsigned();
+            let y = value[i * 2 + 9].cast_unsigned();
+
+            // the upper 4 bits must either be 0 or f depending on the sign of the i12.
+            // we check if these bits correspond to the msb of the i12.
+            if x & 0xf80 != 0xf8 && x & 0xf80 != 0 {
+                return Err(InvalidFilter::CoefficientOutOfRange { index: i * 2 });
+            }
+            if y & 0xf80 != 0xf8 && y & 0xf80 != 0 {
+                return Err(InvalidFilter::CoefficientOutOfRange { index: i * 2 + 1 });
+            }
+        }
+
+        Ok(Self {
+            coefficients: value,
+        })
+    }
+}
+
+impl TryFrom<&[i16]> for FirFilter {
+    type Error = InvalidFilter;
+
+    fn try_from(value: &[i16]) -> Result<Self, Self::Error> {
+        <[i16; 16]>::try_from(value)
+            .map_err(|_| {
+                InvalidFilter::InvalidLength {
+                    length: value.len(),
+                }
+            })?
+            .try_into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::rtl2832u::{
+        FirFilter,
+        pset_iffreq_from_hz,
+    };
+
+    #[test]
+    fn test_pset_iffreq_from_hz() {
+        let pset_iffreq = pset_iffreq_from_hz(4.57 * 1000000.0, 28.8 * 1000000.0);
+        assert_eq!(pset_iffreq, 0x0035d82e);
+    }
+
+    const ENCODED_FILTER: &[u8; 20] =
+        b"\xca\xdc\xd7\xd8\xe0\xf2\x0e\x35\x06\x50\x9c\x0d\x71\x11\x14\x71\x74\x19\x41\xa5";
+
+    #[test]
+    fn fiter_encode() {
+        let mut buffer = Default::default();
+        FirFilter::DEFAULT.encode(&mut buffer);
+        assert_eq!(&buffer, ENCODED_FILTER);
+    }
+
+    #[test]
+    fn fiter_decode() {
+        let filter = FirFilter::decode(ENCODED_FILTER);
+        assert_eq!(filter, FirFilter::DEFAULT);
     }
 }

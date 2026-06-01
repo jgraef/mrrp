@@ -231,6 +231,22 @@ impl_bits!(u16, 2);
 impl_bits!(u32, 4);
 impl_bits!(u64, 8);
 
+impl<const N: usize> Bits for [u8; N] {
+    type Bytes = Self;
+
+    const LENGTH: u16 = const { N as u16 };
+
+    #[inline(always)]
+    fn from_bytes(bytes: &[u8]) -> Self {
+        bytes.try_into().unwrap()
+    }
+
+    #[inline(always)]
+    fn into_bytes(&self) -> Self::Bytes {
+        *self
+    }
+}
+
 pub trait Visitor {
     fn visit<R>(&mut self)
     where
@@ -288,11 +304,11 @@ pub fn visit(mut visitor: impl Visitor) {
 macro_rules! registers {
     {
         $(
-            $(#[$attrs:meta])* $name:ident: $int:ty = $block:ident $args:tt $fields:tt;
+            $(#[$attrs:meta])* $name:ident: $int:ty = $block:ident $args:tt $({$($fields:tt)*})?;
         )*
     } => {
         $(
-            registers!(@generate_code(($($attrs)*), $name, $int, registers!(@parse_address($block, $args)), $fields));
+            registers!(@generate_code(($($attrs)*), $name, $int, registers!(@parse_address($block, $args)), $({$($fields)*})?));
         )*
 
         pub const ALL: &[Register] = &[$($name::ADDRESS),*];
@@ -309,6 +325,14 @@ macro_rules! registers {
     (@parse_address($block:ident, ($address:expr))) => {
         Register::$block($address)
     };
+    (@generate_code(($($attrs:meta)*), $name:ident, $int:ty, $address:expr, )) => {
+        $(#[$attrs])*
+        #[allow(non_camel_case_types)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        pub struct $name(pub $int);
+
+        registers!(@generate_impls($name, $int, $address));
+    };
     (@generate_code(($($attrs:meta)*), $name:ident, $int:ty, $address:expr, {$($fields:tt)*})) => {
         bitfield! {
             $(#[$attrs])*
@@ -320,6 +344,9 @@ macro_rules! registers {
             $($fields)*
         }
 
+        registers!(@generate_impls($name, $int, $address));
+    };
+    (@generate_impls($name:ident, $int:ty, $address:expr)) => {
         #[automatically_derived]
         impl RegisterValue for $name {
             const ADDRESS: Register = $address;
@@ -354,9 +381,10 @@ macro_rules! registers {
         impl Default for $name {
             #[inline(always)]
             fn default() -> Self {
-                Self(0)
+                Self(Default::default())
             }
         }
+
     }
 }
 
@@ -712,10 +740,31 @@ pub mod demod {
             /// En_aci
             pub bool, en_aci, set_en_aci: 1;
         };
-        PSET_IFFREQ: u32 = demod(1, 0x19) {
+
+        /// See PSET_IFFREQ
+        UNK_DDC_OFFSET: u16 = demod(1, 0x16) {};
+
+        /// This really starts at 0x19, but we expand it to 32 bit
+        ///
+        /// There's supposedly a DDC offset somewhere between 0x16 and PSET_IFFREQ
+        ///
+        /// This is how it looks like after powerup:
+        ///
+        /// ```plain
+        /// │00000010│ 0a 07 39 10 04 00 3f ce ┊ cc 35 d7 5d 09 f6 d2 a7 │_•9••⋄?×┊×5×]_×××│
+        /// ```
+        ///
+        /// [Linux sdr driver][1] also sets this to 0
+        ///
+        /// [1]: https://code.googlesource.com/linux/torvalds/linux/+/6d36c728bc2e2d632f4b0dea00df5532e20dfdab/drivers/media/dvb-frontends/rtl2832_sdr.c#509
+        PSET_IFFREQ: u32 = demod(1, 0x18) {
             /// PSET_IFFREQ: 1, 0x19
             pub u32, pset_iffreq, set_pset_iffreq: 21, 0;
         };
+        /// Not in datasheet, but both librtlsdr and the linux sdr driver put a 20 byte FIR filter here.
+        ///
+        /// See [`FirFilter`](super::FirFilter)
+        UNK_FIR_FILTER: [u8; 20] = demod(1, 0x1c);
         EN_CACQ_NOTCH: u8 = demod(1, 0x61) {
             /// EN_CACQ_NOTCH: 1, 0x61
             pub bool, en_cacq_notch, set_en_cacq_notch: 4;
@@ -844,7 +893,7 @@ pub mod demod {
         };
         /// These two overlap in a very confusing way. Can't be combined into 32bit either.
         ///
-        /// ```
+        /// ```plain
         ///        76543210
         /// 0x9b   --------
         /// 0x9c   --------
@@ -854,7 +903,6 @@ pub mod demod {
         /// 0xa0   rrrrrrrr
         /// 0xa1   rrrrrrrr
         /// 0xa2   rrrrrr--
-        ///
         /// ```
         CFREQ_OFF_RATIO_RSAMP_RATIO: u64 = demod(1, 0x9b) {
             /// CFREQ_OFF_RATIO: 1, 0x9d
@@ -1035,7 +1083,7 @@ pub mod demod {
             /// RF_AGC_VAL: 3, 0x5b
             pub u16, rf_agc_val, set_rf_agc_val: 13, 0;
         };
-        CFREQ_OFF: u32 = demod(3, 0x5f) {
+        CFREQ_OFF: u32 = demod(3, 0x5e) {
             /// CFREQ_OFF: 3, 0x5f
             pub u32, cfreq_off, set_cfreq_off: 17, 0;
         };

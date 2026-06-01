@@ -2,6 +2,11 @@ pub mod demod_regs;
 
 use std::{
     borrow::Cow,
+    fs::File,
+    io::{
+        BufWriter,
+        Write,
+    },
     path::{
         Path,
         PathBuf,
@@ -10,6 +15,7 @@ use std::{
 
 use anyhow::{
     Error,
+    anyhow,
     bail,
 };
 use clap::{
@@ -37,14 +43,14 @@ async fn main() -> Result<(), Error> {
                 println!("{device_info:#?}");
             }
         }
-        Command::Open => {
-            let mut device = open_first().await?;
+        Command::Open { serial } => {
+            let mut device = open_device(serial.as_deref()).await?;
             let rtl2832u = device.rtl2832u();
 
             rtl2832u.initialize_baseband().await?;
         }
-        Command::Reset => {
-            let mut device = open_first().await?;
+        Command::Reset { serial } => {
+            let mut device = open_device(serial.as_deref()).await?;
             let rtl2832u = device.rtl2832u();
             rtl2832u.reset().await?;
         }
@@ -52,14 +58,15 @@ async fn main() -> Result<(), Error> {
             demod_regs::demod_regs();
         }
         Command::DumpRegs {
+            serial,
             mut demod,
             mut usb,
             mut system,
             tuner,
             rom,
-            path,
+            output,
         } => {
-            let path = path.as_deref().unwrap_or_else(|| Path::new("."));
+            let path = output.as_deref().unwrap_or_else(|| Path::new("."));
 
             if !path.exists() {
                 bail!("Directory does not exist: {path:?}");
@@ -77,12 +84,40 @@ async fn main() -> Result<(), Error> {
                 // todo: tuner, rom
             }
 
-            dump_regs(demod, usb, system, tuner, rom, path).await?;
+            dump_regs(serial.as_deref(), demod, usb, system, tuner, rom, path).await?;
         }
         Command::PrintRegDump { path } => {
             let path = path.as_deref().unwrap_or_else(|| Path::new("."));
 
             print_reg_dump(path)?;
+        }
+        Command::DumpRomCode {
+            serial,
+            length,
+            output,
+        } => {
+            // note: doesn't work?
+
+            let mut writer = BufWriter::new(File::create(&output)?);
+
+            let mut device = open_device(serial.as_deref()).await?;
+            let rtl2832u = device.rtl2832u();
+
+            let data = rtl2832u
+                .read(reg::Register::Rom { address: 0 }, length)
+                .await?;
+
+            writer.write_all(&data)?;
+        }
+        Command::I2cProbe {
+            serial,
+            first,
+            last,
+        } => {
+            //let mut device = open_device(serial.as_deref()).await?;
+            //let rtl2832u = device.rtl2832u();
+
+            todo!();
         }
     }
 
@@ -98,10 +133,19 @@ struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     List,
-    Open,
-    Reset,
+    Open {
+        #[clap(short, long)]
+        serial: Option<String>,
+    },
+    Reset {
+        #[clap(short, long)]
+        serial: Option<String>,
+    },
     ParseDemodRegs,
     DumpRegs {
+        #[clap(short, long)]
+        serial: Option<String>,
+
         #[clap(long)]
         demod: Vec<u8>,
 
@@ -117,17 +161,49 @@ enum Command {
         #[clap(long)]
         rom: bool,
 
-        path: Option<PathBuf>,
+        #[clap(short, long)]
+        output: Option<PathBuf>,
     },
     PrintRegDump {
         path: Option<PathBuf>,
     },
+    DumpRomCode {
+        #[clap(short, long)]
+        serial: Option<String>,
+
+        #[clap(short, long)]
+        output: PathBuf,
+
+        #[clap(short, long)]
+        length: u16,
+    },
+    I2cProbe {
+        #[clap(short, long)]
+        serial: Option<String>,
+
+        first: Option<u16>,
+
+        last: Option<u16>,
+    },
 }
 
-async fn open_first() -> Result<Device, Error> {
-    let device = mrrp_rtl_sdr::open_first(Default::default()).await?;
-    tracing::debug!(device_info = ?device.device_info(), "device found");
-    Ok(device)
+async fn open_device(serial: Option<&str>) -> Result<Device, Error> {
+    for device_info in mrrp_rtl_sdr::enumerate_devices().await? {
+        if serial.is_none() || device_info.serial_number() == serial {
+            tracing::debug!(?device_info, "device found");
+
+            let device = device_info.open(Default::default()).await?;
+
+            return Ok(device);
+        }
+    }
+
+    if let Some(serial) = serial {
+        Err(anyhow!("Device not found: {serial}"))
+    }
+    else {
+        Err(anyhow!("No device found"))
+    }
 }
 
 fn reg_dump_file_name_for_block(base: impl AsRef<Path>, block: reg::Block) -> PathBuf {
@@ -155,6 +231,7 @@ fn block_size(block: reg::Block) -> u16 {
 }
 
 async fn dump_regs(
+    serial: Option<&str>,
     demod: Vec<u8>,
     usb: bool,
     system: bool,
@@ -162,7 +239,7 @@ async fn dump_regs(
     rom: bool,
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
-    let mut device = open_first().await?;
+    let mut device = open_device(serial).await?;
     let rtl2832u = device.rtl2832u();
 
     let mut dump_block = async |block: reg::Block| {

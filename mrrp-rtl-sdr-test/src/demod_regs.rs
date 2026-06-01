@@ -1,3 +1,6 @@
+// https://github.com/jaredquinn/DVB-Realtek-RTL2832U/blob/3c9e21225d2292fe0e6b885cd861fbebb890918a/src/demod_rtl2832.c#L1631
+//
+
 #[derive(Debug)]
 struct DemodReg {
     pub name: &'static str,
