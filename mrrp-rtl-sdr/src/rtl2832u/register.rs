@@ -566,6 +566,7 @@ pub mod sys {
 
 pub mod demod {
     pub use super::*;
+    use crate::rtl2832u::FirFilter;
 
     // this seems to be a better list of registers:
     // https://github.com/jaredquinn/DVB-Realtek-RTL2832U/blob/3c9e21225d2292fe0e6b885cd861fbebb890918a/src/demod_rtl2832.c#L1631
@@ -573,10 +574,13 @@ pub mod demod {
     // the following register map was generated from the linux source
 
     registers! {
+        // todo: maybe merge this with the next since they both contain mpeg_io_opt field?
         OPT_ADC_IQ_MPEG_IO_OPT_2_2: u8 = demod(0, 0x06) {
             /// OPT_ADC_IQ: 0, 0x06
             ///
             /// Exchange ADC_I and ADC_Q datapath
+            ///
+            /// Why is this 2 bits??? The datasheet only says 0=default, 1=swapped
             pub u8, opt_adc_iq, set_opt_adc_iq: 5, 4;
             /// MPEG_IO_OPT_2_2: 0, 0x06
             pub bool, mpeg_io_opt_2_2, set_mpeg_io_opt_2_2: 7;
@@ -609,7 +613,10 @@ pub mod demod {
         };
         REG_MON_REG_MONSEL_REG_GPE: u8 = demod(0, 0x0d) {
             /// REG_MON: 0, 0x0d
+            ///
+            /// 0b11 on powerup
             pub u8, reg_mon, set_reg_mon: 1, 0;
+
             /// REG_MONSEL: 0, 0x0d
             pub bool, reg_monsel, set_reg_monsel: 2;
             /// REG_GPE: 0, 0x0d
@@ -633,10 +640,55 @@ pub mod demod {
             /// REG_4MSEL: 0, 0x13
             pub bool, reg_4msel, set_reg_4msel: 0;
         };
+        /// Another undocumented register
+        ///
+        /// Both linux sdr and librtlsdr set this to 0x05 during baseband initialization.
+        ///
+        /// librtlsdr comment: "enable SDR mode, disable DAGC (bit 5)"
+        ///
+        /// - `rtlsdr_set_testmode` sets this to 0x03 (if on=true) or 0x05 (otherwise)
+        /// - `rtlsdr_set_agc_mode` sets this to 0x25 (if on=true) or 0x05 (otherwise)
+        /// - linux sdr sets this to 0x20 in `rtl2832_sdr_unset_adc`, called from `rtl2832_sdr_stop_streaming`
+        ///
+        /// The datasheet lists `en_dagc` in page 0 offset 0x11 bit 0
+        ///
+        /// In dumps:
+        ///
+        /// - 0x20 at startup
+        /// - 0x03 in rtl_test
+        ///
+        /// So:
+        ///
+        /// - bit 5: dagc
+        /// - bit 2: on if not in test mode (send samples?)
+        /// - bit 1: on if in test mode (send counter?)
+        /// - bit 0: (enable streaming?)
+        ///
+        UNK_DAGC: u8 = demod(0, 0x19) {
+            pub bool, enable_dagc, set_enable_dagc: 5;
+            pub bool, unk_2, set_unk_2: 2;
+            pub bool, test_mode, set_test_mode: 1;
+            pub bool, unk_0, set_unk_0: 0;
+
+        };
         PIP_ON: u8 = demod(0, 0x21) {
             /// PIP_ON: 0, 0x21
             pub bool, pip_on, set_pip_on: 3;
         };
+        /// librtlsdr disables all but bits 5 and 6 on baseband init
+        PID_CTL: u8 = demod(0, 0x61) {
+            /// Pass all error packets
+            pub bool, err_pass, set_err_pass: 5;
+            /// Reject matched packets
+            pub bool, mode, set_mode: 6;
+            /// Enable PID output
+            ///
+            /// TODO: We think disabling this will reject all packet. Test this with the mode setting.
+            pub bool, enable, set_enable: 7;
+        };
+        PID_ENABLE: u32 = demod(0, 0x62);
+        // todo: this or individual registers? also [u16; 32] doesn't implement our trait yet.
+        //PID_VALUE: [u16; 32] = demod(0, 0x66);
         VAL_LVL_PIP_ERR_LVL_PIP_SYNC_LVL_PIP_CKOUT_PWR_PIP_CKOUTPAR_PIP: u8 = demod(0, 0xb7) {
             /// VAL_LVL_PIP: 0, 0xb7
             pub bool, val_lvl_pip, set_val_lvl_pip: 0;
@@ -709,6 +761,9 @@ pub mod demod {
         IF_AGC_MAX: u8 = demod(1, 0x09) {
             /// IF_AGC_MAX: 1, 0x09
             pub u8, if_agc_max, set_if_agc_max: 7, 0;
+        };
+        EN_DAGC: u8 = demod(1, 0x11) {
+            pub bool, en_dagc, set_endagc: 0;
         };
         RF_AGC_MIN: u8 = demod(1, 0x0a) {
             /// RF_AGC_MIN: 1, 0x0a
@@ -855,10 +910,30 @@ pub mod demod {
             /// RSD_BER_FAIL_VAL: 1, 0x8f
             pub u16, rsd_ber_fail_val, set_rsd_ber_fail_val: 15, 0;
         };
-        SM_PASS: u16 = demod(1, 0x93) {
-            /// SM_PASS: 1, 0x93
-            pub u16, sm_pass, set_sm_pass: 11, 0;
-        };
+        /// # FSM state
+        ///
+        /// Linux SDR just comments "FSM" and sets this to 0x0ff0.
+        /// It actually writes `\x00\xf0\x0f` to offset 0x92 in `rtl2832_sdr_set_adc`.
+        /// In `rtl2832_sdr_unset_adc` it resets it to `\x00\x0f\xff` (0xff0f)
+        ///
+        /// librtlsdr comments "init FSM state-holding register" and writes 0xff0 (doesn't write to 0x92)
+        ///
+        /// Dumps:
+        /// - rtl_test: 0x0ff0
+        /// - powerup: 0xff0f
+        ///
+        /// There's also FSM_STAGE: 3, 0x51, bits 6:3
+        ///
+        /// This is in the dvbt driver
+        ///
+        /// ```no_run
+        /// SM_PASS: u16 = demod(1, 0x93) {
+        ///     /// SM_PASS: 1, 0x93
+        ///     pub u16, sm_pass, set_sm_pass: 11, 0;
+        /// };
+        /// ```
+        UNK_FSM: u16 = demod(1, 0x93);
+
         MGD_THD0: u8 = demod(1, 0x95) {
             /// MGD_THD0: 1, 0x95
             pub u8, mgd_thd0, set_mgd_thd0: 7, 0;
@@ -914,7 +989,7 @@ pub mod demod {
             /// EN_BK_TRK: 1, 0xa6
             pub bool, en_bk_trk, set_en_bk_trk: 7;
         };
-        EN_BBIN: u8 = demod(1, 0xb1) {
+        DC_CANCEL: u8 = demod(1, 0xb1) {
             /// EN_BBIN: 1, 0xb1
             ///
             /// Enable Zero-IF input
@@ -924,6 +999,11 @@ pub mod demod {
             ///
             /// Enable DC estimation and cancellation
             pub bool, en_dc_est, set_en_dc_est: 1;
+
+            /// unknown bit.
+            ///
+            /// 1 on powerup
+            pub bool, unk_2, set_unk_2: 2;
 
             /// en_iq_comp
             ///
@@ -1091,6 +1171,44 @@ pub mod demod {
             /// CE_EST_EVM: 4, 0x0c
             pub u16, ce_est_evm, set_ce_est_evm: 15, 0;
         };
+    }
 
+    impl UNK_FIR_FILTER {
+        #[inline(always)]
+        pub fn decode(&self) -> FirFilter {
+            FirFilter::decode(&self.0)
+        }
+
+        #[inline(always)]
+        pub fn encode(&mut self, filter: &FirFilter) {
+            filter.encode(&mut self.0);
+        }
+
+        #[inline(always)]
+        pub fn from_filter(filter: &FirFilter) -> Self {
+            let mut buffer = Self::default();
+            buffer.encode(&filter);
+            buffer
+        }
+    }
+
+    impl PID_ENABLE {
+        pub fn en_pid(&self, pid: u8) -> bool {
+            assert!(pid < 32, "PID out of range: {pid}");
+            self.0 & (1 << pid) != 0
+        }
+
+        pub fn set_en_pid(&mut self, pid: u8) {
+            assert!(pid < 32, "PID out of range: {pid}");
+            self.0 |= 1 << pid;
+        }
+
+        pub fn clear(&mut self) {
+            self.0 = 0;
+        }
+
+        pub fn set_all(&mut self) {
+            self.0 = !0;
+        }
     }
 }

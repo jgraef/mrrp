@@ -9,6 +9,7 @@ repository.workspace = true
 anyhow = "1.0.102"
 clap = { version = "4.6.1", features = ["derive"] }
 dotenvy = "0.15.7"
+hexyl = "0.17.0"
 mrrp-rtl-sdr.workspace = true
 tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros"] }
 tracing = "0.1.44"

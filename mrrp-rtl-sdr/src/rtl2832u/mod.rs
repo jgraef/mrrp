@@ -16,22 +16,25 @@
 //! [3]: https://homepages.uni-regensburg.de/~erc24492/SDR/RTL2832U.pdf
 //! [4]: https://code.googlesource.com/linux/torvalds/linux/+/6d36c728bc2e2d632f4b0dea00df5532e20dfdab/drivers/media/dvb-frontends/rtl2832_sdr.c
 
+pub mod filter;
 pub mod register;
 
 use std::{
     fmt::Debug,
-    ops::Deref,
     time::Duration,
 };
 
 use crate::{
     Error,
     i2c::I2cRepeater,
-    rtl2832u::register::{
-        self as reg,
-        Bits,
-        Register,
-        RegisterValue,
+    rtl2832u::{
+        filter::FirFilter,
+        register::{
+            self as reg,
+            Bits,
+            Register,
+            RegisterValue,
+        },
     },
 };
 
@@ -157,6 +160,9 @@ impl Rtl2832u {
     }
 
     pub async fn initialize_baseband(&mut self) -> Result<(), Error> {
+        // todo: these should be options that are passed in
+        let fir_filter = &FirFilter::DEFAULT;
+
         // check librtlsdr, but also [linux driver][1]
         //
         // [1]: https://github.com/jaredquinn/DVB-Realtek-RTL2832U/blob/3c9e21225d2292fe0e6b885cd861fbebb890918a/src/rtl2832u_fe.c#L658
@@ -238,8 +244,78 @@ impl Rtl2832u {
         .await?;
 
         // set filter
-        self.write_register_with::<reg::demod::UNK_FIR_FILTER>(|fir_filter| {
-            // todo
+        self.write_register(reg::demod::UNK_FIR_FILTER::from_filter(fir_filter))
+            .await?;
+
+        // disable dagc, "enable SDR mode"???
+        self.write_register_with::<reg::demod::UNK_DAGC>(|unk_dagc| {
+            unk_dagc.set_enable_dagc(false);
+            // todo: figure out what they do
+            unk_dagc.set_unk_0(true);
+            unk_dagc.set_unk_2(true);
+        })
+        .await?;
+
+        // configure FSM
+        self.write_register(reg::demod::UNK_FSM(0x0ff0)).await?;
+
+        // disable DAGC, librtlsdr says this has no effect
+        self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
+            en_dagc.set_endagc(false);
+        })
+        .await?;
+
+        // disable RF and IF AGC loop
+        self.write_register_with::<reg::demod::LOOP_GAIN2_3_0_AAGC_HOLD_EN_RF_AGC_EN_IF_AGC>(
+            |en_agc| {
+                en_agc.set_en_rf_agc(false);
+                en_agc.set_en_if_agc(false);
+            },
+        )
+        .await?;
+
+        // disable PID (packet identifier) filter
+        self.write_register_with::<reg::demod::PID_CTL>(|pid_ctl| {
+            // we think we need to turn off PID filter output and set the mode to accept
+            // rejected and error packets
+            pid_ctl.set_err_pass(true);
+            pid_ctl.set_mode(true);
+            pid_ctl.set_enable(false);
+        })
+        .await?;
+
+        // set I/Q ADC data path
+        self.write_register_with::<reg::demod::OPT_ADC_IQ_MPEG_IO_OPT_2_2>(|opt_adc| {
+            opt_adc.set_opt_adc_iq(0);
+            // librtlsdr and linux sdr set this. don't know what it does
+            opt_adc.set_mpeg_io_opt_2_2(true);
+        })
+        .await?;
+
+        // zero-IF, DC cancellation,
+        self.write_register_with::<reg::demod::DC_CANCEL>(|dc_cancel| {
+            // this is disabled in rtl_test. i think this is only necessary for low
+            // frequencies.
+            //
+            // this is disabled later in rtlsdr_open when a r828d or r820t is detected
+            dc_cancel.set_en_bbin(true);
+
+            dc_cancel.set_en_dc_est(true);
+            dc_cancel.set_en_iq_comp(true);
+            dc_cancel.set_en_iq_est(true);
+        })
+        .await?;
+
+        // librtlsdr comments this as disabling TP_CK0. this pin is mentioned in the
+        // datasheet but nothing else on it.
+        //
+        // linux dvbt has a register layout with some bits, but it's not clear what
+        // they're about
+        //
+        // linux sdr just sets them during e4k tuner setup
+        self.write_register_with::<reg::demod::REG_MON_REG_MONSEL_REG_GPE>(|reg| {
+            reg.set_reg_mon(0b11);
+            reg.set_reg_gpe(true);
         })
         .await?;
 
@@ -254,175 +330,6 @@ impl Rtl2832u {
 pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
     let f = -((f_if_d / f_crystal) * 4194304.0).floor();
     (f as i32).cast_unsigned() & 0x003fffff
-}
-
-#[derive(Clone, Copy, Debug, thiserror::Error)]
-pub enum InvalidFilter {
-    #[error("FIR Filter coefficient out of range at index {index}")]
-    CoefficientOutOfRange { index: usize },
-
-    #[error("FIR Filter has incorrect length of {length} (instead of 16)")]
-    InvalidLength { length: usize },
-}
-
-/// Linux uses
-/// `\xca\xdc\xd7\xd8\xe0\xf2\x0e\x35\x06\x50\x9c\x0d\x71\x11\x14\x71\x74\x19\
-/// x41\xa5`.
-///
-/// librtlsdr generates the bytes from proper filter coefficients:
-///
-/// ```c
-/// /*
-///  * FIR coefficients.
-///  *
-///  * The filter is running at XTal frequency. It is symmetric filter with 32
-///  * coefficients. Only first 16 coefficients are specified, the other 16
-///  * use the same values but in reversed order. The first coefficient in
-///  * the array is the outer one, the last, the last is the inner one.
-///  * First 8 coefficients are 8 bit signed integers, the next 8 coefficients
-///  * are 12 bit signed integers. All coefficients have the same weight.
-///  *
-///  * Default FIR coefficients used for DAB/FM by the Windows driver,
-///  * the DVB driver uses different ones
-///  */
-/// static const int fir_default[16] = {
-/// 	-54, -36, -41, -40, -32, -14, 14, 53,	/* 8 bit signed */
-/// 	101, 156, 215, 273, 327, 372, 404, 421	/* 12 bit signed */
-/// };
-/// ```
-///
-/// This is what it writes to memory (starting at 0x1c):
-///
-/// ```plain
-/// │00000010│                         ┊             ca dc d7 d8 │        ┊    ××××│
-/// │00000020│ e0 f2 0e 35 06 50 9c 0d ┊ 71 11 14 71 74 19 41 a5 │××•5•P×_┊q••qt•A×│
-/// ```
-///
-/// So they both use the same filter.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct FirFilter {
-    coefficients: [i16; 16],
-}
-
-impl FirFilter {
-    pub const DEFAULT: Self = Self {
-        coefficients: [
-            -54, -36, -41, -40, -32, -14, 14, 53, 101, 156, 215, 273, 327, 372, 404, 421,
-        ],
-    };
-
-    pub fn decode(buffer: &[u8; 20]) -> Self {
-        let mut coefficients = [0; 16];
-
-        for i in 0..8 {
-            coefficients[i] = buffer[i].cast_signed().into();
-        }
-
-        for i in 0..4 {
-            let x = u16::from(buffer[i * 3 + 8]);
-            let y = u16::from(buffer[i * 3 + 9]);
-            let z = u16::from(buffer[i * 3 + 10]);
-
-            let mut a = (x << 4) | (y >> 4);
-            let mut b = ((y & 0xf) << 8) | z;
-
-            // sign-extend
-            if a & 0x800 != 0 {
-                a |= 0xf00;
-            }
-            if b & 0x800 != 0 {
-                b |= 0xf00;
-            }
-
-            coefficients[i * 2 + 8] = a.cast_signed();
-            coefficients[i * 2 + 9] = b.cast_signed();
-        }
-
-        Self { coefficients }
-    }
-
-    pub fn encode(&self, buffer: &mut [u8; 20]) {
-        for i in 0..8 {
-            buffer[i] = i8::try_from(self.coefficients[i]).unwrap().cast_unsigned();
-        }
-
-        // each iteration puts 2 i12 into 3 u8
-        // input   fedcba987654 3210 fedcba98 76543210
-        //         ----xxxxxxxx xxxx ----yyyy yyyyyyyy
-        // output      76543210 7654     3210 76543210
-        for i in 0..4 {
-            let x = self.coefficients[i * 2 + 8].cast_unsigned();
-            let y = self.coefficients[i * 2 + 9].cast_unsigned();
-
-            buffer[i * 3 + 8] = (x >> 4).try_into().unwrap();
-            buffer[i * 3 + 9] = (((x & 0x00f) << 4) | (y >> 8)).try_into().unwrap();
-            buffer[i * 3 + 10] = (y & 0x0ff).try_into().unwrap();
-        }
-    }
-}
-
-impl Default for FirFilter {
-    fn default() -> Self {
-        Self::DEFAULT
-    }
-}
-
-impl Deref for FirFilter {
-    type Target = [i16];
-
-    fn deref(&self) -> &Self::Target {
-        &self.coefficients
-    }
-}
-
-impl AsRef<[i16]> for FirFilter {
-    fn as_ref(&self) -> &[i16] {
-        &self.coefficients
-    }
-}
-
-impl TryFrom<[i16; 16]> for FirFilter {
-    type Error = InvalidFilter;
-
-    fn try_from(value: [i16; 16]) -> Result<Self, Self::Error> {
-        for i in 0..8 {
-            if i8::try_from(value[i]).is_err() {
-                return Err(InvalidFilter::CoefficientOutOfRange { index: i });
-            }
-        }
-
-        for i in 0..4 {
-            let x = value[i * 2 + 8].cast_unsigned();
-            let y = value[i * 2 + 9].cast_unsigned();
-
-            // the upper 4 bits must either be 0 or f depending on the sign of the i12.
-            // we check if these bits correspond to the msb of the i12.
-            if x & 0xf80 != 0xf8 && x & 0xf80 != 0 {
-                return Err(InvalidFilter::CoefficientOutOfRange { index: i * 2 });
-            }
-            if y & 0xf80 != 0xf8 && y & 0xf80 != 0 {
-                return Err(InvalidFilter::CoefficientOutOfRange { index: i * 2 + 1 });
-            }
-        }
-
-        Ok(Self {
-            coefficients: value,
-        })
-    }
-}
-
-impl TryFrom<&[i16]> for FirFilter {
-    type Error = InvalidFilter;
-
-    fn try_from(value: &[i16]) -> Result<Self, Self::Error> {
-        <[i16; 16]>::try_from(value)
-            .map_err(|_| {
-                InvalidFilter::InvalidLength {
-                    length: value.len(),
-                }
-            })?
-            .try_into()
-    }
 }
 
 #[cfg(test)]

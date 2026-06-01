@@ -5,7 +5,9 @@ use std::{
     fs::File,
     io::{
         BufWriter,
+        Cursor,
         Write,
+        stdout,
     },
     path::{
         Path,
@@ -86,10 +88,20 @@ async fn main() -> Result<(), Error> {
 
             dump_regs(serial.as_deref(), demod, usb, system, tuner, rom, path).await?;
         }
-        Command::PrintRegDump { path } => {
+        Command::PrintRegDump {
+            path,
+            offset,
+            length,
+            mut decode,
+            hexdump,
+        } => {
             let path = path.as_deref().unwrap_or_else(|| Path::new("."));
 
-            print_reg_dump(path)?;
+            if !decode && !hexdump {
+                decode = true;
+            }
+
+            print_reg_dump(path, offset, length, decode, hexdump)?;
         }
         Command::DumpRomCode {
             serial,
@@ -109,13 +121,12 @@ async fn main() -> Result<(), Error> {
 
             writer.write_all(&data)?;
         }
-        Command::I2cProbe {
-            serial,
-            first,
-            last,
-        } => {
+        Command::I2cProbe { .. } => {
             //let mut device = open_device(serial.as_deref()).await?;
             //let rtl2832u = device.rtl2832u();
+
+            // don't know if we can mess something up with this. if we read only the EEPROM
+            // should not be modified at least.
 
             todo!();
         }
@@ -166,6 +177,14 @@ enum Command {
     },
     PrintRegDump {
         path: Option<PathBuf>,
+        #[clap(short, long)]
+        offset: Option<usize>,
+        #[clap(short, long)]
+        length: Option<usize>,
+        #[clap(short = 'd', long)]
+        decode: bool,
+        #[clap(short = 'H', long)]
+        hexdump: bool,
     },
     DumpRomCode {
         #[clap(short, long)]
@@ -254,6 +273,7 @@ async fn dump_regs(
             Ok(data) => {
                 reg::demod::visit(PrintRegs {
                     buffer: &data,
+                    offset: 0,
                     block,
                 });
 
@@ -293,18 +313,42 @@ async fn dump_regs(
     Ok(())
 }
 
-fn print_reg_dump(path: impl AsRef<Path>) -> Result<(), Error> {
+fn print_reg_dump(
+    path: impl AsRef<Path>,
+    offset: Option<usize>,
+    length: Option<usize>,
+    decode: bool,
+    hexdump: bool,
+) -> Result<(), Error> {
     let print_block = |block: reg::Block| {
         let path = reg_dump_file_name_for_block(&path, block);
 
         match std::fs::read(&path) {
             Ok(data) => {
-                println!("# `{block:?}`\n\n```");
-                reg::visit(PrintRegs {
-                    buffer: &data,
-                    block,
-                });
-                println!("```\n");
+                println!("# `{block:?}`\n\n");
+                let mut data = &*data;
+
+                if let Some(offset) = offset {
+                    data = &data[offset..];
+                }
+                if let Some(length) = length {
+                    data = &data[..length];
+                }
+
+                if hexdump {
+                    println!("```");
+                    hexyl(&data, offset.unwrap_or_default());
+                    println!("```\n");
+                }
+                if decode {
+                    println!("```");
+                    reg::visit(PrintRegs {
+                        buffer: &data,
+                        offset: offset.unwrap_or_default(),
+                        block,
+                    });
+                    println!("```\n");
+                }
             }
             Err(error) => {
                 tracing::warn!(?block, ?path, %error, "Could not read file");
@@ -324,6 +368,7 @@ fn print_reg_dump(path: impl AsRef<Path>) -> Result<(), Error> {
 
 pub struct PrintRegs<'a> {
     buffer: &'a [u8],
+    offset: usize,
     block: reg::Block,
 }
 
@@ -338,11 +383,22 @@ impl<'a> reg::Visitor for PrintRegs<'a> {
             )
             .unwrap();
 
-            let n = usize::try_from(<R::Bits as reg::Bits>::LENGTH).unwrap();
-            let data = &self.buffer[offset..][..n];
-            let bits = <R::Bits as reg::Bits>::from_bytes(data);
-            let value = R::from_bits(bits);
-            println!("{:?} = {value:?}", R::ADDRESS);
+            if let Some(offset) = offset.checked_sub(self.offset) {
+                let n = usize::try_from(<R::Bits as reg::Bits>::LENGTH).unwrap();
+                if offset + n <= self.buffer.len() {
+                    let data = &self.buffer[offset..][..n];
+                    let bits = <R::Bits as reg::Bits>::from_bytes(data);
+                    let value = R::from_bits(bits);
+                    println!("{:?} = {value:?}", R::ADDRESS);
+                }
+            }
         }
     }
+}
+
+fn hexyl(data: &[u8], offset: usize) {
+    let mut stdout = stdout();
+    let mut printer = hexyl::PrinterBuilder::new(&mut stdout).build();
+    printer.display_offset(offset.try_into().unwrap());
+    printer.print_all(Cursor::new(data)).unwrap();
 }
