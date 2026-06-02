@@ -9,10 +9,7 @@ pub use crate::device::{
     Device,
     OpenOptions,
 };
-use crate::tuner::{
-    AnyTunerError,
-    TunerError,
-};
+use crate::tuner::AnyTunerError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

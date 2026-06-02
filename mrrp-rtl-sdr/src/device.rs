@@ -60,7 +60,7 @@ impl Device {
             .with_i2c_repeater::<_, Error>(async |mut rtl2832u| {
                 options
                     .tuner_probe
-                    .try_open(&mut rtl2832u, &device_info)
+                    .try_open(&mut rtl2832u)
                     .await
                     .map_err(Into::into)
             })

@@ -5,10 +5,9 @@ use std::{
     pin::Pin,
 };
 
-use crate::{
-    enumerate::DeviceInfo,
-    rtl2832u::Rtl2832u,
-};
+use futures_util::TryFutureExt;
+
+use crate::rtl2832u::Rtl2832u;
 
 pub trait TunerError: std::error::Error + Send + Sync + Sized + 'static {}
 
@@ -16,11 +15,10 @@ pub trait TunerProbe: Clone + Debug + Sized + Send + 'static {
     type Error: TunerError;
     type Tuner: Tuner;
 
-    fn try_open(
-        &self,
-        rtl2832u: &mut Rtl2832u,
-        device_info: &DeviceInfo,
-    ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send;
+    fn try_open<'a>(
+        &'a self,
+        rtl2832u: &'a mut Rtl2832u,
+    ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a;
 }
 
 pub trait Tuner: Debug + Sized + Send + 'static {
@@ -46,16 +44,12 @@ impl TunerProbe for BultinTunerProbe {
     type Error = AnyTunerError;
     type Tuner = AnyTuner;
 
-    async fn try_open(
-        &self,
-        rtl2832u: &mut Rtl2832u,
-        device_info: &DeviceInfo,
-    ) -> Result<Option<Self::Tuner>, Self::Error> {
+    async fn try_open(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
         macro_rules! probe {
                 {$($probe:expr,)*} => {
                     $(
                         if let Some(tuner) = $probe
-                            .try_open(rtl2832u, device_info)
+                            .try_open(rtl2832u)
                             .await
                             .map_err(AnyTunerError::new)?
                         {
@@ -76,11 +70,10 @@ impl TunerProbe for BultinTunerProbe {
 trait AnyTunerProbeTrait: Debug + Send + 'static {
     fn any_clone(&self) -> AnyTunerProbe;
 
-    fn any_try_open(
-        &self,
-        rtl2832u: &mut Rtl2832u,
-        device_info: &DeviceInfo,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<AnyTuner>, AnyTunerError>> + Send>>;
+    fn any_try_open<'a>(
+        &'a self,
+        rtl2832u: &'a mut Rtl2832u,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<AnyTuner>, AnyTunerError>> + Send + 'a>>;
 }
 
 impl<T> AnyTunerProbeTrait for T
@@ -91,12 +84,15 @@ where
         AnyTunerProbe::new(self.clone())
     }
 
-    fn any_try_open(
-        &self,
-        rtl2832u: &mut Rtl2832u,
-        device_info: &DeviceInfo,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<AnyTuner>, AnyTunerError>> + Send>> {
-        todo!()
+    fn any_try_open<'a>(
+        &'a self,
+        rtl2832u: &'a mut Rtl2832u,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<AnyTuner>, AnyTunerError>> + Send + 'a>> {
+        Box::pin(
+            self.try_open(rtl2832u)
+                .map_ok(|tuner_opt| tuner_opt.map(AnyTuner::new))
+                .map_err(AnyTunerError::new),
+        )
     }
 }
 
@@ -130,12 +126,11 @@ impl TunerProbe for AnyTunerProbe {
     type Error = AnyTunerError;
     type Tuner = AnyTuner;
 
-    fn try_open(
-        &self,
-        rtl2832u: &mut Rtl2832u,
-        device_info: &DeviceInfo,
-    ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send {
-        self.0.any_try_open(rtl2832u, device_info)
+    fn try_open<'a>(
+        &'a self,
+        rtl2832u: &'a mut Rtl2832u,
+    ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a {
+        self.0.any_try_open(rtl2832u)
     }
 }
 

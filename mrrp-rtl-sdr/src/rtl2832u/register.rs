@@ -8,7 +8,7 @@ use nusb::transfer::{
     Recipient,
 };
 
-use crate::rtl2832u::I2cAddress;
+use crate::rtl2832u::i2c::I2cAddress;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Block {
@@ -93,7 +93,7 @@ impl Register {
             Register::Rom { address } => *address,
             Register::I2c {
                 i2c_address: address,
-            } => address.0.into(),
+            } => address.left_aligned().into(),
         }
     }
 
@@ -119,7 +119,7 @@ impl Register {
             Register::Rom { address } => *address,
             Register::I2c {
                 i2c_address: address,
-            } => address.0.into(),
+            } => address.left_aligned().into(),
         }
     }
 

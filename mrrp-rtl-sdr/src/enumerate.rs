@@ -77,7 +77,7 @@ impl DeviceInfo {
         self.usb.manufacturer_string()
     }
 
-    pub fn product_strring(&self) -> Option<&str> {
+    pub fn product_string(&self) -> Option<&str> {
         self.usb.product_string()
     }
 
