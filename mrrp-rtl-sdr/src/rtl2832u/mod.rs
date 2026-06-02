@@ -19,30 +19,41 @@
 pub mod filter;
 pub mod register;
 
-#[cfg(feature = "embedded-hal")]
-use std::convert::Infallible;
 use std::{
     fmt::Debug,
     time::Duration,
 };
 
-use crate::{
-    Error,
-    rtl2832u::{
-        filter::FirFilter,
-        register::{
-            self as reg,
-            Bits,
-            Register,
-            RegisterValue,
-        },
+use crate::rtl2832u::{
+    filter::FirFilter,
+    register::{
+        self as reg,
+        Bits,
+        Register,
+        RegisterValue,
     },
 };
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error(transparent)]
+    UsbTransfer(#[from] nusb::transfer::TransferError),
+
+    #[error(
+        "Invalid control response: expected {expected_length} bytes, but received {response_length} bytes."
+    )]
+    InvalidControlResponse {
+        expected_length: u16,
+        response_length: usize,
+    },
+}
 
 #[derive(Debug)]
 pub struct Rtl2832u {
     usb_interface: nusb::Interface,
     control_timeout: Duration,
+    scratch_buffer: Vec<u8>,
+    i2c_repeater_enabled: bool,
 }
 
 impl Rtl2832u {
@@ -50,6 +61,8 @@ impl Rtl2832u {
         Self {
             usb_interface,
             control_timeout,
+            scratch_buffer: vec![],
+            i2c_repeater_enabled: false,
         }
     }
 
@@ -305,18 +318,138 @@ impl Rtl2832u {
         Ok(())
     }
 
-    pub async fn read_i2c(&mut self, i2c_address: I2cAddress) -> Result<(), Error> {
-        self.read(Register::I2c { address: i2c_address.0 }, length)
-        todo!();
+    /// Reads data from the I2C device.
+    pub async fn read_i2c(
+        &mut self,
+        i2c_address: I2cAddress,
+        length: u16,
+    ) -> Result<Vec<u8>, Error> {
+        //        self.write(Register::I2c { i2c_address }, &[i2c_register])
+        //            .await?;
+
+        self.read(Register::I2c { i2c_address }, length).await
     }
 
-    pub async fn write_i2c(&mut self, i2c_address: I2cAddress) -> Result<(), Error> {
-        todo!();
+    /// Writes data to the I2C device.
+    pub async fn write_i2c(&mut self, i2c_address: I2cAddress, data: &[u8]) -> Result<(), Error> {
+        self.write(Register::I2c { i2c_address }, data).await
+    }
+
+    /// Reads a register from the I2C device.
+    ///
+    /// First writes the register address to the device, then reads back data.
+    pub async fn read_i2c_register(
+        &mut self,
+        i2c_address: I2cAddress,
+        i2c_register: u8,
+        length: u16,
+    ) -> Result<Vec<u8>, Error> {
+        self.write_i2c(i2c_address, &[i2c_register]).await?;
+        self.read_i2c(i2c_address, length).await
+    }
+
+    /// Writes data to the I2C device
+    pub async fn write_i2c_register(
+        &mut self,
+        i2c_address: I2cAddress,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        // take scratch buffer. can't borrow it because we call self.write
+        let mut buffer = std::mem::take(&mut self.scratch_buffer);
+        buffer.clear();
+        buffer.extend(std::iter::once(i2c_address.0).chain(data.iter().copied()));
+
+        self.write(Register::I2c { i2c_address }, &buffer).await?;
+
+        // give scratch buffer back
+        buffer.clear();
+        self.scratch_buffer = buffer;
+
+        Ok(())
+    }
+
+    pub async fn set_i2c_repeater(&mut self, on: bool) -> Result<(), Error> {
+        if self.i2c_repeater_enabled != on {
+            self.write_register_with::<reg::demod::SOFT_RST_IIC_REPEAT>(|iic_repeat| {
+                iic_repeat.set_iic_repeat(on);
+            })
+            .await?;
+
+            self.i2c_repeater_enabled = on;
+        }
+
+        Ok(())
+    }
+
+    pub async fn with_i2c_repeater<R, E>(
+        &mut self,
+        mut f: impl AsyncFnMut(&mut Self) -> Result<R, E>,
+    ) -> Result<R, E>
+    where
+        E: From<Error>,
+    {
+        self.set_i2c_repeater(true).await?;
+
+        let output = f(self).await;
+
+        let disable_result = self.set_i2c_repeater(false).await;
+
+        if output.is_ok()
+            && let Err(error) = disable_result
+        {
+            Err(error.into())
+        }
+        else {
+            output
+        }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct I2cAddress(pub u8);
+/// I2C address
+///
+/// This address is in the format the RTL2832U expects, i.e. it is left-aligned.
+/// This means the 7 bits of the address are in the 7 MSB bits, while the 0th
+/// bit is 0.
+///
+/// **Be careful** to use the right addressing scheme, or you could potentially
+/// write to the wrong device, e.g. the EEPROM.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct I2cAddress(u8);
+
+impl I2cAddress {
+    /// This is the format the RTL2832U expects.
+    pub fn from_left_aligned(address: u8) -> Self {
+        assert_eq!(
+            address & 1,
+            0,
+            "Address not left-aligned, or read-bit set: 0x{address:02x}"
+        );
+
+        Self(address)
+    }
+
+    /// Format used by e.g. `embedded_hal::i2c`
+    pub fn from_right_aligned(address: u8) -> Self {
+        assert_eq!(
+            address & 0x80,
+            0,
+            "Address not right-aligned, or read-bit set: 0x{address:02x}"
+        );
+
+        Self(address << 1)
+    }
+
+    /// Returns the "left-aligned" address
+    pub fn left_aligned(&self) -> u8 {
+        self.0
+    }
+}
+
+impl Debug for I2cAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:02x}", self.0)
+    }
+}
 
 /// # Arguments
 ///
@@ -328,18 +461,50 @@ pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
 }
 
 #[cfg(feature = "embedded-hal")]
+impl embedded_hal_async::i2c::Error for Error {
+    fn kind(&self) -> embedded_hal_async::i2c::ErrorKind {
+        // todo: can we determine the cause of an error?
+        embedded_hal_async::i2c::ErrorKind::Other
+    }
+}
+
+#[cfg(feature = "embedded-hal")]
 impl embedded_hal_async::i2c::ErrorType for Rtl2832u {
-    type Error = Infallible; // todo
+    type Error = Error;
 }
 
 #[cfg(feature = "embedded-hal")]
 impl embedded_hal_async::i2c::I2c for Rtl2832u {
+    /// # TODO
+    ///
+    /// Not supported. We need to check if we can uphold the transaction
+    /// contract required by `embedded_hal`.
     async fn transaction(
         &mut self,
         address: u8,
         operations: &mut [embedded_hal_async::i2c::Operation<'_>],
     ) -> Result<(), Self::Error> {
-        todo!()
+        let _ = (address, operations);
+        todo!(
+            "we need to check if we can uphold the transaction contract required by embedded_hal"
+        );
+    }
+
+    async fn read(&mut self, address: u8, read: &mut [u8]) -> Result<(), Self::Error> {
+        let data = self
+            .read_i2c(
+                I2cAddress::from_right_aligned(address),
+                read.len().try_into().unwrap(),
+            )
+            .await?;
+        read.copy_from_slice(&data);
+        Ok(())
+    }
+
+    async fn write(&mut self, address: u8, write: &[u8]) -> Result<(), Self::Error> {
+        self.write_i2c(I2cAddress::from_right_aligned(address), write)
+            .await?;
+        Ok(())
     }
 }
 

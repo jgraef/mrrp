@@ -8,6 +8,8 @@ use nusb::transfer::{
     Recipient,
 };
 
+use crate::rtl2832u::I2cAddress;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Block {
     Demod { page: u8 },
@@ -34,19 +36,28 @@ impl Block {
         }
     }
 
+    #[track_caller]
     pub fn with_address(&self, address: u16) -> Register {
         match self {
             Block::Demod { page } => {
+                if *page > 4 {
+                    panic!("Invalid demod page: {page}");
+                }
+
                 Register::Demod {
                     page: *page,
-                    address: address.try_into().unwrap(),
+                    address: address
+                        .try_into()
+                        .unwrap_or_else(|_| panic!("Invalid demod address: 0x{address:04x}")),
                 }
             }
             Block::Usb => Register::Usb { address },
             Block::System => Register::System { address },
             Block::Tuner => Register::Tuner { address },
             Block::Rom => Register::Rom { address },
-            Block::I2c => Register::I2c { address },
+            Block::I2c => {
+                panic!("Not possible to create an I2C register from block and address");
+            }
         }
     }
 }
@@ -58,7 +69,7 @@ pub enum Register {
     System { address: u16 },
     Tuner { address: u16 },
     Rom { address: u16 },
-    I2c { address: u16 },
+    I2c { i2c_address: I2cAddress },
 }
 
 impl Register {
@@ -69,7 +80,7 @@ impl Register {
             Register::System { address: _ } => Block::System,
             Register::Tuner { address: _ } => Block::Tuner,
             Register::Rom { address: _ } => Block::Rom,
-            Register::I2c { address: _ } => Block::I2c,
+            Register::I2c { i2c_address: _ } => Block::I2c,
         }
     }
 
@@ -80,7 +91,9 @@ impl Register {
             Register::System { address } => *address,
             Register::Tuner { address } => *address,
             Register::Rom { address } => *address,
-            Register::I2c { address } => *address,
+            Register::I2c {
+                i2c_address: address,
+            } => address.0.into(),
         }
     }
 
@@ -104,7 +117,9 @@ impl Register {
             Register::System { address } => *address,
             Register::Tuner { address } => *address,
             Register::Rom { address } => *address,
-            Register::I2c { address } => *address,
+            Register::I2c {
+                i2c_address: address,
+            } => address.0.into(),
         }
     }
 
@@ -118,7 +133,7 @@ impl Register {
             Register::System { address: _ } => 0x0200,
             Register::Tuner { address: _ } => 0x0300,
             Register::Rom { address: _ } => 0x0400,
-            Register::I2c { address: _ } => 0x0600,
+            Register::I2c { i2c_address: _ } => 0x0600,
         };
 
         if write {
