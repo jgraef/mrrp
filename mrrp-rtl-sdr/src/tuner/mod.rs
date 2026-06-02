@@ -15,6 +15,11 @@ pub trait TunerProbe: Clone + Debug + Sized + Send + 'static {
     type Error: TunerError;
     type Tuner: Tuner;
 
+    /// Probe for a tuner and return its initial state if one is found
+    ///
+    /// # Note
+    ///
+    /// The I2C repeater must be enabled by the caller.
     fn try_open<'a>(
         &'a self,
         rtl2832u: &'a mut Rtl2832u,

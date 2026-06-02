@@ -83,6 +83,10 @@ pub struct Rtl2832u {
 }
 
 impl Rtl2832u {
+    /// Creates a RTK2832U interface from a USB interface.
+    ///
+    /// This method doesn't initialize anything. It actually doesn't interact
+    /// with the device at all.
     pub fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
         Self {
             usb_interface,
@@ -93,10 +97,15 @@ impl Rtl2832u {
         }
     }
 
+    /// Read raw registers
+    ///
+    /// This is a low-level function that takes a dynamic register address (and
+    /// length) and returns the raw bytes from these registers. See
+    /// [`read_register`](Self::read_register) for a statically typed variant.
     pub async fn read(&mut self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
         let request = address.control_in(length);
 
-        tracing::debug!(?request, "sending control request");
+        tracing::trace!(?request, "sending control request");
 
         // wish they didn't allocate
         let response_data = self
@@ -114,10 +123,17 @@ impl Rtl2832u {
         Ok(response_data)
     }
 
+    /// Write raw registers
+    ///
+    /// This is a low-level function that takes a dynamic register address and
+    /// writes raw bytes to it. See [`write_register`](Self::write_register),
+    /// [`write_register_with`](Self::write_register_with),
+    /// and [`write_register_update`](Self::write_register_update) for
+    /// statically typed variants.
     pub async fn write(&mut self, address: Register, data: &[u8]) -> Result<(), Error> {
         let request = address.control_out(data);
 
-        tracing::debug!(?request, "sending control request");
+        tracing::trace!(?request, "sending control request");
 
         self.usb_interface
             .control_out(request, self.control_timeout)
@@ -125,6 +141,7 @@ impl Rtl2832u {
         Ok(())
     }
 
+    /// Read a statically typed [`Register`]
     pub async fn read_register<R>(&mut self) -> Result<R, Error>
     where
         R: RegisterValue,
@@ -148,6 +165,7 @@ impl Rtl2832u {
         }
     }
 
+    /// Write a statically typed [`Register`]
     pub async fn write_register<R>(&mut self, value: R) -> Result<(), Error>
     where
         R: RegisterValue,
@@ -164,6 +182,29 @@ impl Rtl2832u {
         Ok(())
     }
 
+    /// Read a statically typed [`Register`]
+    ///
+    /// This is a convenience wrapper around
+    /// [`write_register`](Self::write_register) that initializes
+    /// a buffer with its [`Default`] value (i.e. all zeros), and calls your
+    /// closure with it.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # use mrrp_rtl_sdr::rtl2832u::{Rtl2832u, Error, register::sys::DEMOD_CTL};
+    /// # async fn example() -> Result<(), Error> {
+    /// # let rtl2832u: Rtl2832u = todo!();
+    /// rtl2832u
+    ///     .write_register_with::<DEMOD_CTL>(|demod_ctl| {
+    ///         demod_ctl.set_pll_enable(true);
+    ///         demod_ctl.set_adc_i_enable(true);
+    ///         demod_ctl.set_hardware_reset(true);
+    ///         demod_ctl.set_adc_q_enable(true);
+    ///     })
+    ///     .await?;
+    /// # }
+    /// ```
     pub async fn write_register_with<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
     where
         R: RegisterValue,
@@ -365,6 +406,9 @@ impl Rtl2832u {
         tracing::debug!("resetting device");
 
         // todo: reset tuner
+
+        // turn off I2C repeater, if it is on.
+        self.set_i2c_repeater(false).await?;
 
         // `rtlsdr_deinit_baseband` sets DEMOD_CTL to 0x20, meaning PLL, ADC I/Q are
         // disabled, but the reset flag is inverted, so it's released. I think the PLL

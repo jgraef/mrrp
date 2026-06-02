@@ -114,7 +114,17 @@ impl Rtl2832u {
         tracing::debug!(?i2c_address, ?i2c_register, length, "read I2C registers");
 
         self.write_i2c(i2c_address, &[i2c_register.0]).await?;
-        self.read_i2c(i2c_address, length).await
+        let data = self.read_i2c(i2c_address, length).await?;
+
+        tracing::debug!(
+            ?i2c_address,
+            ?i2c_register,
+            length,
+            ?data,
+            "read I2C registers"
+        );
+
+        Ok(data)
     }
 
     /// Writes data to the I2C device
@@ -126,6 +136,7 @@ impl Rtl2832u {
     ) -> Result<(), Error> {
         tracing::debug!(?i2c_address, ?i2c_register, ?data, "write I2C registers");
 
+        /*
         // take scratch buffer. can't borrow it because we call self.write
         let mut buffer = std::mem::take(&mut self.scratch_buffer);
         buffer.clear();
@@ -138,12 +149,18 @@ impl Rtl2832u {
         self.scratch_buffer = buffer;
 
         Ok(())
+        */
+        todo!("write_i2c_register");
     }
 
     /// Enable the I2C repeater
     ///
     /// Connects the tuner to the I2C bus.
     pub async fn set_i2c_repeater(&mut self, on: bool) -> Result<(), Error> {
+        // note: with the shadow map we could also just do a write_register_update now.
+        // we think it's better to have a proper flag tracking this. then it still works
+        // if we decide to disable shadow on this register
+
         if self.i2c_repeater_enabled != on {
             self.write_register_with::<SOFT_RST_IIC_REPEAT>(|iic_repeat| {
                 iic_repeat.set_iic_repeat(on);
@@ -154,6 +171,10 @@ impl Rtl2832u {
         }
 
         Ok(())
+    }
+
+    pub fn i2c_repeater_enabled(&self) -> bool {
+        self.i2c_repeater_enabled
     }
 
     pub async fn with_i2c_repeater<R, E>(
@@ -240,9 +261,21 @@ impl I2cReadProbe {
         rtl2832u: &mut Rtl2832u,
         i2c_address: I2cAddress,
     ) -> Result<bool, Error> {
-        let data = rtl2832u
+        tracing::debug!(?i2c_address, register = ?self.register, expected_value = ?self.expected_value, "probing I2C");
+
+        let result = rtl2832u
             .read_i2c_register(i2c_address, self.register, 1)
-            .await?;
-        Ok(data[0] == self.expected_value)
+            .await;
+
+        tracing::debug!(?result, "probe result");
+
+        match result {
+            Ok(data) => Ok(data[0] == self.expected_value),
+            Err(Error::UsbTransfer(nusb::transfer::TransferError::Stall)) => {
+                // no device at this I2C address
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
     }
 }

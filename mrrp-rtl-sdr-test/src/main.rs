@@ -25,10 +25,14 @@ use clap::{
     Subcommand,
 };
 use dotenvy::dotenv;
-use mrrp_rtl_sdr::rtl2832u::{
-    Rtl2832u,
-    register::{
-        self as reg,
+use mrrp_rtl_sdr::{
+    Device,
+    enumerate::DeviceInfo,
+    rtl2832u::{
+        Rtl2832u,
+        register::{
+            self as reg,
+        },
     },
 };
 
@@ -126,6 +130,12 @@ async fn main() -> Result<(), Error> {
         }
         Command::BiasTee { serial, command } => {
             gpio_command(serial.as_deref(), 0, command).await?;
+        }
+        Command::Test { serial } => {
+            let device = open_device(serial.as_deref()).await?;
+            ////tracing::debug!(tuner = ?device.tuner());
+
+            device.close().await?;
         }
     }
 
@@ -227,6 +237,10 @@ enum Command {
         #[clap(subcommand)]
         command: GpioCommand,
     },
+    Test {
+        #[clap(short, long)]
+        serial: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -273,13 +287,11 @@ async fn gpio_command(serial: Option<&str>, pin: u8, command: GpioCommand) -> Re
     Ok(())
 }
 
-async fn open_rtl2832u(serial: Option<&str>) -> Result<Rtl2832u, Error> {
+async fn find_device(serial: Option<&str>) -> Result<DeviceInfo, Error> {
     for device_info in mrrp_rtl_sdr::enumerate_devices().await? {
         if serial.is_none() || device_info.serial_number() == serial {
             tracing::debug!(?device_info, "device found");
-
-            let rtl2832u = device_info.open_rtl2832u(Default::default()).await?;
-            return Ok(rtl2832u);
+            return Ok(device_info);
         }
     }
 
@@ -289,6 +301,17 @@ async fn open_rtl2832u(serial: Option<&str>) -> Result<Rtl2832u, Error> {
     else {
         Err(anyhow!("No device found"))
     }
+}
+
+async fn open_rtl2832u(serial: Option<&str>) -> Result<Rtl2832u, Error> {
+    Ok(find_device(serial)
+        .await?
+        .open_rtl2832u(Default::default())
+        .await?)
+}
+
+async fn open_device(serial: Option<&str>) -> Result<Device, Error> {
+    Ok(find_device(serial).await?.open(Default::default()).await?)
 }
 
 fn reg_dump_file_name_for_block(base: impl AsRef<Path>, block: reg::Block) -> PathBuf {

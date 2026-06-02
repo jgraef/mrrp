@@ -1100,7 +1100,7 @@ pub mod demod {
         ///
         /// This is in the dvbt driver
         ///
-        /// ```no_run
+        /// ```plain
         /// SM_PASS: u16 = demod(1, 0x93) {
         ///     /// SM_PASS: 1, 0x93
         ///     pub u16, sm_pass, set_sm_pass: 11, 0;

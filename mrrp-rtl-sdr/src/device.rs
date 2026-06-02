@@ -40,6 +40,8 @@ impl Device {
         device_info: DeviceInfo,
         options: Options,
     ) -> Result<Self, Error> {
+        // todo: should we try to reset the device if initialization fails?
+
         // initialize baseband
         rtl2832u.initialize().await?;
 
@@ -69,7 +71,7 @@ impl Device {
         })
     }
 
-    pub async fn reset(mut self) -> Result<(), Error> {
+    pub async fn close(mut self) -> Result<(), Error> {
         if let Some(mut inner) = self.inner.take() {
             inner.reset().await?;
         }
@@ -77,8 +79,19 @@ impl Device {
         Ok(())
     }
 
+    #[inline(always)]
     pub fn device_info(&self) -> &DeviceInfo {
         &self.device_info
+    }
+
+    #[inline(always)]
+    fn expect_inner_mut(&mut self) -> &mut Inner {
+        self.inner.as_mut().expect("device lost")
+    }
+
+    // for testing only
+    pub fn tuner(&mut self) -> &mut AnyTuner {
+        &mut self.expect_inner_mut().tuner
     }
 }
 
@@ -100,6 +113,8 @@ impl Inner {
 
 impl Drop for Device {
     fn drop(&mut self) {
+        tracing::debug!(reset_on_drop = ?self.reset_on_drop, inner_present = self.inner.is_some(), "device dropped");
+
         if self.reset_on_drop
             && let Some(mut inner) = self.inner.take()
         {

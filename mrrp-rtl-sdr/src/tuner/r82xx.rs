@@ -45,14 +45,15 @@ impl TunerProbe for R82xxProbe {
 }
 
 async fn probe(rtl2832u: &mut Rtl2832u) -> Result<bool, Error> {
+    tracing::debug!("probing for R820T");
     if I2C_PROBE.probe(rtl2832u, R820T_I2C_ADDR).await? {
         tracing::debug!("R820T found");
         return Ok(true);
     }
 
-    if I2C_PROBE.probe(rtl2832u, R820T_I2C_ADDR).await? {
+    tracing::debug!("probing for R828D");
+    if I2C_PROBE.probe(rtl2832u, R828D_I2C_ADDR).await? {
         tracing::debug!("R828D found");
-
         return Ok(true);
     }
 
