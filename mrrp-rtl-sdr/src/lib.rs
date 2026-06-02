@@ -5,10 +5,7 @@ pub mod tuner;
 
 pub use enumerate::enumerate_devices;
 
-pub use crate::device::{
-    Device,
-    OpenOptions,
-};
+pub use crate::device::Device;
 use crate::tuner::AnyTunerError;
 
 #[derive(Debug, thiserror::Error)]
@@ -36,4 +33,10 @@ pub async fn open_any(options: OpenOptions) -> Result<Device, Error> {
         .ok_or(Error::NoDeviceFound)?
         .open(options)
         .await
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct OpenOptions {
+    pub device: device::Options,
+    pub rtl2832u: rtl2832u::Options,
 }

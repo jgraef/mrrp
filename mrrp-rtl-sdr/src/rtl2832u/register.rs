@@ -343,7 +343,7 @@ macro_rules! registers {
     (@generate_code(($($attrs:meta)*), $name:ident, $int:ty, $address:expr, )) => {
         $(#[$attrs])*
         #[allow(non_camel_case_types)]
-        #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
         pub struct $name(pub $int);
 
         registers!(@generate_impls($name, $int, $address));
@@ -352,7 +352,7 @@ macro_rules! registers {
         bitfield! {
             $(#[$attrs])*
             #[allow(non_camel_case_types)]
-            #[derive(Clone, Copy, PartialEq, Eq)]
+            #[derive(Clone, Copy, PartialEq, Eq, Default)]
             pub struct $name($int);
             impl Debug;
             impl new;
@@ -391,15 +391,6 @@ macro_rules! registers {
                 value.0
             }
         }
-
-        #[automatically_derived]
-        impl Default for $name {
-            #[inline(always)]
-            fn default() -> Self {
-                Self(Default::default())
-            }
-        }
-
     }
 }
 
@@ -511,24 +502,16 @@ pub mod sys {
         };
 
         /// Output Value for General-Purpose I/O
-        GPO: u8 = sys(0x3001) {
-            // todo
-        };
+        GPO: u8 = sys(0x3001);
 
         /// Input Value for General-Purpose I/O
-        GPI: u8 = sys(0x3002) {
-            // todo
-        };
+        GPI: u8 = sys(0x3002);
 
         /// Output Enable for General-Purpose I/O
-        GPOE: u8 = sys(0x3003) {
-            // todo
-        };
+        GPOE: u8 = sys(0x3003);
 
         /// Direction Control for General-Purpose I/O
-        GPD: u8 = sys(0x3004) {
-            // todo
-        };
+        GPD: u8 = sys(0x3004);
 
         /// System Interrupt Enable Register
         SYSINTE: u8 = sys(0x3005) {

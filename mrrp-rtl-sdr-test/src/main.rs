@@ -25,9 +25,9 @@ use clap::{
     Subcommand,
 };
 use dotenvy::dotenv;
-use mrrp_rtl_sdr::{
-    Device,
-    rtl2832u::register::{
+use mrrp_rtl_sdr::rtl2832u::{
+    Rtl2832u,
+    register::{
         self as reg,
     },
 };
@@ -45,15 +45,12 @@ async fn main() -> Result<(), Error> {
                 println!("{device_info:#?}");
             }
         }
-        Command::Open { serial } => {
-            let mut device = open_device(serial.as_deref()).await?;
-            let rtl2832u = device.rtl2832u();
-
-            rtl2832u.initialize().await?;
+        Command::PoweronDemod { serial } => {
+            let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            rtl2832u.poweron_demod().await?;
         }
         Command::Reset { serial } => {
-            let mut device = open_device(serial.as_deref()).await?;
-            let rtl2832u = device.rtl2832u();
+            let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
             rtl2832u.reset().await?;
         }
         Command::ParseDemodRegs => {
@@ -112,8 +109,7 @@ async fn main() -> Result<(), Error> {
 
             let mut writer = BufWriter::new(File::create(&output)?);
 
-            let mut device = open_device(serial.as_deref()).await?;
-            let rtl2832u = device.rtl2832u();
+            let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
 
             let data = rtl2832u
                 .read(reg::Register::Rom { address: 0 }, length)
@@ -121,14 +117,15 @@ async fn main() -> Result<(), Error> {
 
             writer.write_all(&data)?;
         }
-        Command::I2cProbe { .. } => {
-            //let mut device = open_device(serial.as_deref()).await?;
-            //let rtl2832u = device.rtl2832u();
-
-            // don't know if we can mess something up with this. if we read only the EEPROM
-            // should not be modified at least.
-
-            todo!();
+        Command::Gpio {
+            serial,
+            pin,
+            command,
+        } => {
+            gpio_command(serial.as_deref(), pin, command).await?;
+        }
+        Command::BiasTee { serial, command } => {
+            gpio_command(serial.as_deref(), 0, command).await?;
         }
     }
 
@@ -143,16 +140,26 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// List available devices
     List,
-    Open {
+    /// Power-on the DEMOD chip.
+    ///
+    /// This can be useful for e.g. dumping its registers
+    PoweronDemod {
         #[clap(short, long)]
         serial: Option<String>,
     },
+    /// Reset
+    ///
+    /// This doesn't perform a soft or hard reset (via the bits), but turns off
+    /// the DEMOD chip and disables all GPIO outputs.
     Reset {
         #[clap(short, long)]
         serial: Option<String>,
     },
+    #[clap(hide = true)]
     ParseDemodRegs,
+    /// Dump registers
     DumpRegs {
         #[clap(short, long)]
         serial: Option<String>,
@@ -175,6 +182,7 @@ enum Command {
         #[clap(short, long)]
         output: Option<PathBuf>,
     },
+    /// Print register dump
     PrintRegDump {
         path: Option<PathBuf>,
         #[clap(short, long)]
@@ -186,6 +194,9 @@ enum Command {
         #[clap(short = 'H', long)]
         hexdump: bool,
     },
+    /// Dump ROM code
+    ///
+    /// Doesn't seem to work.
     DumpRomCode {
         #[clap(short, long)]
         serial: Option<String>,
@@ -196,24 +207,79 @@ enum Command {
         #[clap(short, long)]
         length: u16,
     },
-    I2cProbe {
+    /// Control GPIO pins
+    Gpio {
         #[clap(short, long)]
         serial: Option<String>,
 
-        first: Option<u16>,
+        pin: u8,
 
-        last: Option<u16>,
+        #[clap(subcommand)]
+        command: GpioCommand,
+    },
+    /// Control Bias-Tee
+    ///
+    /// This is just an alias for `gpio 0`.
+    BiasTee {
+        #[clap(short, long)]
+        serial: Option<String>,
+
+        #[clap(subcommand)]
+        command: GpioCommand,
     },
 }
 
-async fn open_device(serial: Option<&str>) -> Result<Device, Error> {
+#[derive(Debug, Subcommand)]
+enum GpioCommand {
+    Mode,
+    Read {
+        #[clap(short, long)]
+        output_state: bool,
+    },
+    Write {
+        // we can't use bool directly here or clap assumes this is a flag.
+        #[arg(value_parser = clap::builder::BoolishValueParser::new())]
+        value: GpioValue,
+    },
+}
+
+type GpioValue = bool;
+
+async fn gpio_command(serial: Option<&str>, pin: u8, command: GpioCommand) -> Result<(), Error> {
+    let mut rtl2832u = open_rtl2832u(serial).await?;
+
+    match command {
+        GpioCommand::Mode => {
+            let mode = rtl2832u.gp_direction(pin).await?;
+            println!("{mode:?}");
+        }
+        GpioCommand::Read { output_state } => {
+            let state = if output_state {
+                let mut pin = rtl2832u.gp_output(pin).await?;
+                pin.get_state().await?
+            }
+            else {
+                let mut pin = rtl2832u.gp_input(pin).await?;
+                pin.read().await?
+            };
+            println!("{state:?}");
+        }
+        GpioCommand::Write { value } => {
+            let mut pin = rtl2832u.gp_output(pin).await?;
+            pin.write(value).await?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn open_rtl2832u(serial: Option<&str>) -> Result<Rtl2832u, Error> {
     for device_info in mrrp_rtl_sdr::enumerate_devices().await? {
         if serial.is_none() || device_info.serial_number() == serial {
             tracing::debug!(?device_info, "device found");
 
-            let device = device_info.open(Default::default()).await?;
-
-            return Ok(device);
+            let rtl2832u = device_info.open_rtl2832u(Default::default()).await?;
+            return Ok(rtl2832u);
         }
     }
 
@@ -258,8 +324,7 @@ async fn dump_regs(
     rom: bool,
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
-    let mut device = open_device(serial).await?;
-    let rtl2832u = device.rtl2832u();
+    let mut rtl2832u = open_rtl2832u(serial).await?;
 
     let mut dump_block = async |block: reg::Block| {
         let base_address = block.base_address().unwrap_or_default();

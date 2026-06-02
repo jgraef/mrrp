@@ -17,6 +17,7 @@
 //! [4]: https://code.googlesource.com/linux/torvalds/linux/+/6d36c728bc2e2d632f4b0dea00df5532e20dfdab/drivers/media/dvb-frontends/rtl2832_sdr.c
 
 pub mod filter;
+pub mod gpio;
 pub mod i2c;
 pub mod register;
 
@@ -49,6 +50,21 @@ pub enum Error {
     },
 }
 
+#[derive(Clone, Debug)]
+pub struct Options {
+    pub detach_kernel_driver: bool,
+    pub control_timeout: Duration,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Self {
+            detach_kernel_driver: false,
+            control_timeout: Duration::from_secs(5),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Rtl2832u {
     usb_interface: nusb::Interface,
@@ -58,7 +74,7 @@ pub struct Rtl2832u {
 }
 
 impl Rtl2832u {
-    pub(crate) fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
+    pub fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
         Self {
             usb_interface,
             control_timeout,
@@ -136,6 +152,23 @@ impl Rtl2832u {
         f(&mut value);
 
         self.write_register(value).await
+    }
+
+    pub async fn write_register_update<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
+    where
+        R: RegisterValue + Default + Debug + PartialEq + Clone,
+        <R as RegisterValue>::Bits: Debug,
+    {
+        let current_value = self.read_register::<R>().await?;
+
+        let mut new_value = current_value.clone();
+        f(&mut new_value);
+
+        if new_value != current_value {
+            self.write_register(new_value).await?;
+        }
+
+        Ok(())
     }
 
     pub async fn initialize(&mut self) -> Result<(), Error> {
@@ -301,6 +334,14 @@ impl Rtl2832u {
         Ok(())
     }
 
+    pub async fn poweron_demod(&mut self) -> Result<(), Error> {
+        self.write_register_with::<reg::sys::DEMOD_CTL>(|demod_ctl| {
+            demod_ctl.set_pll_enable(true);
+        })
+        .await?;
+        Ok(())
+    }
+
     pub async fn reset(&mut self) -> Result<(), Error> {
         tracing::debug!("resetting device");
 
@@ -315,6 +356,9 @@ impl Rtl2832u {
             demod_ctl.set_hardware_reset(true);
         })
         .await?;
+
+        // disable GPIO outputs
+        self.write_register::<reg::sys::GPOE>(0.into()).await?;
 
         Ok(())
     }

@@ -8,6 +8,10 @@ use crate::{
     Device,
     Error,
     OpenOptions,
+    rtl2832u::{
+        self,
+        Rtl2832u,
+    },
 };
 
 pub async fn enumerate_devices() -> Result<EnumerateDevices, Error> {
@@ -90,7 +94,23 @@ impl DeviceInfo {
     }
 
     pub async fn open(self, options: OpenOptions) -> Result<Device, Error> {
-        Device::open(self, options).await
+        let rtl2832u = self.open_rtl2832u(options.rtl2832u).await?;
+        Device::from_rtl2832u(rtl2832u, self, options.device).await
+    }
+
+    pub async fn open_rtl2832u(&self, options: rtl2832u::Options) -> Result<Rtl2832u, Error> {
+        let usb_device = self.usb.open().await?;
+
+        const INTERFACE: u8 = 0;
+
+        if options.detach_kernel_driver {
+            usb_device.detach_kernel_driver(INTERFACE)?;
+        }
+
+        let usb_interface = usb_device.claim_interface(INTERFACE).await?;
+
+        // create interface to RTL2832U device
+        Ok(Rtl2832u::new(usb_interface, options.control_timeout))
     }
 }
 
