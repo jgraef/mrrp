@@ -1,5 +1,11 @@
-use std::ops::Deref;
+//! FIR filter used by demod.
+//!
+//! This can be written to
+//! [`UNK_FIR_FILTER`](super::register::demod::UNK_FIR_FILTER).
+//!
+//! Refer to the [`FirFilter`] documentation for more details.
 
+/// The provided filter coefficients are invalid
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 pub enum InvalidFilter {
     #[error("FIR Filter coefficient out of range at index {index}")]
@@ -9,6 +15,25 @@ pub enum InvalidFilter {
     InvalidLength { length: usize },
 }
 
+/// FIR filter
+///
+/// This contains the filter coefficients. The filter is symmetric, so only half
+/// the coefficients are stored. The center coefficient is at the last index.
+///
+/// The first 8 coefficients coefficients must be 8-bit signed. The remaining 8
+/// coefficients must be 12-bit signed.
+///
+/// There are conversion traits from and to `[i16; 16]` implemented. [`TryFrom`]
+/// is used to convert to [`FirFilter`], since it has to check that all filter
+/// coefficients are in range.
+///
+/// # TODO
+///
+/// What scale do coefficients use? Is the scale different between 8-bit and
+/// 12-bit?
+///
+/// # Notes
+///
 /// Linux uses
 /// `\xca\xdc\xd7\xd8\xe0\xf2\x0e\x35\x06\x50\x9c\x0d\x71\x11\x14\x71\x74\x19\
 /// x41\xa5`.
@@ -49,12 +74,18 @@ pub struct FirFilter {
 }
 
 impl FirFilter {
+    /// The default filter coefficients used by the Linux and Windows DVBT
+    /// drivers.
     pub const DEFAULT: Self = Self {
         coefficients: [
             -54, -36, -41, -40, -32, -14, 14, 53, 101, 156, 215, 273, 327, 372, 404, 421,
         ],
     };
 
+    /// Decode from compressed representation
+    ///
+    /// This representation is used by the
+    /// [`UNK_FIR_FILTER`](super::register::demod::UNK_FIR_FILTER) register.
     pub fn decode(buffer: &[u8; 20]) -> Self {
         let mut coefficients = [0; 16];
 
@@ -85,6 +116,10 @@ impl FirFilter {
         Self { coefficients }
     }
 
+    /// Encode into compressed representation
+    ///
+    /// This representation is used by the
+    /// [`UNK_FIR_FILTER`](super::register::demod::UNK_FIR_FILTER) register.
     pub fn encode(&self, buffer: &mut [u8; 20]) {
         for i in 0..8 {
             buffer[i] = i8::try_from(self.coefficients[i]).unwrap().cast_unsigned();
@@ -106,16 +141,9 @@ impl FirFilter {
 }
 
 impl Default for FirFilter {
+    /// Returns the [default filter](`Self::DEFAULT`).
     fn default() -> Self {
         Self::DEFAULT
-    }
-}
-
-impl Deref for FirFilter {
-    type Target = [i16];
-
-    fn deref(&self) -> &Self::Target {
-        &self.coefficients
     }
 }
 

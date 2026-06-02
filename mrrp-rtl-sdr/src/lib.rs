@@ -1,3 +1,5 @@
+//! From-scratch implementation of RTL-SDR driver library for async Rust.
+
 mod device;
 pub mod enumerate;
 pub mod rtl2832u;

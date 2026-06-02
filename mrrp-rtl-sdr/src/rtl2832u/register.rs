@@ -1,3 +1,8 @@
+//! Types for working with registers.
+//!
+//! A big portion of this module is generated via a macro, so it's not the
+//! prettiest, but is also not intended to be.
+
 use std::fmt::Debug;
 
 use bitfield::bitfield;
@@ -10,13 +15,48 @@ use nusb::transfer::{
 
 use crate::rtl2832u::i2c::I2cAddress;
 
+/// A register block.
+///
+/// These correspond to different systems on the chip
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Block {
+    /// Demodulator
+    ///
+    /// Split into 5 pages `0..=4`
     Demod { page: u8 },
+    /// USB
+    ///
+    /// Configures USB interface
     Usb,
+    /// System
+    ///
+    /// This is a 8051 processor. The registers manage interrupts, GPIO, IR.
+    /// [`DEMOD_CTL`](sys::DEMOD_CTL) is important as it is used to power on
+    /// the demod system.
     System,
+    /// Tuner
+    ///
+    /// This seems to be unused. Instead the tuners are controlled via I2C.
     Tuner,
+
+    /// ROM code
+    ///
+    /// The datasheet only refers to this as "ROM Code". It might contain the
+    /// firmware. But it seems to be locked down. Reading various block sizes
+    /// from it failed when we tried it.
+    ///
+    /// Note that there is a separate EEPROM chip (not in the RTL2832U) that
+    /// contains various settings (e.g. USB vendor ID, product ID, etc.). But
+    /// the EEPROM is accessed via I2C.
     Rom,
+
+    /// I2C relay
+    ///
+    /// This allows you to read and write to I2C devices on chip. When
+    /// [`IIC_repeat`](demod::SOFT_RST_IIC_REPEAT) is enabled this allows you to
+    /// talk to the tuner.
+    ///
+    /// This uses left-aligned I2C addresses.
     I2c,
 }
 
@@ -36,6 +76,11 @@ impl Block {
         }
     }
 
+    /// Get a register address from this block with the given address.
+    ///
+    /// Note that for usb, system and tuner blocks you'll have to add a [base
+    /// address](Self::base_address) to the register offset to obtain this
+    /// address.
     #[track_caller]
     pub fn with_address(&self, address: u16) -> Register {
         match self {
@@ -62,17 +107,30 @@ impl Block {
     }
 }
 
+/// A register address
+///
+/// Block addresses must include base addresses where applicable (usb, system,
+/// tuner).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Register {
+    /// Register in demod block
     Demod { page: u8, address: u8 },
+    /// Register in USB block
     Usb { address: u16 },
+    /// Register in system block
     System { address: u16 },
+    /// Tuner block (unusued)
     Tuner { address: u16 },
+    /// ROM (might be locked down)
     Rom { address: u16 },
+    /// I2C relay
+    ///
+    /// `i2c_address` is a left-aligned I2C device address.
     I2c { i2c_address: I2cAddress },
 }
 
 impl Register {
+    /// Return the block this register belongs to.
     pub fn block(&self) -> Block {
         match self {
             Register::Demod { page, address: _ } => Block::Demod { page: *page },
@@ -84,6 +142,10 @@ impl Register {
         }
     }
 
+    /// Return the address of this address.
+    ///
+    /// For usb, system and tuner blocks the returned address includes the base
+    /// address. For I2C the left-aligned I2C device address is returned.
     pub fn address(&self) -> u16 {
         match self {
             Register::Demod { page: _, address } => (*address).into(),
@@ -97,6 +159,7 @@ impl Register {
         }
     }
 
+    /// The `wValue` for an USB request
     pub fn w_value(&self) -> u16 {
         match self {
             Register::Demod { page: _, address } => {
@@ -123,6 +186,7 @@ impl Register {
         }
     }
 
+    /// The `wIndex` for an USB request
     pub fn w_index(&self, write: bool) -> u16 {
         let mut w_index = match self {
             Register::Demod { page, address: _ } => {
@@ -143,6 +207,7 @@ impl Register {
         w_index
     }
 
+    /// USB control request to read from this register.
     pub fn control_in(&self, length: u16) -> ControlIn {
         ControlIn {
             // bmRequestType, vendor command
@@ -160,6 +225,7 @@ impl Register {
         }
     }
 
+    /// USB control request to write to this register.
     pub fn control_out<'a>(&self, data: &'a [u8]) -> ControlOut<'a> {
         ControlOut {
             // bmRequestType, vendor command
@@ -177,19 +243,28 @@ impl Register {
         }
     }
 
+    /// Create a demod address
     pub const fn demod(page: u8, address: u8) -> Self {
         Self::Demod { page, address }
     }
 
+    /// Create an USB address
     pub const fn usb(address: u16) -> Self {
         Self::Usb { address }
     }
 
+    /// Create a system address
     pub const fn sys(address: u16) -> Self {
         Self::System { address }
     }
 }
 
+/// A value from a specific register.
+///
+/// All registers are statically typed with getters and setters for individual
+/// fields in their bits (if applicable). This trait defines how to convert from
+/// this register value to plain bit type, e.g. `u8`, `u32`, but also large
+/// registers `[u8; 20]`.
 pub trait RegisterValue: Debug {
     const ADDRESS: Register;
     type Bits: Bits;
@@ -198,6 +273,9 @@ pub trait RegisterValue: Debug {
     fn as_bits(&self) -> Self::Bits;
 }
 
+/// Plain bits type for a register
+///
+/// Defines conversion from and to bytes.
 pub trait Bits {
     type Bytes: AsRef<[u8]>;
     const LENGTH: u16;
@@ -262,6 +340,7 @@ impl<const N: usize> Bits for [u8; N] {
     }
 }
 
+/// Visitor trait for iterating over all [`RegisterValue`] implementations
 pub trait Visitor {
     fn visit<R>(&mut self)
     where
@@ -281,6 +360,7 @@ where
     }
 }
 
+/// Filtered register visitor.
 #[derive(Clone, Copy, Debug)]
 pub struct FilterVisitor<V, F> {
     pub inner: V,
@@ -308,11 +388,57 @@ where
     }
 }
 
+/// Visit all register types.
+///
+/// This calls your visitor. The register type is "passed" as type parameter to
+/// the [`visit`](Visitor::visit) method.
 pub fn visit(mut visitor: impl Visitor) {
     demod::visit(&mut visitor);
     sys::visit(&mut visitor);
     usb::visit(&mut visitor);
     // todo: others
+}
+
+pub mod shadow {
+    //! A shadow map is a local cache for register values.
+    //!
+    //! This is used to avoid redundant reads from the device. Each block has
+    //! its own `ShadowBlock` struct in the respective module - generated by the
+    //! `registers` macro. These are combined in [`ShadowMap`].
+
+    /// Helper trait to get a specific block from the shadow map.
+    pub trait GetShadowBlock<Block> {
+        fn get(&self) -> &Block;
+        fn get_mut(&mut self) -> &mut Block;
+    }
+
+    /// Trait for reading register values from a shadow block.
+    ///
+    /// This basically defines which value to read from the shadow block struct.
+    /// Implementations are generated by the `registers` macro.
+    pub trait ShadowRead {
+        type Block;
+
+        fn read(map: &Self::Block) -> Option<&Self>;
+    }
+
+    /// Trait for writing register values into a shadow block.
+    ///
+    /// This basically defines which value to write into the shadow block
+    /// struct. Implementations are generated by the `registers` macro.
+    pub trait ShadowWrite {
+        type Block;
+
+        fn write(&self, map: &mut Self::Block);
+    }
+
+    /// The shadow map consisting of all (used) blocks.
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct ShadowMap {
+        pub demod: super::demod::ShadowBlock,
+        pub usb: super::usb::ShadowBlock,
+        pub sys: super::sys::ShadowBlock,
+    }
 }
 
 /// Macro that lets us define registers more easily
@@ -326,13 +452,48 @@ macro_rules! registers {
             registers!(@generate_code(($($attrs)*), $name, $int, registers!(@parse_address($block, $args)), $({$($fields)*})?));
         )*
 
+        /// All register addresses in this block
         pub const ALL: &[Register] = &[$($name::ADDRESS),*];
 
+        /// Visit all registers in this block.
+        ///
+        /// See [`super::visit`]
         pub fn visit(mut visitor: impl Visitor) {
             $(
                 visitor.visit::<$name>();
             )*
         }
+
+        #[allow(non_snake_case)]
+        #[derive(Clone, Copy, Debug, Default)]
+        pub struct ShadowBlock {
+            $(
+                pub $name: Option<$name>,
+            )*
+        }
+
+        $(
+            #[automatically_derived]
+            impl shadow::ShadowRead for $name {
+                type Block = ShadowBlock;
+
+                #[inline(always)]
+                fn read(map: &Self::Block) -> Option<&Self> {
+                    map.$name.as_ref()
+                }
+            }
+
+            #[automatically_derived]
+            impl shadow::ShadowWrite for $name {
+                type Block = ShadowBlock;
+
+                #[inline(always)]
+                fn write(&self, map: &mut Self::Block) {
+                    map.$name = Some(*self);
+                }
+            }
+        )*
+
     };
     (@parse_address(demod, ($page:expr, $address:expr))) => {
         Register::demod($page, $address)
@@ -433,7 +594,19 @@ macro_rules! make_enum {
 }
 
 pub mod usb {
+    //! USB block registers
+
     use super::*;
+
+    impl shadow::GetShadowBlock<ShadowBlock> for shadow::ShadowMap {
+        fn get(&self) -> &ShadowBlock {
+            &self.usb
+        }
+
+        fn get_mut(&mut self) -> &mut ShadowBlock {
+            &mut self.usb
+        }
+    }
 
     registers! {
         SYSCTL: u32 = usb(0x2000) {
@@ -489,7 +662,19 @@ pub mod usb {
 }
 
 pub mod sys {
+    //! System block registers
+
     use super::*;
+
+    impl shadow::GetShadowBlock<ShadowBlock> for shadow::ShadowMap {
+        fn get(&self) -> &ShadowBlock {
+            &self.sys
+        }
+
+        fn get_mut(&mut self) -> &mut ShadowBlock {
+            &mut self.sys
+        }
+    }
 
     registers! {
         /// Control register for DVB-T Demodulator
@@ -563,8 +748,20 @@ pub mod sys {
 }
 
 pub mod demod {
-    pub use super::*;
+    //! demod block registers
+
+    use super::*;
     use crate::rtl2832u::FirFilter;
+
+    impl shadow::GetShadowBlock<ShadowBlock> for shadow::ShadowMap {
+        fn get(&self) -> &ShadowBlock {
+            &self.demod
+        }
+
+        fn get_mut(&mut self) -> &mut ShadowBlock {
+            &mut self.demod
+        }
+    }
 
     // this seems to be a better list of registers:
     // https://github.com/jaredquinn/DVB-Realtek-RTL2832U/blob/3c9e21225d2292fe0e6b885cd861fbebb890918a/src/demod_rtl2832.c#L1631
@@ -816,7 +1013,7 @@ pub mod demod {
         };
         /// Not in datasheet, but both librtlsdr and the linux sdr driver put a 20 byte FIR filter here.
         ///
-        /// See [`FirFilter`](super::FirFilter)
+        /// See [`FirFilter`]
         UNK_FIR_FILTER: [u8; 20] = demod(1, 0x1c);
         EN_CACQ_NOTCH: u8 = demod(1, 0x61) {
             /// EN_CACQ_NOTCH: 1, 0x61

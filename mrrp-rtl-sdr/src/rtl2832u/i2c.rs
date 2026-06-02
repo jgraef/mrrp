@@ -1,3 +1,22 @@
+//! I2C functions
+//!
+//! You can read and write to the I2C bus via [`read_i2c`](Rtl2832u::read_i2c),
+//! [`read_i2c_register`](Rtl2832u::write_i2c),
+//! [`write_i2c`](Rtl2832u::write_i2c), and
+//! [`write_i2c_register`](Rtl2832u::write_i2c_register).
+//!
+//! The tuner chip is usually disconnected from the rest of the bus. It can be
+//! enabled via the [`IIC_repeat`](SOFT_RST_IIC_REPEAT) flag.
+//!
+//! # Features
+//!
+//! If the `embedded-hal` feature is enabled,
+//! [`embedded_hal_async::i2c::I2c`][1] is implemented for [`Rtl2832u`]. At the
+//! time of writing the transaction functionality is not implemented. Note that
+//! `embedded-hal` uses right-aligned addresses.
+//!
+//! [1]: https://docs.rs/embedded-hal-async/latest/embedded_hal_async/i2c/trait.I2c.html
+
 use std::fmt::Debug;
 
 use crate::rtl2832u::{
@@ -44,6 +63,7 @@ impl I2cAddress {
         self.0
     }
 
+    /// Returns the "right-aligned" address
     pub fn right_aligned(&self) -> u8 {
         self.0 >> 1
     }

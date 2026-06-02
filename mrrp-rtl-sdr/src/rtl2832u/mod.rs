@@ -50,9 +50,15 @@ pub enum Error {
     },
 }
 
+/// Options for [`Rtl2832u`]
 #[derive(Clone, Debug)]
 pub struct Options {
+    /// Detach the kernel driver before claiming the USB interface.
+    ///
+    /// This only works on Linux, and is ignored on other platforms.
     pub detach_kernel_driver: bool,
+
+    /// Timeout for a control operation. Default is 5 seconds.
     pub control_timeout: Duration,
 }
 
@@ -65,6 +71,7 @@ impl Default for Options {
     }
 }
 
+/// Low-level interface to the `RTL2832U` chip via USB.
 #[derive(Debug)]
 pub struct Rtl2832u {
     usb_interface: nusb::Interface,
@@ -364,6 +371,9 @@ impl Rtl2832u {
     }
 }
 
+/// Calculate [`pset_iffreq`](reg::demod::PSET_IFFREQ) value from intermediate
+/// frequency and crystal frequency.
+///
 /// # Arguments
 ///
 /// - `f_if_d`: Intermediate frequency (IF) after sub-sampling
