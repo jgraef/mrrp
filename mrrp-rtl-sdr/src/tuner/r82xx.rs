@@ -67,21 +67,3 @@ pub struct R82xx {
 impl Tuner for R82xx {
     type Error = Error;
 }
-
-/*
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BlogV4Variant {
-    V4,
-    V4L,
-}
-
-            let blog_v4_variant = match (
-                device_info.manufacturer_string(),
-                device_info.product_string(),
-            ) {
-                (Some("RTLSDRBlog"), Some("Blog V4")) => Some(BlogV4Variant::V4),
-                (Some("RTLSDRBlog"), Some("Blog V4L")) => Some(BlogV4Variant::V4L),
-                _ => None,
-            };
-*/

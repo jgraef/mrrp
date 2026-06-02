@@ -10,23 +10,23 @@ use crate::{
     OpenOptions,
 };
 
-pub async fn enumerate_devices() -> Result<EnumerateDevices<'static>, Error> {
+pub async fn enumerate_devices() -> Result<EnumerateDevices, Error> {
     Ok(EnumerateDevices {
         devices: Box::new(nusb::list_devices().await?),
-        known_devices: KnownDevices::builtin(),
+        known_devices: BuiltinKnownDevices::builtin(),
     })
 }
 
 #[derive(derive_more::Debug)]
-pub struct EnumerateDevices<'a> {
+pub struct EnumerateDevices<K = &'static BuiltinKnownDevices> {
     #[debug(skip)]
     devices: Box<dyn Iterator<Item = nusb::DeviceInfo>>,
 
-    known_devices: &'a KnownDevices,
+    known_devices: K,
 }
 
-impl<'a> EnumerateDevices<'a> {
-    pub fn with_known_devices<'b>(self, known_devices: &'b KnownDevices) -> EnumerateDevices<'b> {
+impl<K> EnumerateDevices<K> {
+    pub fn with_known_devices<'b>(self, known_devices: K) -> EnumerateDevices<K> {
         EnumerateDevices {
             devices: self.devices,
             known_devices,
@@ -34,20 +34,20 @@ impl<'a> EnumerateDevices<'a> {
     }
 }
 
-impl<'a> Iterator for EnumerateDevices<'a> {
+impl<K> Iterator for EnumerateDevices<K>
+where
+    K: KnownDevices,
+{
     type Item = DeviceInfo;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             let device_info = self.devices.next()?;
 
-            if let Some(known_device) = self
-                .known_devices
-                .get(device_info.vendor_id(), device_info.product_id())
-            {
+            if let Some(known_device) = self.known_devices.detect(&device_info) {
                 return Some(DeviceInfo {
                     usb: device_info,
-                    known_device: known_device.clone(),
+                    device_config: known_device,
                 });
             }
         }
@@ -61,7 +61,7 @@ impl<'a> Iterator for EnumerateDevices<'a> {
 #[derive(Clone, Debug)]
 pub struct DeviceInfo {
     pub(crate) usb: nusb::DeviceInfo,
-    pub(crate) known_device: KnownDevice,
+    pub(crate) device_config: DeviceConfig,
 }
 
 impl DeviceInfo {
@@ -85,8 +85,8 @@ impl DeviceInfo {
         self.usb.serial_number()
     }
 
-    pub fn known_device(&self) -> &KnownDevice {
-        &self.known_device
+    pub fn device_config(&self) -> &DeviceConfig {
+        &self.device_config
     }
 
     pub async fn open(self, options: OpenOptions) -> Result<Device, Error> {
@@ -94,27 +94,37 @@ impl DeviceInfo {
     }
 }
 
+pub trait KnownDevices {
+    fn detect(&self, device_info: &nusb::DeviceInfo) -> Option<DeviceConfig>;
+}
+
+impl<T> KnownDevices for &T
+where
+    T: KnownDevices,
+{
+    fn detect(&self, device_info: &nusb::DeviceInfo) -> Option<DeviceConfig> {
+        T::detect(self, device_info)
+    }
+}
+
 #[derive(Clone, derive_more::Debug)]
-pub struct KnownDevice {
-    #[debug("0x{vendor_id:04x}")]
-    pub vendor_id: u16,
-    #[debug("0x{product_id:04x}")]
-    pub product_id: u16,
+pub struct DeviceConfig {
     pub name: Cow<'static, str>,
+    // todo: info about if it has a builtin upconverter, i.e. is a blog v4(l), etc.
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct KnownDevices {
-    devices: HashMap<(u16, u16), KnownDevice>,
+pub struct BuiltinKnownDevices {
+    devices: HashMap<(u16, u16), BuiltinKnownDevice>,
 }
 
-impl KnownDevices {
+impl BuiltinKnownDevices {
     pub fn builtin() -> &'static Self {
-        static ONCE: OnceLock<KnownDevices> = OnceLock::new();
+        static ONCE: OnceLock<BuiltinKnownDevices> = OnceLock::new();
         ONCE.get_or_init(|| BUILTIN_KNOWN_DEVICES.iter().cloned().collect())
     }
 
-    pub fn insert(&mut self, device: KnownDevice) {
+    pub fn insert(&mut self, device: BuiltinKnownDevice) {
         self.devices
             .insert((device.vendor_id, device.product_id), device);
     }
@@ -127,17 +137,17 @@ impl KnownDevices {
         self.devices.clear();
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &'_ KnownDevice> {
+    pub fn iter(&self) -> impl Iterator<Item = &'_ BuiltinKnownDevice> {
         self.devices.values()
     }
 
-    pub fn get(&self, vendor_id: u16, product_id: u16) -> Option<&KnownDevice> {
+    pub fn get(&self, vendor_id: u16, product_id: u16) -> Option<&BuiltinKnownDevice> {
         self.devices.get(&(vendor_id, product_id))
     }
 }
 
-impl FromIterator<KnownDevice> for KnownDevices {
-    fn from_iter<T: IntoIterator<Item = KnownDevice>>(iter: T) -> Self {
+impl FromIterator<BuiltinKnownDevice> for BuiltinKnownDevices {
+    fn from_iter<T: IntoIterator<Item = BuiltinKnownDevice>>(iter: T) -> Self {
         Self {
             devices: iter
                 .into_iter()
@@ -147,48 +157,80 @@ impl FromIterator<KnownDevice> for KnownDevices {
     }
 }
 
+impl KnownDevices for BuiltinKnownDevices {
+    fn detect(&self, device_info: &nusb::DeviceInfo) -> Option<DeviceConfig> {
+        let device = self.get(device_info.vendor_id(), device_info.product_id())?;
+
+        match (
+            device_info.manufacturer_string(),
+            device_info.product_string(),
+        ) {
+            (Some("RTLSDRBlog"), Some("Blog V4")) => {
+                // todo
+            }
+            (Some("RTLSDRBlog"), Some("Blog V4L")) => {
+                // todo
+            }
+            _ => {}
+        }
+
+        Some(DeviceConfig {
+            name: device.name.into(),
+        })
+    }
+}
+
+#[derive(Clone, Copy, derive_more::Debug)]
+pub struct BuiltinKnownDevice {
+    #[debug("0x{vendor_id:04x}")]
+    pub vendor_id: u16,
+    #[debug("0x{product_id:04x}")]
+    pub product_id: u16,
+    pub name: &'static str,
+}
+
 #[rustfmt::skip]
-pub const BUILTIN_KNOWN_DEVICES: &[KnownDevice] = &[
-    KnownDevice { vendor_id: 0x0bda, product_id: 0x2832, name: Cow::Borrowed("Generic RTL2832U") },
-	KnownDevice { vendor_id: 0x0bda, product_id: 0x2838, name: Cow::Borrowed("Generic RTL2832U OEM") },
-	KnownDevice { vendor_id: 0x0413, product_id: 0x6680, name: Cow::Borrowed("DigitalNow Quad DVB-T PCI-E card") },
-	KnownDevice { vendor_id: 0x0413, product_id: 0x6f0f, name: Cow::Borrowed("Leadtek WinFast DTV Dongle mini D") },
-	KnownDevice { vendor_id: 0x0458, product_id: 0x707f, name: Cow::Borrowed("Genius TVGo DVB-T03 USB dongle (Ver. B)") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00a9, name: Cow::Borrowed("Terratec Cinergy T Stick Black (rev 1)") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00b3, name: Cow::Borrowed("Terratec NOXON DAB/DAB+ USB dongle (rev 1)") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00b4, name: Cow::Borrowed("Terratec Deutschlandradio DAB Stick") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00b5, name: Cow::Borrowed("Terratec NOXON DAB Stick - Radio Energy") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00b7, name: Cow::Borrowed("Terratec Media Broadcast DAB Stick") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00b8, name: Cow::Borrowed("Terratec BR DAB Stick") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00b9, name: Cow::Borrowed("Terratec WDR DAB Stick") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00c0, name: Cow::Borrowed("Terratec MuellerVerlag DAB Stick") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00c6, name: Cow::Borrowed("Terratec Fraunhofer DAB Stick") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00d3, name: Cow::Borrowed("Terratec Cinergy T Stick RC (Rev.3)") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00d7, name: Cow::Borrowed("Terratec T Stick PLUS") },
-	KnownDevice { vendor_id: 0x0ccd, product_id: 0x00e0, name: Cow::Borrowed("Terratec NOXON DAB/DAB+ USB dongle (rev 2)") },
-	KnownDevice { vendor_id: 0x1554, product_id: 0x5020, name: Cow::Borrowed("PixelView PV-DT235U(RN)") },
-	KnownDevice { vendor_id: 0x15f4, product_id: 0x0131, name: Cow::Borrowed("Astrometa DVB-T/DVB-T2") },
-	KnownDevice { vendor_id: 0x15f4, product_id: 0x0133, name: Cow::Borrowed("HanfTek DAB+FM+DVB-T") },
-	KnownDevice { vendor_id: 0x185b, product_id: 0x0620, name: Cow::Borrowed("Compro Videomate U620F") },
-	KnownDevice { vendor_id: 0x185b, product_id: 0x0650, name: Cow::Borrowed("Compro Videomate U650F") },
-	KnownDevice { vendor_id: 0x185b, product_id: 0x0680, name: Cow::Borrowed("Compro Videomate U680F") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd393, name: Cow::Borrowed("GIGABYTE GT-U7300") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd394, name: Cow::Borrowed("DIKOM USB-DVBT HD") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd395, name: Cow::Borrowed("Peak 102569AGPK") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd397, name: Cow::Borrowed("KWorld KW-UB450-T USB DVB-T Pico TV") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd398, name: Cow::Borrowed("Zaapa ZT-MINDVBZP") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd39d, name: Cow::Borrowed("SVEON STV20 DVB-T USB & FM") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd3a4, name: Cow::Borrowed("Twintech UT-40") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd3a8, name: Cow::Borrowed("ASUS U3100MINI_PLUS_V2") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd3af, name: Cow::Borrowed("SVEON STV27 DVB-T USB & FM") },
-	KnownDevice { vendor_id: 0x1b80, product_id: 0xd3b0, name: Cow::Borrowed("SVEON STV21 DVB-T USB & FM") },
-	KnownDevice { vendor_id: 0x1d19, product_id: 0x1101, name: Cow::Borrowed("Dexatek DK DVB-T Dongle (Logilink VG0002A)") },
-	KnownDevice { vendor_id: 0x1d19, product_id: 0x1102, name: Cow::Borrowed("Dexatek DK DVB-T Dongle (MSI DigiVox mini II V3.0)") },
-	KnownDevice { vendor_id: 0x1d19, product_id: 0x1103, name: Cow::Borrowed("Dexatek Technology Ltd. DK 5217 DVB-T Dongle") },
-	KnownDevice { vendor_id: 0x1d19, product_id: 0x1104, name: Cow::Borrowed("MSI DigiVox Micro HD") },
-	KnownDevice { vendor_id: 0x1f4d, product_id: 0xa803, name: Cow::Borrowed("Sweex DVB-T USB") },
-	KnownDevice { vendor_id: 0x1f4d, product_id: 0xb803, name: Cow::Borrowed("GTek T803") },
-	KnownDevice { vendor_id: 0x1f4d, product_id: 0xc803, name: Cow::Borrowed("Lifeview LV5TDeluxe") },
-	KnownDevice { vendor_id: 0x1f4d, product_id: 0xd286, name: Cow::Borrowed("MyGica TD312") },
-	KnownDevice { vendor_id: 0x1f4d, product_id: 0xd803, name: Cow::Borrowed("PROlectrix DV107669") },
+pub const BUILTIN_KNOWN_DEVICES: &[BuiltinKnownDevice] = &[
+    BuiltinKnownDevice { vendor_id: 0x0bda, product_id: 0x2832, name: "Generic RTL2832U" },
+    BuiltinKnownDevice { vendor_id: 0x0bda, product_id: 0x2838, name: "Generic RTL2832U OEM" },
+    BuiltinKnownDevice { vendor_id: 0x0413, product_id: 0x6680, name: "DigitalNow Quad DVB-T PCI-E card" },
+    BuiltinKnownDevice { vendor_id: 0x0413, product_id: 0x6f0f, name: "Leadtek WinFast DTV Dongle mini D" },
+    BuiltinKnownDevice { vendor_id: 0x0458, product_id: 0x707f, name: "Genius TVGo DVB-T03 USB dongle (Ver. B)" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00a9, name: "Terratec Cinergy T Stick Black (rev 1)" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00b3, name: "Terratec NOXON DAB/DAB+ USB dongle (rev 1)" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00b4, name: "Terratec Deutschlandradio DAB Stick" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00b5, name: "Terratec NOXON DAB Stick - Radio Energy" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00b7, name: "Terratec Media Broadcast DAB Stick" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00b8, name: "Terratec BR DAB Stick" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00b9, name: "Terratec WDR DAB Stick" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00c0, name: "Terratec MuellerVerlag DAB Stick" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00c6, name: "Terratec Fraunhofer DAB Stick" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00d3, name: "Terratec Cinergy T Stick RC (Rev.3)" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00d7, name: "Terratec T Stick PLUS" },
+    BuiltinKnownDevice { vendor_id: 0x0ccd, product_id: 0x00e0, name: "Terratec NOXON DAB/DAB+ USB dongle (rev 2)" },
+    BuiltinKnownDevice { vendor_id: 0x1554, product_id: 0x5020, name: "PixelView PV-DT235U(RN)" },
+    BuiltinKnownDevice { vendor_id: 0x15f4, product_id: 0x0131, name: "Astrometa DVB-T/DVB-T2" },
+    BuiltinKnownDevice { vendor_id: 0x15f4, product_id: 0x0133, name: "HanfTek DAB+FM+DVB-T" },
+    BuiltinKnownDevice { vendor_id: 0x185b, product_id: 0x0620, name: "Compro Videomate U620F" },
+    BuiltinKnownDevice { vendor_id: 0x185b, product_id: 0x0650, name: "Compro Videomate U650F" },
+    BuiltinKnownDevice { vendor_id: 0x185b, product_id: 0x0680, name: "Compro Videomate U680F" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd393, name: "GIGABYTE GT-U7300" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd394, name: "DIKOM USB-DVBT HD" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd395, name: "Peak 102569AGPK" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd397, name: "KWorld KW-UB450-T USB DVB-T Pico TV" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd398, name: "Zaapa ZT-MINDVBZP" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd39d, name: "SVEON STV20 DVB-T USB & FM" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd3a4, name: "Twintech UT-40" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd3a8, name: "ASUS U3100MINI_PLUS_V2" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd3af, name: "SVEON STV27 DVB-T USB & FM" },
+    BuiltinKnownDevice { vendor_id: 0x1b80, product_id: 0xd3b0, name: "SVEON STV21 DVB-T USB & FM" },
+    BuiltinKnownDevice { vendor_id: 0x1d19, product_id: 0x1101, name: "Dexatek DK DVB-T Dongle (Logilink VG0002A)" },
+    BuiltinKnownDevice { vendor_id: 0x1d19, product_id: 0x1102, name: "Dexatek DK DVB-T Dongle (MSI DigiVox mini II V3.0)" },
+    BuiltinKnownDevice { vendor_id: 0x1d19, product_id: 0x1103, name: "Dexatek Technology Ltd. DK 5217 DVB-T Dongle" },
+    BuiltinKnownDevice { vendor_id: 0x1d19, product_id: 0x1104, name: "MSI DigiVox Micro HD" },
+    BuiltinKnownDevice { vendor_id: 0x1f4d, product_id: 0xa803, name: "Sweex DVB-T USB" },
+    BuiltinKnownDevice { vendor_id: 0x1f4d, product_id: 0xb803, name: "GTek T803" },
+    BuiltinKnownDevice { vendor_id: 0x1f4d, product_id: 0xc803, name: "Lifeview LV5TDeluxe" },
+    BuiltinKnownDevice { vendor_id: 0x1f4d, product_id: 0xd286, name: "MyGica TD312" },
+    BuiltinKnownDevice { vendor_id: 0x1f4d, product_id: 0xd803, name: "PROlectrix DV107669" },
 ];
