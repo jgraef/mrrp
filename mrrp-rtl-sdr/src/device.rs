@@ -55,6 +55,13 @@ impl Device {
             .await?
             .ok_or(Error::NoTunerFound)?;
 
+        // if blog v4, set tuner_xtal = R828D_XTAL_FREQ, otherwise use rtl_xtal
+        //
+        // #define R828D_XTAL_FREQ		16000000
+        // #define DEF_RTL_XTAL_FREQ	28800000
+        // #define MIN_RTL_XTAL_FREQ	(DEF_RTL_XTAL_FREQ - 1000)
+        // #define MAX_RTL_XTAL_FREQ	(DEF_RTL_XTAL_FREQ + 1000)
+
         Ok(Self {
             device_info,
             reset_on_drop: options.reset_on_drop,

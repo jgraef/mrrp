@@ -33,6 +33,7 @@ use crate::rtl2832u::{
         Bits,
         Register,
         RegisterValue,
+        shadow::ShadowMap,
     },
 };
 
@@ -78,6 +79,7 @@ pub struct Rtl2832u {
     control_timeout: Duration,
     scratch_buffer: Vec<u8>,
     i2c_repeater_enabled: bool,
+    shadow_map: ShadowMap,
 }
 
 impl Rtl2832u {
@@ -87,6 +89,7 @@ impl Rtl2832u {
             control_timeout,
             scratch_buffer: vec![],
             i2c_repeater_enabled: false,
+            shadow_map: ShadowMap::default(),
         }
     }
 
@@ -124,36 +127,46 @@ impl Rtl2832u {
 
     pub async fn read_register<R>(&mut self) -> Result<R, Error>
     where
-        R: RegisterValue + Debug,
+        R: RegisterValue,
     {
-        let data = self
-            .read(R::ADDRESS, <R::Bits as register::Bits>::LENGTH)
-            .await?;
+        if let Some(value) = R::shadow_read(&self.shadow_map) {
+            Ok(*value)
+        }
+        else {
+            let data = self
+                .read(R::ADDRESS, <R::Bits as register::Bits>::LENGTH)
+                .await?;
 
-        let bits = <R::Bits as register::Bits>::from_bytes(&data);
-        let value = R::from_bits(bits);
+            let bits = <R::Bits as register::Bits>::from_bytes(&data);
+            let value = R::from_bits(bits);
 
-        tracing::debug!(address = ?R::ADDRESS, ?value, "read register");
+            tracing::debug!(address = ?R::ADDRESS, ?value, "read register");
 
-        Ok(value)
+            value.shadow_write(&mut self.shadow_map);
+
+            Ok(value)
+        }
     }
 
     pub async fn write_register<R>(&mut self, value: R) -> Result<(), Error>
     where
-        R: RegisterValue + Debug,
+        R: RegisterValue,
     {
         tracing::debug!(address = ?R::ADDRESS, ?value, "writing register");
 
         let bits = value.as_bits();
         let data = bits.into_bytes();
 
-        self.write(R::ADDRESS, data.as_ref()).await
+        self.write(R::ADDRESS, data.as_ref()).await?;
+
+        value.shadow_write(&mut self.shadow_map);
+
+        Ok(())
     }
 
     pub async fn write_register_with<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
     where
-        R: RegisterValue + Default + Debug,
-        <R as RegisterValue>::Bits: Debug,
+        R: RegisterValue,
     {
         let mut value = Default::default();
         f(&mut value);
@@ -163,8 +176,7 @@ impl Rtl2832u {
 
     pub async fn write_register_update<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
     where
-        R: RegisterValue + Default + Debug + PartialEq + Clone,
-        <R as RegisterValue>::Bits: Debug,
+        R: RegisterValue,
     {
         let current_value = self.read_register::<R>().await?;
 

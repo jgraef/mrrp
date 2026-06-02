@@ -140,6 +140,9 @@ impl Rtl2832u {
         Ok(())
     }
 
+    /// Enable the I2C repeater
+    ///
+    /// Connects the tuner to the I2C bus.
     pub async fn set_i2c_repeater(&mut self, on: bool) -> Result<(), Error> {
         if self.i2c_repeater_enabled != on {
             self.write_register_with::<SOFT_RST_IIC_REPEAT>(|iic_repeat| {
