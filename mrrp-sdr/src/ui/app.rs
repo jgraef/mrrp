@@ -8,7 +8,6 @@ use crate::{
         source::{
             LoopedFileSource,
             MockSource,
-            SourceInfo,
         },
     },
     ui::{
@@ -63,10 +62,7 @@ impl App {
         }
         else {
             tracing::debug!(?center_frequency, ?sample_rate, "test: noise");
-            sdr.add_source(MockSource::new(SourceInfo {
-                center_frequency,
-                sample_rate,
-            }))
+            sdr.add_source(MockSource::new(center_frequency, sample_rate))
         };
         source.leak();
 
@@ -83,6 +79,10 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        self.app_state
+            .error_message_state
+            .fill_from_context(ui.ctx());
+
         // app menu
         ui.add(MainMenuPanel::new(
             &mut self.app_state,

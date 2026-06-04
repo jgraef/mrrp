@@ -2,8 +2,8 @@ pub mod about_window;
 pub mod app;
 pub mod debug_window;
 pub mod dock;
+pub mod error_message;
 pub mod menu;
-pub mod radio;
 pub mod state;
 pub mod widgets;
 

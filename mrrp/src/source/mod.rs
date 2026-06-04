@@ -1,5 +1,6 @@
 pub mod file;
 mod noise;
+pub mod pcm;
 #[cfg(feature = "rtlsdr")]
 pub mod rtlsdr;
 // #[cfg(feature = "rtlsdr")]

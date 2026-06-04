@@ -6,9 +6,12 @@ use serde::{
 
 use crate::{
     cli::UiCommand,
-    ui::dock::{
-        DockState,
-        TabState,
+    ui::{
+        dock::{
+            DockState,
+            TabState,
+        },
+        error_message::ErrorMessageState,
     },
 };
 
@@ -35,6 +38,8 @@ pub struct AppState {
     #[serde(skip, default)]
     pub show_debug_window: bool,
 
+    pub error_message_state: ErrorMessageState,
+
     #[serde(default)]
     pub dock_state: DockState,
 }
@@ -46,6 +51,7 @@ impl Default for AppState {
             persist_everything: true,
             show_about_window: false,
             show_debug_window: false,
+            error_message_state: Default::default(),
             dock_state: Default::default(),
         }
     }

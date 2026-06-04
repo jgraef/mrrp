@@ -158,7 +158,7 @@ impl StagingTransaction {
                     state.total_allocated_bytes += size;
                     drop(state);
 
-                    tracing::debug!(?size, "allocating staging buffer");
+                    tracing::trace!(?size, "allocating staging buffer");
 
                     Chunk {
                         buffer: device.create_buffer(&wgpu::BufferDescriptor {

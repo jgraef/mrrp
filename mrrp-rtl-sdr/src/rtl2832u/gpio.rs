@@ -1,9 +1,6 @@
 //! GPIO pins
 //!
-//! See [`gp_direction`](Rtl2832u::gp_direction),
-//! [`gp_input`](Rtl2832u::gp_input),
-//! [`gp_output_init`](Rtl2832u::gp_output_init), and
-//! [`gp_output`](Rtl2832u::gp_output)
+//! You can obtain a [`GpioPin`] via [`gpio`](Rtl2832u::gpio).
 
 use std::ops::{
     Deref,

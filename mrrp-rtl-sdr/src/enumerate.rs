@@ -109,6 +109,10 @@ impl DeviceInfo {
         &self.device_config
     }
 
+    pub fn name(&self) -> &str {
+        &self.device_config.name
+    }
+
     /// Open the device
     pub async fn open(self, options: OpenOptions) -> Result<Device, Error> {
         let rtl2832u = self.open_rtl2832u(options.rtl2832u).await?;

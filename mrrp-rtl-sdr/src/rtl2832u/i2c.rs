@@ -177,11 +177,9 @@ impl Rtl2832u {
         self.i2c_repeater_enabled
     }
 
-    pub async fn with_i2c_repeater<R, E>(
-        &mut self,
-        mut f: impl AsyncFnMut(&mut Self) -> Result<R, E>,
-    ) -> Result<R, E>
+    pub async fn with_i2c_repeater<F, R, E>(&mut self, mut f: F) -> Result<R, E>
     where
+        F: AsyncFnMut(&mut Self) -> Result<R, E>,
         E: From<Error>,
     {
         self.set_i2c_repeater(true).await?;

@@ -3,6 +3,7 @@ pub mod source;
 
 use std::{
     collections::HashMap,
+    fmt::Debug,
     pin::Pin,
     sync::{
         Arc,
@@ -18,13 +19,9 @@ use std::{
     },
 };
 
-use anyhow::Error;
-use mrrp::{
-    buf::{
-        SampleBufMut,
-        SamplesMut,
-    },
-    io::AsyncReadSamples,
+use mrrp::buf::{
+    SampleBufMut,
+    SamplesMut,
 };
 use num_complex::Complex;
 use rustfft::FftPlanner;
@@ -37,9 +34,15 @@ use crate::{
             SpectrumFrame,
             SpectrumSink,
         },
-        source::Source,
+        source::{
+            IntoSource,
+            Source,
+        },
     },
-    util::AtomicIds,
+    util::{
+        AtomicIds,
+        debug::buffer_debug,
+    },
 };
 
 pub type Iq = Complex<f32>;
@@ -130,7 +133,9 @@ impl SdrRuntime {
 
         assert_eq!(buffered_source.buffer.len(), self.buffer_size);
 
-        let source_info = buffered_source.source.as_mut().info();
+        let source = buffered_source.source.as_mut();
+        let center_frequency = source.center_frequency();
+        let sample_rate = source.sample_rate();
 
         // calculate FFT of signal (in-place)
         //
@@ -160,8 +165,8 @@ impl SdrRuntime {
         );
 
         let frame = SpectrumFrame {
-            center_frequency: source_info.center_frequency,
-            sample_rate: source_info.sample_rate,
+            center_frequency,
+            sample_rate,
             data: &*self.amplitude_buffer,
         };
 
@@ -195,7 +200,9 @@ impl Sources {
             id,
             BufferedSource {
                 source,
+
                 buffer: SamplesMut::with_capacity(self.buffer_size),
+                active: true, // todo
             },
         );
 
@@ -208,35 +215,84 @@ impl Sources {
         self.buffered_sources.remove(&id);
     }
 
-    pub fn read(&mut self) -> ReadSources<'_> {
-        ReadSources { sources: self }
+    pub fn read(&mut self) -> HandleSources<'_> {
+        HandleSources { sources: self }
     }
 }
 
-#[derive(derive_more::Debug)]
 struct BufferedSource {
-    #[debug(skip)]
     source: Pin<Box<dyn Source + Send>>,
 
+    // doesn't work. these futures contain a borrow on the source
+    //control_future: Option<Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>>,
     buffer: SamplesMut<Iq>,
+
+    active: bool,
+}
+
+impl Debug for BufferedSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BufferedSource")
+            .field("source", &self.source.name())
+            .field("buffer", &buffer_debug(&self.buffer))
+            .finish()
+    }
 }
 
 /// Helper to read from all sources at once
 #[derive(Debug)]
-struct ReadSources<'a> {
+struct HandleSources<'a> {
     sources: &'a mut Sources,
 }
 
-impl<'a> Future for ReadSources<'a> {
+impl<'a> Future for HandleSources<'a> {
     type Output = usize;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // todo: we need to actually call the stop method on the souces.
+
         let sources = &mut *self.sources;
 
         'outer: loop {
             let mut all_pending = true;
 
             for (&id, buffered_source) in &mut sources.buffered_sources {
+                /*if let Some(control_future) = &mut buffered_source.control_future {
+                    // note that we don't set `all_pending = false` if this future resolves, since
+                    // we'll be immediately trying to read from it, which will clear this if the
+                    // source returns data.
+
+                    match control_future.poll_unpin(cx) {
+                        Poll::Pending => {
+                            // source pending, try next
+                            continue;
+                        }
+                        Poll::Ready(Err(error)) => {
+                            // an error occured
+                            buffered_source.control_future = None;
+
+                            // but set this inactive
+                            buffered_source.active = false;
+
+                            tracing::error!(
+                                id,
+                                name = buffered_source.source.name(),
+                                %error,
+                                "Source error (control)"
+                            );
+                        }
+                        Poll::Ready(Ok(())) => {
+                            // the control future returned without error
+                            buffered_source.control_future = None;
+                        }
+                    }
+                }*/
+
+                // if the source is inactive, we don't read from it
+                if !buffered_source.active {
+                    continue;
+                }
+
                 // todo: this expect might fail if we reduce the requested amount between calls
                 // to this. we should handle this case.
                 let mut remaining_buffer_capacity = sources
@@ -257,12 +313,11 @@ impl<'a> Future for ReadSources<'a> {
                 match result {
                     Poll::Pending => {
                         // source pending, try next
+                        continue;
                     }
                     Poll::Ready(Err(error)) => {
-                        // the source failed. we can't remove it while we're iterating over it, so
-                        // we remove it and start over
-                        tracing::error!(id, %error, "Source error");
-                        sources.buffered_sources.remove(&id);
+                        tracing::error!(id, name = buffered_source.source.name(), %error, "Source error (read)");
+                        buffered_source.active = false;
                         continue 'outer;
                     }
                     Poll::Ready(Ok(())) => {
@@ -270,9 +325,12 @@ impl<'a> Future for ReadSources<'a> {
 
                         if num_read == 0 {
                             // nevermind, this is the end of stream
-                            tracing::error!(id, "Source end of stream");
-                            sources.buffered_sources.remove(&id);
-                            continue 'outer;
+                            tracing::error!(
+                                id,
+                                name = buffered_source.source.name(),
+                                "Source end of stream"
+                            );
+                            buffered_source.active = false;
                         }
 
                         // check if the buffer has been filled
@@ -337,17 +395,20 @@ impl SdrHandle {
     #[must_use]
     pub fn add_source<S>(&self, source: S) -> SourceHandle
     where
-        S: Source + Sized + Send + 'static,
-        <S as AsyncReadSamples<Iq>>::Error: Into<Error> + Sized + Send + Sync + 'static,
+        S: IntoSource,
+        S::Source: Sized + Send + 'static,
     {
         let id = self.handle_ids.next();
+
+        let source = source.into_source();
+        let name = source.name().into();
 
         self.send_command(Command::AddSource {
             id,
             source: Box::pin(source),
         });
 
-        SourceHandle::new(self.command_sender.clone(), id)
+        SourceHandle::new(self.command_sender.clone(), id, name)
     }
 }
 
@@ -433,19 +494,25 @@ impl SpectrumSinkHandle {
 #[derive(Clone, Debug)]
 pub struct SourceHandle {
     inner: Arc<HandleInner>,
+    name: Arc<str>,
 }
 
 impl SourceHandle {
-    fn new(command_sender: mpsc::UnboundedSender<Command>, id: usize) -> Self {
+    fn new(command_sender: mpsc::UnboundedSender<Command>, id: usize, name: Arc<str>) -> Self {
         Self {
             inner: Arc::new(HandleInner::new(command_sender, id, |id| {
                 Command::RemoveSource { id }
             })),
+            name,
         }
     }
 
     pub fn leak(self) {
         self.inner.leak();
+    }
+
+    pub fn name(&self) -> &Arc<str> {
+        &self.name
     }
 }
 

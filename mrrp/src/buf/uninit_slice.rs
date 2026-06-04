@@ -116,6 +116,11 @@ impl<S> UninitSlice<S> {
     }
 
     #[inline]
+    pub fn as_mut_slice(&mut self) -> &mut [MaybeUninit<S>] {
+        &mut self.0
+    }
+
+    #[inline]
     pub fn len(&self) -> usize {
         self.0.len()
     }
@@ -146,6 +151,23 @@ impl<S> UninitSlice<S> {
         self.0.iter_mut().for_each(|sample| unsafe {
             sample.assume_init_drop();
         });
+    }
+
+    pub fn align_to_mut<Q>(&mut self) -> (&mut Self, &mut UninitSlice<Q>, &mut Self) {
+        // this is std::slice::align_to_uninit_mut
+
+        // SAFETY: `MaybeUninit` is transparent. Correct size and alignment are
+        // guaranteed by `align_to_mut` itself. Therefore the only thing that we
+        // have to ensure for a safe `transmute` is that the values are valid
+        // for the types involved. But for `MaybeUninit` any values are valid,
+        // so this operation is safe.
+        let (head, body, tail) = unsafe { self.0.align_to_mut::<MaybeUninit<Q>>() };
+
+        (
+            UninitSlice::slice_mut_from_uninit(head),
+            UninitSlice::slice_mut_from_uninit(body),
+            UninitSlice::slice_mut_from_uninit(tail),
+        )
     }
 }
 

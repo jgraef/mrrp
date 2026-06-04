@@ -14,7 +14,7 @@ pub trait TunerError: std::error::Error + Send + Sync + Sized + 'static {}
 
 impl TunerError for Infallible {}
 
-pub trait TunerProbe: Clone + Debug + Sized + Send + 'static {
+pub trait TunerProbe: Clone + Debug + Sized + Send + Sync + 'static {
     type Error: TunerError;
     type Tuner: Tuner;
 
@@ -29,7 +29,7 @@ pub trait TunerProbe: Clone + Debug + Sized + Send + 'static {
     ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a;
 }
 
-pub trait Tuner: Debug + Sized + Send + 'static {
+pub trait Tuner: Debug + Sized + Send + Sync + 'static {
     type Error: TunerError;
 }
 
@@ -75,7 +75,7 @@ impl TunerProbe for BultinTunerProbe {
     }
 }
 
-trait AnyTunerProbeTrait: Debug + Send + 'static {
+trait AnyTunerProbeTrait: Debug + Send + Sync + 'static {
     fn any_clone(&self) -> AnyTunerProbe;
 
     fn any_try_open<'a>(
@@ -142,7 +142,7 @@ impl TunerProbe for AnyTunerProbe {
     }
 }
 
-trait AnyTunerTrait: Debug + Send + 'static {
+trait AnyTunerTrait: Debug + Send + Sync + 'static {
     // todo
 }
 

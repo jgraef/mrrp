@@ -1,7 +1,9 @@
+// otherwise cargo doc overflow somewhere in wgpu
+#![recursion_limit = "256"]
+
 pub mod cli;
 pub mod config;
 pub mod directories;
-pub mod hal;
 pub mod sdr;
 pub mod ui;
 pub mod util;
@@ -35,10 +37,17 @@ fn main() -> Result<(), Error> {
             run_app(directories, config, command)?;
         }
         Command::ListRadios => {
-            for device in hal::radio::list_devices()? {
-                println!("{device:?}");
-            }
+            list_devices()?;
         }
+    }
+
+    Ok(())
+}
+
+#[tokio::main]
+async fn list_devices() -> Result<(), Error> {
+    for device in mrrp_rtl_sdr::enumerate_devices().await? {
+        println!("{device:?}");
     }
 
     Ok(())

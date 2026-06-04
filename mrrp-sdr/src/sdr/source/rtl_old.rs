@@ -4,7 +4,6 @@ use std::{
 };
 
 use num_complex::Complex;
-use rtl_sdr_rs::DeviceDescriptor;
 use tokio::sync::{
     broadcast,
     mpsc,
@@ -15,13 +14,7 @@ use tokio::sync::{
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    RtlSdr(#[from] rtl_sdr_rs::error::RtlsdrError),
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DeviceId<'a> {
-    Index(usize),
-    Serial(&'a str),
+    RtlSdr(#[from] mrrp_rtl_sdr::Error),
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -45,61 +38,34 @@ pub struct RtlSdr {
 }
 
 impl RtlSdr {
-    pub async fn open<'a>(device_id: DeviceId<'a>, options: Options) -> Result<Self, Error> {
-        Self::open_inner(device_id.into(), options).await
-    }
+    async fn new(device: mrrp_rtl_sdr::Device, options: Options) -> Result<Self, Error> {
+        let (command_sender, command_receiver) = mpsc::channel(options.command_channel_capacity);
 
-    pub async fn open_first_available<'a>(options: Options) -> Result<Self, Error> {
-        Self::open_inner(OwnedDeviceId::FirstAvailable, options).await
-    }
-
-    async fn open_inner(device_id: OwnedDeviceId, options: Options) -> Result<Self, Error> {
-        // channel to receive back the result of opening the device
-        let (result_sender, result_receiver) = oneshot::channel();
-
-        // handle device in separate thread
-        //
-        // we also can't move the device into the thread. it's not send
-        std::thread::spawn({
-            move || {
-                match open_device(device_id) {
-                    Ok((device, info, state)) => {
-                        let (command_sender, command_receiver) =
-                            mpsc::channel(options.command_channel_capacity);
-
-                        let (data_sender, _) = watch::channel(RingBuffer {
-                            head_position: 0,
-                            buffer: VecDeque::new(),
-                        });
-
-                        let info = Arc::new(info);
-
-                        let _ = result_sender.send(Ok((
-                            command_sender,
-                            data_sender.clone(),
-                            info.clone(),
-                        )));
-
-                        let reactor = Reactor::new(
-                            device,
-                            options,
-                            command_receiver,
-                            data_sender,
-                            state,
-                            info,
-                        );
-
-                        reactor.run();
-                    }
-                    Err(error) => {
-                        let _ = result_sender.send(Err(Error::from(error)));
-                    }
-                }
-            }
+        let (data_sender, _) = watch::channel(RingBuffer {
+            head_position: 0,
+            buffer: VecDeque::new(),
         });
 
-        let (command_sender, data_sender, info) =
-            result_receiver.await.expect("thread didn't reply")?;
+        // todo: fill these
+        let info = Arc::new(Info {});
+        let state = State {
+            center_frequency: 7000000,
+            frequency_correction: 0,
+            sample_rate: 2400000,
+            tuner_gain: TunerGain::Auto,
+            bias_tee: false,
+        };
+
+        let reactor = Reactor::new(
+            device,
+            options,
+            command_receiver,
+            data_sender.clone(),
+            state,
+            info.clone(),
+        );
+
+        let _join_handle = tokio::spawn(reactor.run());
 
         Ok(Self {
             command_sender,
@@ -121,7 +87,7 @@ struct Chunk {
 }
 
 struct Reactor {
-    device: rtl_sdr_rs::RtlSdr,
+    device: mrrp_rtl_sdr::Device,
     options: Options,
     command_receiver: mpsc::Receiver<Command>,
     data_sender: watch::Sender<RingBuffer>,
@@ -132,7 +98,7 @@ struct Reactor {
 
 impl Reactor {
     fn new(
-        device: rtl_sdr_rs::RtlSdr,
+        device: mrrp_rtl_sdr::Device,
         options: Options,
         command_receiver: mpsc::Receiver<Command>,
         data_sender: watch::Sender<RingBuffer>,
@@ -154,12 +120,14 @@ impl Reactor {
         }
     }
 
-    fn run(mut self) {
-        loop {
+    async fn run(mut self) {
+        // todo
+
+        /*loop {
             self.handle_commands();
 
             self.handle_data();
-        }
+        }*/
     }
 
     fn handle_commands(&mut self) {
@@ -213,7 +181,10 @@ impl Reactor {
                     center_frequency,
                     result_sender,
                     |state| &mut state.center_frequency,
-                    rtl_sdr_rs::RtlSdr::set_center_freq,
+                    |_, _| {
+                        tracing::warn!("todo: set center frequency");
+                        Ok(())
+                    },
                     Event::CenterFrequency,
                 );
             }
@@ -225,7 +196,10 @@ impl Reactor {
                     frequency_correction,
                     result_sender,
                     |state| &mut state.frequency_correction,
-                    rtl_sdr_rs::RtlSdr::set_freq_correction,
+                    |_, _| {
+                        tracing::warn!("todo: set frequency correction");
+                        Ok(())
+                    },
                     Event::FrequencyCorrection,
                 );
             }
@@ -237,7 +211,10 @@ impl Reactor {
                     sample_rate,
                     result_sender,
                     |state| &mut state.sample_rate,
-                    rtl_sdr_rs::RtlSdr::set_sample_rate,
+                    |_, _| {
+                        tracing::warn!("todo: set sample rate");
+                        Ok(())
+                    },
                     Event::SampleRate,
                 );
             }
@@ -249,7 +226,10 @@ impl Reactor {
                     tuner_gain,
                     result_sender,
                     |state| &mut state.tuner_gain,
-                    |device, value| device.set_tuner_gain(value.into()),
+                    |_, _| {
+                        tracing::warn!("todo: set tuner gain");
+                        Ok(())
+                    },
                     Event::TunerGain,
                 );
             }
@@ -261,9 +241,9 @@ impl Reactor {
                     bias_tee,
                     result_sender,
                     |state| &mut state.bias_tee,
-                    |device, value| {
-                        // pretty sure it's not intended to take &self, but instead &mut self
-                        device.set_bias_tee(value)
+                    |_, _| {
+                        tracing::warn!("todo: set bias tee");
+                        Ok(())
                     },
                     Event::BiasTee,
                 );
@@ -276,10 +256,7 @@ impl Reactor {
         new_value: T,
         result_sender: oneshot::Sender<Result<(), Error>>,
         state_mut: impl FnOnce(&mut State) -> &mut T,
-        device_set: impl FnOnce(
-            &mut rtl_sdr_rs::RtlSdr,
-            T,
-        ) -> Result<(), rtl_sdr_rs::error::RtlsdrError>,
+        device_set: impl FnOnce(&mut mrrp_rtl_sdr::Device, T) -> Result<(), mrrp_rtl_sdr::Error>,
         event: impl FnOnce(T) -> Event,
     ) where
         T: PartialEq + Clone,
@@ -351,8 +328,8 @@ pub enum Event {
 // enumerate all device
 #[derive(Clone, Debug)]
 pub struct Info {
-    tuner_gains: Vec<i32>,
-    tuner_id: String,
+    //tuner_gains: Vec<i32>,
+    //tuner_id: String,
 }
 
 #[derive(Clone, Debug)]
@@ -370,6 +347,7 @@ pub enum TunerGain<G> {
     Manual(G),
 }
 
+/*
 impl From<TunerGain<i32>> for rtl_sdr_rs::TunerGain {
     fn from(value: TunerGain<i32>) -> Self {
         match value {
@@ -378,48 +356,4 @@ impl From<TunerGain<i32>> for rtl_sdr_rs::TunerGain {
         }
     }
 }
-
-#[derive(Debug)]
-enum OwnedDeviceId {
-    FirstAvailable,
-    Index(usize),
-    Serial(String),
-}
-
-impl<'a> From<DeviceId<'a>> for OwnedDeviceId {
-    fn from(value: DeviceId) -> Self {
-        match value {
-            DeviceId::Index(index) => OwnedDeviceId::Index(index),
-            DeviceId::Serial(serial) => OwnedDeviceId::Serial(serial.to_owned()),
-        }
-    }
-}
-
-fn open_device(device_id: OwnedDeviceId) -> Result<(rtl_sdr_rs::RtlSdr, Info, State), Error> {
-    let device = match &device_id {
-        OwnedDeviceId::FirstAvailable => rtl_sdr_rs::RtlSdr::open_first_available()?,
-        OwnedDeviceId::Index(index) => {
-            rtl_sdr_rs::RtlSdr::open(rtl_sdr_rs::DeviceId::Index(*index))?
-        }
-        OwnedDeviceId::Serial(serial) => {
-            rtl_sdr_rs::RtlSdr::open(rtl_sdr_rs::DeviceId::Serial(&serial))?
-        }
-    };
-
-    let info = Info {
-        tuner_gains: device.get_tuner_gains()?,
-        tuner_id: device.get_tuner_id()?.to_owned(),
-    };
-
-    let state = State {
-        center_frequency: device.get_center_freq(),
-        frequency_correction: device.get_freq_correction(),
-        sample_rate: device.get_sample_rate(),
-        tuner_gain: TunerGain::Manual(device.read_tuner_gain()?),
-        bias_tee: false,
-    };
-
-    tracing::debug!(?device_id, ?state, "opened rtl-sdr device");
-
-    Ok((device, info, state))
-}
+     */

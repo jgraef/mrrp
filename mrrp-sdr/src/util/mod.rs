@@ -1,4 +1,5 @@
 pub mod build_info;
+pub mod debug;
 pub mod github_urls;
 
 use std::{

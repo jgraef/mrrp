@@ -4,6 +4,7 @@ use crate::{
     rtl2832u::{
         Reader,
         Rtl2832u,
+        filter::FirFilter,
     },
     tuner::{
         AnyTuner,
@@ -16,6 +17,7 @@ use crate::{
 pub struct Options {
     pub reset_on_drop: bool,
     pub tuner_probe: AnyTunerProbe,
+    pub fir_filter: FirFilter,
 }
 
 impl Default for Options {
@@ -23,6 +25,7 @@ impl Default for Options {
         Self {
             reset_on_drop: true,
             tuner_probe: AnyTunerProbe::default(),
+            fir_filter: FirFilter::DEFAULT,
         }
     }
 }
@@ -46,13 +49,13 @@ impl Device {
         // todo: should we try to reset the device if initialization fails?
 
         // initialize baseband
-        rtl2832u.initialize().await?;
+        rtl2832u.initialize(&options.fir_filter).await?;
 
         // probe tuners
+        let tuner_probe = options.tuner_probe;
         let tuner = rtl2832u
-            .with_i2c_repeater::<_, Error>(async |mut rtl2832u| {
-                options
-                    .tuner_probe
+            .with_i2c_repeater::<_, _, Error>(async move |mut rtl2832u| {
+                tuner_probe
                     .try_open(&mut rtl2832u)
                     .await
                     .map_err(Into::into)
@@ -102,8 +105,10 @@ impl Device {
         &mut self.expect_inner_mut().rtl2832u
     }
 
-    pub fn reader(&mut self, buffer_size: usize) -> Result<Reader, Error> {
-        Ok(self.expect_inner_mut().rtl2832u.reader(buffer_size)?)
+    pub async fn reader(&mut self, buffer_size: usize) -> Result<Reader, Error> {
+        let rtl2832u = &mut self.expect_inner_mut().rtl2832u;
+        rtl2832u.start_data_stream().await?;
+        Ok(rtl2832u.reader(buffer_size)?)
     }
 }
 

@@ -433,7 +433,7 @@ pub struct OrbitPropagationCache {
 /// [`SGP4Source::satrec_mut`]. But we don't want our TLE, and with that our
 /// satellites, to be mutable.
 ///
-/// Instead we let the user of [`Satellite::get_state`] pass in a
+/// Instead we let the user of [`Satellite::predict_state`] pass in a
 /// [`OrbitPropagationCache`] and then pass this helper struct to satkit
 /// instead. This helper struct will redirect the caching to our separate cache.
 /// Thus the TLE doesn't need to be mutable.

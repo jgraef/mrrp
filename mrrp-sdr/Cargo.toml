@@ -23,13 +23,13 @@ egui_extras = { version = "0.34.2", features = ["all_loaders"] }
 futures-util = "0.3.32"
 indexmap = { version = "2.14.0", features = ["serde"] }
 mrrp.workspace = true
+mrrp-rtl-sdr.workspace = true
 mrrp-widgets = { workspace = true, features = ["colorgrad", "serde"] }
 num-complex = "0.4.6"
 num-traits = "0.2.19"
 parking_lot = "0.12.5"
 rand = "0.10.1"
 rand_distr = "0.6.0"
-rtl-sdr-rs = { version = "0.3.1", features = ["rtl_sdr_blog"] }
 rustfft = "6.4.1"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.150"

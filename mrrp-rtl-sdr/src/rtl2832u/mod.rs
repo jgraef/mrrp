@@ -95,7 +95,7 @@ impl Default for Options {
 pub struct Rtl2832u {
     usb_interface: nusb::Interface,
     control_timeout: Duration,
-    scratch_buffer: Vec<u8>,
+    _scratch_buffer: Vec<u8>,
     i2c_repeater_enabled: bool,
     shadow_map: ShadowMap,
 }
@@ -109,7 +109,7 @@ impl Rtl2832u {
         Self {
             usb_interface,
             control_timeout,
-            scratch_buffer: vec![],
+            _scratch_buffer: vec![],
             i2c_repeater_enabled: false,
             shadow_map: ShadowMap::default(),
         }
@@ -261,10 +261,7 @@ impl Rtl2832u {
         Ok(())
     }
 
-    pub async fn initialize(&mut self) -> Result<(), Error> {
-        // todo: these should be options that are passed in
-        let fir_filter = &FirFilter::DEFAULT;
-
+    pub async fn initialize(&mut self, fir_filter: &FirFilter) -> Result<(), Error> {
         // check librtlsdr, but also [linux driver][1]
         //
         // [1]: https://github.com/jaredquinn/DVB-Realtek-RTL2832U/blob/3c9e21225d2292fe0e6b885cd861fbebb890918a/src/rtl2832u_fe.c#L658

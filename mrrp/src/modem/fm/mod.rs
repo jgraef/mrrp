@@ -8,7 +8,7 @@ use num_traits::Zero;
 
 use crate::io::combinators::Scanner;
 
-/// https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/
+/// <https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/>
 #[derive(Clone, Copy, Debug)]
 pub struct DifferentiateAndAccessPhase {
     delayed: Complex<f32>,
@@ -34,7 +34,8 @@ impl Scanner<Complex<f32>> for DifferentiateAndAccessPhase {
     }
 }
 
-/// https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/
+/// <https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/>
+///
 /// buggy
 #[derive(Clone, Copy, Debug)]
 pub struct AccessPhaseAndDifferentiate {

@@ -29,7 +29,10 @@ use crate::ui::{
         bookmarks::BookmarksDock,
         channels::ChannelsDock,
         demodulation::DemodulationDock,
-        radio::RadioDockView,
+        radio::{
+            RadioDockState,
+            RadioDockView,
+        },
         spectrum_waterfall::{
             SpectrumWaterfallDockContextMenu,
             SpectrumWaterfallDockState,
@@ -51,9 +54,7 @@ struct Tab {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum TabState {
-    Radio {
-        // todo
-    },
+    Radio(RadioDockState),
     SpectrumWaterfall(SpectrumWaterfallDockState),
     Bookmarks {
         // todo
@@ -66,64 +67,6 @@ pub enum TabState {
     },
 }
 
-impl TabState {
-    /*pub fn ty(&self) -> TabType {
-        match self {
-            TabState::Radio { .. } => TabType::Radio,
-            TabState::SpectrumWaterfall { .. } => TabType::SpectrumWaterfall,
-            TabState::Bookmarks { .. } => TabType::Bookmarks,
-            TabState::Channels { .. } => TabType::Channels,
-            TabState::Demodulation { .. } => TabType::Demodulation,
-        }
-    }
-
-    pub fn title(&self) -> egui::WidgetText {
-        // for now we'll just return the generic label for the tab type. but we can also
-        // add some extra information from the tab state
-        self.ty().label().into()
-    }*/
-}
-/*
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub enum TabType {
-    Radio,
-    Spectrum,
-    Waterfall,
-    Bookmarks,
-    Channels,
-    Demodulation,
-}
-
-impl TabType {
-    pub fn allow_multiple(&self) -> bool {
-        match self {
-            _ => true,
-        }
-    }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Radio => "Radio",
-            Self::Spectrum => "Spectrum",
-            Self::Waterfall => "Waterfall",
-            Self::Bookmarks => "Bookmarks",
-            Self::Channels => "Channels",
-            Self::Demodulation => "Demodulation",
-        }
-    }
-
-    pub fn create_state(&self) -> TabState {
-        match self {
-            TabType::Radio => TabState::Radio {},
-            TabType::Spectrum => TabState::SpectrumWaterfall(Default::default()),
-            TabType::Waterfall => TabState::SpectrumWaterfall(Default::default()),
-            TabType::Bookmarks => TabState::Bookmarks {},
-            TabType::Channels => TabState::Channels {},
-            TabType::Demodulation => TabState::Demodulation {},
-        }
-    }
-}
-*/
 /// Helper to generate [`Tab`]s from [`TabState`]s
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct TabMaker {
@@ -169,8 +112,9 @@ impl Default for DockState {
         let mut tab_with_id_maker = TabMaker::default();
 
         // create dock state with only radio dock
-        let mut inner =
-            egui_dock::DockState::new(tab_with_id_maker.make_tabs([TabState::Radio {}]));
+        let mut inner = egui_dock::DockState::new(
+            tab_with_id_maker.make_tabs([TabState::Radio(Default::default())]),
+        );
 
         let main_surface = inner.main_surface_mut();
 
@@ -225,7 +169,7 @@ impl<'a> TabViewer for DockViewer<'a> {
 
     fn title(&mut self, tab: &mut Tab) -> egui::WidgetText {
         match &tab.state {
-            TabState::Radio {} => "Radio".into(),
+            TabState::Radio(_radio_dock_state) => "Radio".into(),
             TabState::SpectrumWaterfall(spectrum_waterfall_dock_state) => {
                 spectrum_waterfall_dock_state.title()
             }
@@ -237,7 +181,7 @@ impl<'a> TabViewer for DockViewer<'a> {
 
     fn ui(&mut self, ui: &mut egui::Ui, tab: &mut Tab) {
         match &mut tab.state {
-            TabState::Radio {} => RadioDockView.show(ui),
+            TabState::Radio(state) => RadioDockView::new(state).show(ui),
             TabState::SpectrumWaterfall(state) => SpectrumWaterfallDockView::new(state).show(ui),
             TabState::Bookmarks {} => BookmarksDock.show(ui),
             TabState::Channels {} => ChannelsDock.show(ui),
@@ -259,7 +203,7 @@ impl<'a> TabViewer for DockViewer<'a> {
 
     fn context_menu(&mut self, ui: &mut egui::Ui, tab: &mut Self::Tab, _path: NodePath) {
         match &mut tab.state {
-            TabState::Radio {} => todo!(),
+            TabState::Radio(_radio_dock_state) => todo!(),
             TabState::SpectrumWaterfall(spectrum_waterfall_dock_state) => {
                 SpectrumWaterfallDockContextMenu::new(spectrum_waterfall_dock_state).show(ui)
             }
@@ -332,7 +276,7 @@ impl<'a> egui::Widget for DockAddTabMenu<'a> {
             // apply menu style, so this always looks like a menu
             menu_style(ui.style_mut());
 
-            self.make_button(ui, "Radio", || TabState::Radio {});
+            self.make_button(ui, "Radio", || TabState::Radio(Default::default()));
             self.make_button(ui, "Spectrum", || {
                 TabState::SpectrumWaterfall(SpectrumWaterfallDockState::spectrum())
             });
