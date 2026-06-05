@@ -1,0 +1,683 @@
+use std::{
+    net::SocketAddr,
+    pin::Pin,
+    task::{
+        Context,
+        Poll,
+    },
+};
+
+use anyhow::{
+    Error,
+    anyhow,
+};
+use bytes::Buf;
+use mrrp_rtl_tcp::server;
+use pin_project_lite::pin_project;
+use tokio::{
+    io::AsyncBufReadExt,
+    sync::{
+        mpsc,
+        oneshot,
+    },
+};
+
+use crate::server::ring_buffer::Closed;
+
+#[derive(Debug)]
+pub struct ServerHandler {
+    command_sender: mpsc::Sender<Command>,
+    data_subscriber: ring_buffer::Subscriber<u8>,
+    dongle_info: mrrp_rtl_tcp::DongleInfo,
+}
+
+impl ServerHandler {
+    pub async fn new(device: mrrp_rtl_sdr::Device, buffer_size: usize) -> Result<Self, Error> {
+        assert_ne!(buffer_size, 0, "buffer_size can't be 0");
+        assert_eq!(buffer_size % 2, 0, "buffer_size must be a multiple of 2");
+
+        // todo
+        let dongle_info = mrrp_rtl_tcp::DongleInfo {
+            tuner_type: mrrp_rtl_tcp::TunerType::R828D,
+            tuner_gain_count: 10,
+        };
+
+        let (command_sender, command_receiver) = mpsc::channel(64);
+        let (data_sender, data_subscriber) = ring_buffer::channel(buffer_size);
+
+        let _command_task = tokio::spawn(handle_commands(device, command_receiver));
+        let _data_task = tokio::spawn(handle_data(
+            data_sender,
+            command_sender.clone(),
+            buffer_size,
+        ));
+
+        Ok(Self {
+            command_sender,
+            data_subscriber,
+            dongle_info,
+        })
+    }
+}
+
+impl server::Handler for ServerHandler {
+    type Error = Error;
+    type CommandHandler = CommandHandler;
+    type SampleStream = SampleStream;
+
+    async fn accept_connection(
+        &mut self,
+        _address: SocketAddr,
+    ) -> Result<(CommandHandler, SampleStream, mrrp_rtl_tcp::DongleInfo), Self::Error> {
+        let command_handler = CommandHandler {
+            command_sender: self.command_sender.clone(),
+        };
+
+        let sample_stream = SampleStream {
+            data_receiver: self.data_subscriber.subscribe(),
+        };
+
+        Ok((command_handler, sample_stream, self.dongle_info))
+    }
+
+    async fn shutdown(&mut self) -> Result<(), Self::Error> {
+        tracing::info!("Shutting down server");
+        let (result_sender, result_receiver) = oneshot::channel();
+        let _ = self
+            .command_sender
+            .send(Command::Shutdown { result_sender })
+            .await;
+        result_receiver.await.unwrap_or(Ok(()))
+    }
+}
+
+#[derive(Debug)]
+pub struct CommandHandler {
+    command_sender: mpsc::Sender<Command>,
+}
+
+impl server::CommandHandler for CommandHandler {
+    type Error = Error;
+
+    async fn handle_command(
+        &mut self,
+        command: mrrp_rtl_tcp::protocol::Command,
+    ) -> Result<(), Self::Error> {
+        self.command_sender
+            .send(Command::Client(command))
+            .await
+            .map_err(|_| anyhow!("reactor dead"))
+    }
+}
+
+pin_project! {
+    #[derive(Debug)]
+    pub struct SampleStream {
+        #[pin]
+        data_receiver: ring_buffer::Receiver<u8>,
+    }
+}
+
+impl server::SampleStream for SampleStream {
+    type Error = Error;
+
+    fn poll_fill_buffer<'a>(
+        self: Pin<&'a mut Self>,
+        cx: &mut Context,
+    ) -> Poll<Result<impl Buf + 'a, Self::Error>> {
+        match self.project().data_receiver.poll_receive(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(Closed)) => Poll::Ready(Ok(Buffer::Eof)),
+            Poll::Ready(Ok(buffer)) => Poll::Ready(Ok(Buffer::Filled(buffer))),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Buffer<'a> {
+    Eof,
+    Filled(ring_buffer::ReceiveGuard<'a, u8>),
+}
+
+impl<'a> Buf for Buffer<'a> {
+    fn remaining(&self) -> usize {
+        match self {
+            Buffer::Eof => 0,
+            Buffer::Filled(receive_guard) => receive_guard.remaining(),
+        }
+    }
+
+    fn chunk(&self) -> &[u8] {
+        match self {
+            Buffer::Eof => &[],
+            Buffer::Filled(receive_guard) => receive_guard.chunk(),
+        }
+    }
+
+    fn advance(&mut self, cnt: usize) {
+        match self {
+            Buffer::Eof => {}
+            Buffer::Filled(receive_guard) => receive_guard.advance(cnt),
+        }
+    }
+}
+
+#[tracing::instrument(skip_all)]
+async fn handle_commands(
+    mut device: mrrp_rtl_sdr::Device,
+    mut command_receiver: mpsc::Receiver<Command>,
+) -> Result<(), Error> {
+    while let Some(command) = command_receiver.recv().await {
+        match command {
+            Command::Client(command) => {
+                tracing::debug!(?command, "todo: client command")
+            }
+            Command::GetReader {
+                buffer_size,
+                result_sender,
+            } => {
+                let reader = device.reader(buffer_size).await?;
+                let _ = result_sender.send(reader);
+            }
+            Command::Shutdown { result_sender } => {
+                let result = device.close().await.map_err(Into::into);
+                let _ = result_sender.send(result);
+                break;
+            }
+        }
+    }
+
+    tracing::debug!("done");
+
+    Ok(())
+}
+
+#[tracing::instrument(skip_all)]
+async fn handle_data(
+    mut data_sender: ring_buffer::Sender<u8>,
+    command_sender: mpsc::Sender<Command>,
+    buffer_size: usize,
+) -> Result<(), Error> {
+    let mut reader_opt: Option<mrrp_rtl_sdr::Reader> = None;
+
+    loop {
+        if let Some(reader) = &mut reader_opt {
+            // we have a reader so we need to read the data from it into our ring buffer
+
+            // the underlying reader is an AsyncBufRead, so we can ask it to receive more
+            // data if necessary, and then give us its buffer.
+            let data = reader.fill_buf().await?;
+
+            // put that data into our ring buffer.
+            // this returns if there are any receivers to receive that data.
+            // if there are, the data will have been written to the buffer.
+            // if there aren't, it doesn't really matter, since no receiver will ever see
+            // that data.
+            if data_sender.send(data) {
+                let n = data.len();
+                reader.consume(n);
+            }
+            else {
+                tracing::debug!("no receivers left");
+                // no receivers left. drop reader
+                reader_opt = None;
+            }
+        }
+        else {
+            // we don't have a reader, meaning we don't know of any receivers yet. wait for
+            // some
+            tracing::debug!("waiting for receivers...");
+            if data_sender.wait_for_receivers().await.is_err() {
+                // no receivers and no subscribers left. we're done here
+                break;
+            }
+
+            // we have receivers now, so we need to get a reader
+            let (result_sender, result_receiver) = oneshot::channel();
+            if command_sender
+                .send(Command::GetReader {
+                    buffer_size,
+                    result_sender,
+                })
+                .await
+                .is_err()
+            {
+                // command receiver closed
+                break;
+            }
+
+            // receive reader from command task. if the result_sender is dropped, we exit
+            let Ok(reader) = result_receiver.await
+            else {
+                break;
+            };
+            tracing::debug!(?reader, "got reader");
+            reader_opt = Some(reader);
+        }
+    }
+
+    tracing::debug!("done");
+
+    Ok(())
+}
+
+enum Command {
+    Client(mrrp_rtl_tcp::protocol::Command),
+    GetReader {
+        buffer_size: usize,
+        result_sender: oneshot::Sender<mrrp_rtl_sdr::Reader>,
+    },
+    Shutdown {
+        result_sender: oneshot::Sender<Result<(), Error>>,
+    },
+}
+
+mod ring_buffer {
+    #![allow(dead_code)]
+    // todo: this would be super useful in mrrp (with Buf/BufMut impls)
+
+    use std::{
+        collections::VecDeque,
+        pin::Pin,
+        sync::Arc,
+        task::{
+            Context,
+            Poll,
+            Waker,
+        },
+    };
+
+    use bytes::Buf;
+    use parking_lot::{
+        RwLock,
+        RwLockReadGuard,
+        RwLockWriteGuard,
+    };
+    use pin_project_lite::pin_project;
+
+    /// The channel is closed and can't ever become open again.
+    #[derive(Debug)]
+    pub struct Closed;
+
+    pub fn channel<T>(buffer_size: usize) -> (Sender<T>, Subscriber<T>) {
+        let shared = Arc::new(Shared {
+            state: RwLock::new(State {
+                buffer: VecDeque::with_capacity(buffer_size),
+                head_pos: 0,
+                receiver_slots: vec![],
+                sender_slot: Some(Slot { waker: None }),
+                receiver_count: 0,
+                subscriber_count: 1,
+                sender_count: 1,
+            }),
+        });
+
+        (
+            Sender {
+                shared: shared.clone(),
+            },
+            Subscriber { shared },
+        )
+    }
+
+    #[derive(Debug)]
+    struct Shared<T> {
+        state: RwLock<State<T>>,
+    }
+
+    #[derive(Debug)]
+    struct State<T> {
+        buffer: VecDeque<T>,
+        head_pos: usize,
+
+        receiver_slots: Vec<Option<Slot>>,
+        sender_slot: Option<Slot>,
+
+        receiver_count: usize,
+        subscriber_count: usize,
+        sender_count: usize,
+    }
+
+    impl<T> State<T> {
+        fn wake_all_receivers(&mut self) {
+            // todo: do we need to clear the waker?
+            self.receiver_slots
+                .iter()
+                .flatten()
+                .flat_map(|slot| &slot.waker)
+                .for_each(|waker| waker.wake_by_ref());
+        }
+
+        fn subscribe(&mut self) -> usize {
+            // increase receiver count
+            self.receiver_count += 1;
+
+            // notify sender that there are receivers
+            if let Some(slot) = &self.sender_slot
+                && let Some(waker) = &slot.waker
+            {
+                waker.wake_by_ref();
+            }
+
+            // insert a receiver slot
+            for (i, slot) in self.receiver_slots.iter_mut().enumerate() {
+                if slot.is_none() {
+                    *slot = Some(Slot { waker: None });
+                    return i;
+                }
+            }
+
+            let i = self.receiver_slots.len();
+            self.receiver_slots.push(Some(Slot { waker: None }));
+            i
+        }
+    }
+
+    #[derive(Debug)]
+    struct Slot {
+        waker: Option<Waker>,
+    }
+
+    pin_project! {
+        #[derive(Debug)]
+        pub struct Receiver<T> {
+            inner: ReceiverInner<T>
+        }
+    }
+
+    #[derive(Debug)]
+    struct ReceiverInner<T> {
+        shared: Arc<Shared<T>>,
+        slot: usize,
+        read_pos: usize,
+    }
+
+    impl<T> Receiver<T> {
+        pub fn poll_receive<'a>(
+            self: Pin<&'a mut Self>,
+            cx: &mut Context,
+        ) -> Poll<Result<ReceiveGuard<'a, T>, Closed>> {
+            let this = self.project();
+
+            // we do this in 2 steps
+            //
+            // 1: check if there's data and if so return it. this only needs a read guard
+            // 2: register waker. this needs a write guard
+            //
+            // between 1 and 2 we don't hold a lock, so we need to rerun the checks in 2.
+            // but 1 can be run by all readers in parallel. we hope this is more efficient
+            // (benchmark lol!)
+
+            // first we try to read through a read guard
+            let new_waker = {
+                let state_guard = this.inner.shared.state.read();
+
+                if this.inner.read_pos < state_guard.head_pos {
+                    // there's data :)
+                    return Poll::Ready(Ok(ReceiveGuard {
+                        state_guard,
+                        read_pos: &mut this.inner.read_pos,
+                    }));
+                }
+
+                // check if there's still a sender
+                if state_guard.sender_count == 0 {
+                    return Poll::Ready(Err(Closed));
+                }
+
+                // check if we need to insert our waker
+                let slot = state_guard.receiver_slots[this.inner.slot]
+                    .as_ref()
+                    .unwrap();
+
+                let new_waker = cx.waker();
+
+                if let Some(waker) = &slot.waker
+                    && new_waker.will_wake(waker)
+                {
+                    None
+                }
+                else {
+                    Some(new_waker.clone())
+                }
+            };
+
+            // at this point we don't hold the lock, so stuff could be written, or the
+            // sender drop
+
+            if let Some(waker) = new_waker {
+                // we'll need a write guard to insert our waker
+
+                let mut state_guard = this.inner.shared.state.write();
+
+                // but in the meantime some data might have been written to the ring buffer
+                if this.inner.read_pos < state_guard.head_pos {
+                    return Poll::Ready(Ok(ReceiveGuard {
+                        state_guard: RwLockWriteGuard::downgrade(state_guard),
+                        read_pos: &mut this.inner.read_pos,
+                    }));
+                }
+
+                // check if there's still a sender (again)
+                if state_guard.sender_count == 0 {
+                    return Poll::Ready(Err(Closed));
+                }
+
+                let slot = state_guard.receiver_slots[this.inner.slot]
+                    .as_mut()
+                    .unwrap();
+
+                slot.waker = Some(waker);
+            }
+
+            Poll::Pending
+        }
+
+        pub fn subscriber(&self) -> Subscriber<T> {
+            Subscriber {
+                shared: self.inner.shared.clone(),
+            }
+        }
+    }
+
+    impl<T> Clone for ReceiverInner<T> {
+        fn clone(&self) -> Self {
+            let mut state_guard = self.shared.state.write();
+            let slot = state_guard.subscribe();
+            Self {
+                shared: self.shared.clone(),
+                slot,
+                read_pos: self.read_pos,
+            }
+        }
+    }
+
+    impl<T> Drop for ReceiverInner<T> {
+        fn drop(&mut self) {
+            let mut state_guard = self.shared.state.write();
+            state_guard.receiver_count -= 1;
+            state_guard.receiver_slots[self.slot] = None;
+        }
+    }
+
+    /// # TODO
+    ///
+    /// Implement `mrrp::Buf` on this
+    #[derive(Debug)]
+    pub struct ReceiveGuard<'a, T> {
+        state_guard: RwLockReadGuard<'a, State<T>>,
+        read_pos: &'a mut usize,
+    }
+
+    impl<'a, T> ReceiveGuard<'a, T> {
+        #[allow(dead_code)]
+        pub fn num_dropped(&self) -> usize {
+            (self.state_guard.head_pos - *self.read_pos)
+                .saturating_sub(self.state_guard.buffer.len())
+        }
+    }
+
+    impl<'a> Buf for ReceiveGuard<'a, u8> {
+        fn remaining(&self) -> usize {
+            self.state_guard.head_pos - *self.read_pos
+        }
+
+        fn chunk(&self) -> &[u8] {
+            let mut start_index = self
+                .state_guard
+                .buffer
+                .len()
+                .saturating_sub(self.state_guard.head_pos - *self.read_pos);
+
+            let (tail, head) = self.state_guard.buffer.as_slices();
+
+            let chunk = if start_index < tail.len() {
+                tail
+            }
+            else {
+                start_index -= tail.len();
+                head
+            };
+
+            &chunk[start_index..]
+        }
+
+        fn advance(&mut self, cnt: usize) {
+            let read_pos = *self.read_pos + cnt;
+            assert!(
+                read_pos <= self.state_guard.head_pos,
+                "Called advance with cnt={cnt}, but only {} remaining",
+                self.remaining()
+            );
+
+            *self.read_pos = read_pos;
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Sender<T> {
+        shared: Arc<Shared<T>>,
+    }
+
+    impl<T> Sender<T>
+    where
+        T: Clone,
+    {
+        pub fn send(&mut self, data: &[T]) -> bool {
+            if data.is_empty() {
+                return true;
+            }
+
+            let mut state_guard = self.shared.state.write();
+
+            if state_guard.receiver_count == 0 {
+                // no receivers are here to ever observe the bytes we would write, so we don't.
+
+                // technically, since there are no receivers that keep track of this, we
+                // don't need to increase this
+                state_guard.head_pos += data.len();
+
+                false
+            }
+            else {
+                // skip anything that would not end up in the buffer anyway
+                let skip = data.len().saturating_sub(state_guard.buffer.capacity());
+
+                // truncate to not exceed capacity
+                let truncate = (data.len() + state_guard.buffer.len())
+                    .saturating_sub(state_guard.buffer.capacity());
+                let keep = state_guard.buffer.capacity().saturating_sub(truncate);
+                debug_assert!(skip == 0 || keep != 0);
+                state_guard.buffer.truncate_front(keep);
+
+                // write data to buffer
+                state_guard.buffer.extend(data.iter().cloned());
+
+                // update head position
+                state_guard.head_pos += data.len();
+
+                // notify receivers
+                state_guard.wake_all_receivers();
+
+                true
+            }
+        }
+
+        pub fn poll_wait_receivers(
+            self: Pin<&mut Self>,
+            cx: &mut Context,
+        ) -> Poll<Result<(), Closed>> {
+            let mut state_guard = self.shared.state.write();
+
+            if state_guard.receiver_count > 0 {
+                Poll::Ready(Ok(()))
+            }
+            else if state_guard.sender_count == 0 {
+                Poll::Ready(Err(Closed))
+            }
+            else {
+                let new_waker = cx.waker();
+                let slot = state_guard.sender_slot.as_mut().unwrap();
+                if let Some(waker) = &mut slot.waker {
+                    waker.clone_from(new_waker);
+                }
+                else {
+                    slot.waker = Some(new_waker.clone());
+                }
+
+                Poll::Pending
+            }
+        }
+
+        pub async fn wait_for_receivers(&mut self) -> Result<(), Closed> {
+            std::future::poll_fn(move |cx| Pin::new(&mut *self).poll_wait_receivers(cx)).await
+        }
+    }
+
+    impl<T> Drop for Sender<T> {
+        fn drop(&mut self) {
+            let mut state_guard = self.shared.state.write();
+            state_guard.sender_count -= 1;
+            state_guard.sender_slot = None;
+
+            state_guard.wake_all_receivers();
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct Subscriber<T> {
+        shared: Arc<Shared<T>>,
+    }
+
+    impl<T> Subscriber<T> {
+        pub fn subscribe(&self) -> Receiver<T> {
+            let mut state_guard = self.shared.state.write();
+
+            Receiver {
+                inner: ReceiverInner {
+                    shared: self.shared.clone(),
+                    slot: state_guard.subscribe(),
+                    read_pos: state_guard.head_pos,
+                },
+            }
+        }
+    }
+
+    impl<T> Clone for Subscriber<T> {
+        fn clone(&self) -> Self {
+            let mut state_guard = self.shared.state.write();
+            state_guard.subscriber_count += 1;
+
+            Self {
+                shared: self.shared.clone(),
+            }
+        }
+    }
+
+    impl<T> Drop for Subscriber<T> {
+        fn drop(&mut self) {
+            let mut state_guard = self.shared.state.write();
+            state_guard.subscriber_count -= 1;
+        }
+    }
+}

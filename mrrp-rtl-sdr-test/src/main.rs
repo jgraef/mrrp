@@ -1,13 +1,15 @@
-pub mod demod_regs;
+#![feature(vec_deque_truncate_front)]
+
+pub mod gpio;
+pub mod open;
+pub mod regdump;
+pub mod server;
 
 use std::{
-    borrow::Cow,
     fs::File,
     io::{
         BufWriter,
-        Cursor,
         Write,
-        stdout,
     },
     path::{
         Path,
@@ -17,7 +19,6 @@ use std::{
 
 use anyhow::{
     Error,
-    anyhow,
     bail,
 };
 use clap::{
@@ -25,17 +26,32 @@ use clap::{
     Subcommand,
 };
 use dotenvy::dotenv;
-use mrrp_rtl_sdr::{
-    Device,
-    enumerate::DeviceInfo,
-    rtl2832u::{
-        Rtl2832u,
-        register::{
-            self as reg,
-        },
-    },
+use futures_util::TryFutureExt;
+use mrrp_rtl_sdr::rtl2832u::register::{
+    self as reg,
 };
-use tokio::io::AsyncBufReadExt;
+use mrrp_rtl_tcp::server::RtlTcpServer;
+use tokio::{
+    io::AsyncBufReadExt,
+    net::TcpListener,
+};
+use tokio_util::sync::CancellationToken;
+
+use crate::{
+    gpio::{
+        GpioCommand,
+        gpio_command,
+    },
+    open::{
+        open_device,
+        open_rtl2832u,
+    },
+    regdump::{
+        dump_regs,
+        print_reg_dump,
+    },
+    server::ServerHandler,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -57,9 +73,6 @@ async fn main() -> Result<(), Error> {
         Command::Reset { serial } => {
             let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
             rtl2832u.reset().await?;
-        }
-        Command::ParseDemodRegs => {
-            demod_regs::demod_regs();
         }
         Command::DumpRegs {
             serial,
@@ -169,6 +182,33 @@ async fn main() -> Result<(), Error> {
                 }
             }
         }
+        Command::Tcp {
+            serial,
+            listen_address,
+            buffer_size,
+        } => {
+            let device = open_device(serial.as_deref()).await?;
+            let tcp_listener = TcpListener::bind(listen_address).await?;
+            let server_handler = ServerHandler::new(device, buffer_size).await?;
+            let server = RtlTcpServer::new(server_handler, tcp_listener)
+                .with_graceful_shutdown(shutdown_signal());
+
+            server
+                .serve()
+                .map_err(|error| {
+                    // this needs some explicit conversion because anyhow::Error doesn't implement
+                    // std::error::Error. we just convert the non-anyhow variants into anyhow
+                    // errors.
+                    match error {
+                        mrrp_rtl_tcp::server::Error::Socket(error) => error.into(),
+                        mrrp_rtl_tcp::server::Error::Handler(error) => error,
+                        mrrp_rtl_tcp::server::Error::InvalidCommand(invalid_command) => {
+                            invalid_command.into()
+                        }
+                    }
+                })
+                .await?;
+        }
     }
 
     Ok(())
@@ -199,8 +239,6 @@ enum Command {
         #[clap(short, long)]
         serial: Option<String>,
     },
-    #[clap(hide = true)]
-    ParseDemodRegs,
     /// Dump registers
     DumpRegs {
         #[clap(short, long)]
@@ -273,255 +311,34 @@ enum Command {
         #[clap(short, long)]
         serial: Option<String>,
     },
-}
-
-#[derive(Debug, Subcommand)]
-enum GpioCommand {
-    Mode,
-    Read {
+    Tcp {
         #[clap(short, long)]
-        output_state: bool,
+        serial: Option<String>,
+
+        #[clap(short, long, default_value = "localhost:1234")]
+        listen_address: String,
+
+        #[clap(short, long, default_value = "65536")]
+        buffer_size: usize,
     },
-    Write {
-        // we can't use bool directly here or clap assumes this is a flag.
-        #[arg(value_parser = clap::builder::BoolishValueParser::new())]
-        value: GpioValue,
-    },
 }
 
-type GpioValue = bool;
+fn shutdown_signal() -> CancellationToken {
+    let cancellation_token = CancellationToken::new();
 
-async fn gpio_command(serial: Option<&str>, pin: u8, command: GpioCommand) -> Result<(), Error> {
-    let mut rtl2832u = open_rtl2832u(serial).await?;
+    // todo: sigterm, etc.
 
-    match command {
-        GpioCommand::Mode => {
-            let mut pin = rtl2832u.gpio(pin);
-            let direction = pin.direction().await?;
-            let pad_config = pin.pad_config().await?;
-            println!("Direction:  {direction:?}");
-            println!("PAD config: {pad_config:?}");
-        }
-        GpioCommand::Read { output_state } => {
-            let state = if output_state {
-                let mut pin = rtl2832u.gpio(pin).into_output().await?;
-                pin.get_state().await?
+    tokio::spawn({
+        let cancellation_token = cancellation_token.clone();
+        async move {
+            if let Err(error) = tokio::signal::ctrl_c().await {
+                tracing::error!(%error, "Ctrl-C signal returned an error");
             }
-            else {
-                let mut pin = rtl2832u.gpio(pin).into_input().await?;
-                pin.read().await?
-            };
-            println!("{state:?}");
+
+            tracing::info!("Received Ctrl-C. Shutting down.");
+            cancellation_token.cancel();
         }
-        GpioCommand::Write { value } => {
-            let mut pin = rtl2832u.gpio(pin).into_output().await?;
-            pin.write(value).await?;
-        }
-    }
+    });
 
-    Ok(())
-}
-
-async fn find_device(serial: Option<&str>) -> Result<DeviceInfo, Error> {
-    for device_info in mrrp_rtl_sdr::enumerate_devices().await? {
-        if serial.is_none() || device_info.serial_number() == serial {
-            tracing::debug!(?device_info, "device found");
-            return Ok(device_info);
-        }
-    }
-
-    if let Some(serial) = serial {
-        Err(anyhow!("Device not found: {serial}"))
-    }
-    else {
-        Err(anyhow!("No device found"))
-    }
-}
-
-async fn open_rtl2832u(serial: Option<&str>) -> Result<Rtl2832u, Error> {
-    Ok(find_device(serial)
-        .await?
-        .open_rtl2832u(Default::default())
-        .await?)
-}
-
-async fn open_device(serial: Option<&str>) -> Result<Device, Error> {
-    Ok(find_device(serial).await?.open(Default::default()).await?)
-}
-
-fn reg_dump_file_name_for_block(base: impl AsRef<Path>, block: reg::Block) -> PathBuf {
-    let file_name = match block {
-        reg::Block::Demod { page } => Cow::Owned(format!("demod_{page}.dat")),
-        reg::Block::Usb => Cow::Borrowed("usb.dat"),
-        reg::Block::System => Cow::Borrowed("system.dat"),
-        reg::Block::Tuner => Cow::Borrowed("tuner.dat"),
-        reg::Block::Rom => Cow::Borrowed("rom.dat"),
-        reg::Block::I2c => Cow::Borrowed("i2c.dat"),
-    };
-
-    base.as_ref().join(&*file_name)
-}
-
-fn block_size(block: reg::Block) -> u16 {
-    match block {
-        reg::Block::Demod { page: _ } => 0x100,
-        reg::Block::Usb => 0x1000,
-        reg::Block::System => 0x1000,
-        reg::Block::Tuner => todo!(),
-        reg::Block::Rom => todo!(),
-        reg::Block::I2c => todo!(),
-    }
-}
-
-async fn dump_regs(
-    serial: Option<&str>,
-    demod: Vec<u8>,
-    usb: bool,
-    system: bool,
-    tuner: bool,
-    rom: bool,
-    path: impl AsRef<Path>,
-) -> Result<(), Error> {
-    let mut rtl2832u = open_rtl2832u(serial).await?;
-
-    let mut dump_block = async |block: reg::Block| {
-        let base_address = block.base_address().unwrap_or_default();
-
-        tracing::info!(?block, base_address, "Dumping");
-
-        match rtl2832u
-            .read(block.with_address(base_address), block_size(block))
-            .await
-        {
-            Ok(data) => {
-                reg::demod::visit(PrintRegs {
-                    buffer: &data,
-                    offset: 0,
-                    block,
-                });
-
-                std::fs::write(reg_dump_file_name_for_block(&path, block), &data)?;
-            }
-            Err(error) => {
-                tracing::warn!(?block, %error, "Failed to dump block");
-            }
-        }
-
-        Ok::<(), Error>(())
-    };
-
-    for page in demod {
-        if page > 4 {
-            bail!("Invalid demod page: {page}");
-        }
-        dump_block(reg::Block::Demod { page }).await?;
-    }
-
-    if usb {
-        dump_block(reg::Block::Usb).await?;
-    }
-
-    if system {
-        dump_block(reg::Block::System).await?;
-    }
-
-    if tuner {
-        todo!();
-    }
-
-    if rom {
-        todo!();
-    }
-
-    Ok(())
-}
-
-fn print_reg_dump(
-    path: impl AsRef<Path>,
-    offset: Option<usize>,
-    length: Option<usize>,
-    decode: bool,
-    hexdump: bool,
-) -> Result<(), Error> {
-    let print_block = |block: reg::Block| {
-        let path = reg_dump_file_name_for_block(&path, block);
-
-        match std::fs::read(&path) {
-            Ok(data) => {
-                println!("# `{block:?}`\n\n");
-                let mut data = &*data;
-
-                if let Some(offset) = offset {
-                    data = &data[offset..];
-                }
-                if let Some(length) = length {
-                    data = &data[..length];
-                }
-
-                if hexdump {
-                    println!("```");
-                    hexyl(&data, offset.unwrap_or_default());
-                    println!("```\n");
-                }
-                if decode {
-                    println!("```");
-                    reg::visit(PrintRegs {
-                        buffer: &data,
-                        offset: offset.unwrap_or_default(),
-                        block,
-                    });
-                    println!("```\n");
-                }
-            }
-            Err(error) => {
-                tracing::warn!(?block, ?path, %error, "Could not read file");
-            }
-        }
-    };
-
-    for page in 0..5 {
-        print_block(reg::Block::Demod { page });
-    }
-
-    print_block(reg::Block::Usb);
-    print_block(reg::Block::System);
-
-    Ok(())
-}
-
-pub struct PrintRegs<'a> {
-    buffer: &'a [u8],
-    offset: usize,
-    block: reg::Block,
-}
-
-impl<'a> reg::Visitor for PrintRegs<'a> {
-    fn visit<R>(&mut self)
-    where
-        R: reg::RegisterValue,
-    {
-        if self.block == R::ADDRESS.block() {
-            let offset = usize::try_from(
-                R::ADDRESS.address() - self.block.base_address().unwrap_or_default(),
-            )
-            .unwrap();
-
-            if let Some(offset) = offset.checked_sub(self.offset) {
-                let n = usize::try_from(<R::Bits as reg::Bits>::LENGTH).unwrap();
-                if offset + n <= self.buffer.len() {
-                    let data = &self.buffer[offset..][..n];
-                    let bits = <R::Bits as reg::Bits>::from_bytes(data);
-                    let value = R::from_bits(bits);
-                    println!("{:?} = {value:?}", R::ADDRESS);
-                }
-            }
-        }
-    }
-}
-
-fn hexyl(data: &[u8], offset: usize) {
-    let mut stdout = stdout();
-    let mut printer = hexyl::PrinterBuilder::new(&mut stdout).build();
-    printer.display_offset(offset.try_into().unwrap());
-    printer.print_all(Cursor::new(data)).unwrap();
+    cancellation_token
 }

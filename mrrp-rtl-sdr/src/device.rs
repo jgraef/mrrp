@@ -78,10 +78,9 @@ impl Device {
     }
 
     pub async fn close(mut self) -> Result<(), Error> {
-        if let Some(mut inner) = self.inner.take() {
-            inner.reset().await?;
-        }
-
+        tracing::debug!("closing device");
+        let mut inner = self.inner.take().expect("device lost");
+        inner.reset().await?;
         Ok(())
     }
 
@@ -106,6 +105,9 @@ impl Device {
     }
 
     pub async fn reader(&mut self, buffer_size: usize) -> Result<Reader, Error> {
+        // todo: we need to wrap the rtl2832u::Reader and add a Drop impl that stops the
+        // data stream.
+
         let rtl2832u = &mut self.expect_inner_mut().rtl2832u;
         rtl2832u.start_data_stream().await?;
         Ok(rtl2832u.reader(buffer_size)?)

@@ -5,6 +5,7 @@ members = [
     "mrrp-cli",
     "mrrp-rtl-sdr",
     "mrrp-rtl-sdr-test",
+    "mrrp-rtl-tcp",
     "mrrp-sat",
     "mrrp-sdr",
     "mrrp-widgets",

@@ -432,6 +432,8 @@ impl Rtl2832u {
     pub async fn reset(&mut self) -> Result<(), Error> {
         tracing::debug!("resetting device");
 
+        self.stop_data_stream().await?;
+
         // todo: reset tuner
 
         // turn off I2C repeater, if it is on.
@@ -458,9 +460,22 @@ impl Rtl2832u {
     }
 
     pub async fn start_data_stream(&mut self) -> Result<(), Error> {
+        tracing::debug!("start data stream");
+
         self.write_register_update::<reg::usb::EPA_CTL>(|epa_ctl| {
             epa_ctl.set_stall_endpoint(false);
             epa_ctl.set_fifo_reset(false);
+        })
+        .await?;
+        Ok(())
+    }
+
+    pub async fn stop_data_stream(&mut self) -> Result<(), Error> {
+        tracing::debug!("stop data stream");
+
+        self.write_register_update::<reg::usb::EPA_CTL>(|epa_ctl| {
+            epa_ctl.set_stall_endpoint(true);
+            epa_ctl.set_fifo_reset(true);
         })
         .await?;
         Ok(())
