@@ -14,7 +14,14 @@ use anyhow::{
     Error,
     bail,
 };
-use mrrp_rtl_sdr::rtl2832u::register as reg;
+use mrrp_rtl_sdr::{
+    rtl2832u::register as reg,
+    tuner::{
+        Tuner,
+        TunerProbe,
+        r82xx,
+    },
+};
 
 use crate::open::open_rtl2832u;
 
@@ -49,9 +56,16 @@ pub async fn dump_regs(
     system: bool,
     tuner: bool,
     rom: bool,
+    tuner_i2c: bool,
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
+    let path = path.as_ref();
     let mut rtl2832u = open_rtl2832u(serial).await?;
+
+    if !demod.is_empty() || tuner_i2c {
+        tracing::info!("We have to poweron the DEMOD chip.");
+        rtl2832u.poweron_demod().await?;
+    }
 
     let mut dump_block = async |block: reg::Block| {
         let base_address = block.base_address().unwrap_or_default();
@@ -100,6 +114,33 @@ pub async fn dump_regs(
 
     if rom {
         todo!();
+    }
+
+    if tuner_i2c {
+        rtl2832u
+            .with_i2c_repeater(async |rtl2832u| {
+                if let Some(mut tuner) = r82xx::R82xxProbe.try_open(rtl2832u).await? {
+                    let name = tuner.name().to_owned();
+                    tracing::info!("Found tuner: {name}");
+
+                    let _tuner = tuner.access(rtl2832u);
+
+                    //let data = tuner.read_registers(0.into(), 0x10).await?;
+                    //let data2 = tuner.read_registers(0x10.into(), 0x10).await?;
+
+                    //hexyl(&data, 0);
+                    //hexyl(&data2, 0x10);
+
+                    //std::fs::write(path.join(format!("tuner_i2c_{name}.dat")), &data)?;
+                    todo!();
+                }
+                else {
+                    tracing::warn!("No tuner found");
+                }
+
+                Ok::<(), Error>(())
+            })
+            .await?;
     }
 
     Ok(())

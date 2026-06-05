@@ -2,6 +2,8 @@ use crate::{
     Error,
     enumerate::DeviceInfo,
     rtl2832u::{
+        DEFAULT_CRYSTAL_FREQUENCY,
+        IfMode,
         Reader,
         Rtl2832u,
         filter::FirFilter,
@@ -10,6 +12,7 @@ use crate::{
         AnyTuner,
         AnyTunerProbe,
         TunerProbe,
+        r82xx,
     },
 };
 
@@ -38,6 +41,13 @@ pub struct Device {
     /// The RTL2832U and tuner are in an `Option` so we can take them out and
     /// spawn a task to run the reset code if this struct is dropped.
     inner: Option<Inner>,
+
+    /// The frequency correction factor (in ppm) that was set on the
+    /// RTL2832U.
+    frequency_correction: i16,
+    // /// The crystal frequency (in Hz) that was set on the
+    // /// RTL2832U.
+    // rtl_crystal_frequency: u32,
 }
 
 impl Device {
@@ -63,17 +73,22 @@ impl Device {
             .await?
             .ok_or(Error::NoTunerFound)?;
 
+        // todo: this is specifically for R828D and Blog v4 for testing
+
         // if blog v4, set tuner_xtal = R828D_XTAL_FREQ, otherwise use rtl_xtal
-        //
-        // #define R828D_XTAL_FREQ		16000000
-        // #define DEF_RTL_XTAL_FREQ	28800000
-        // #define MIN_RTL_XTAL_FREQ	(DEF_RTL_XTAL_FREQ - 1000)
-        // #define MAX_RTL_XTAL_FREQ	(DEF_RTL_XTAL_FREQ + 1000)
+        // librtlsdr uses the corrected crystal frequency
+        rtl2832u.set_if_mode(IfMode::If).await?;
+        rtl2832u
+            .set_if_frequency(r82xx::DEFAULT_IF_FREQUENCY, DEFAULT_CRYSTAL_FREQUENCY)
+            .await?;
+        rtl2832u.enable_spectrum_inversion(true).await?;
 
         Ok(Self {
             device_info,
             reset_on_drop: options.reset_on_drop,
             inner: Some(Inner { rtl2832u, tuner }),
+            frequency_correction: 0,
+            // rtl_crystal_frequency: DEFAULT_CRYSTAL_FREQUENCY,
         })
     }
 
@@ -94,12 +109,12 @@ impl Device {
         self.inner.as_mut().expect("device lost")
     }
 
-    /// todo: for testing only
+    /// todo: pub for testing only
     pub fn tuner(&mut self) -> &mut AnyTuner {
         &mut self.expect_inner_mut().tuner
     }
 
-    /// todo: for testing only
+    /// todo: pub for testing only
     pub fn rtl2832(&mut self) -> &mut Rtl2832u {
         &mut self.expect_inner_mut().rtl2832u
     }
@@ -111,6 +126,30 @@ impl Device {
         let rtl2832u = &mut self.expect_inner_mut().rtl2832u;
         rtl2832u.start_data_stream().await?;
         Ok(rtl2832u.reader(buffer_size)?)
+    }
+
+    /// Set the frequency correction factor in ppm.
+    ///
+    /// This is a 14-bit signed integer, thus must be between -8192 and 8191
+    /// inclusive.
+    pub async fn set_frequency_correction(
+        &mut self,
+        frequency_correction: i16,
+    ) -> Result<(), Error> {
+        if self.frequency_correction != frequency_correction {
+            assert!(
+                frequency_correction >= -8192 && frequency_correction <= 8191,
+                "frequency_correction must be between -8192 and 8191 inclusive: {frequency_correction}"
+            );
+
+            self.rtl2832()
+                .set_sample_frequency_correction(frequency_correction)
+                .await?;
+
+            self.frequency_correction = frequency_correction;
+        }
+
+        Ok(())
     }
 }
 
@@ -144,4 +183,11 @@ impl Drop for Device {
             });
         }
     }
+}
+
+/// Applies `correction` (in PPM) to `frequency` (in Hz).
+#[inline]
+pub fn apply_frequency_correction(frequency: u32, correction: i16) -> u32 {
+    // todo: check for overflow?
+    (frequency as f32 * (1.0 + correction as f32 / 1.0e6)) as u32
 }

@@ -72,6 +72,7 @@ async fn main() -> Result<(), Error> {
         }
         Command::Reset { serial } => {
             let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            rtl2832u.stop_data_stream().await?;
             rtl2832u.reset().await?;
         }
         Command::DumpRegs {
@@ -81,6 +82,7 @@ async fn main() -> Result<(), Error> {
             mut system,
             tuner,
             rom,
+            tuner_i2c,
             output,
         } => {
             let path = output.as_deref().unwrap_or_else(|| Path::new("."));
@@ -93,7 +95,7 @@ async fn main() -> Result<(), Error> {
                 bail!("Must be a directory: {path:?}");
             }
 
-            if demod.is_empty() && !usb && !system && !tuner && !rom {
+            if demod.is_empty() && !usb && !system && !tuner && !rom && !tuner_i2c {
                 // all
                 demod.extend(0..5);
                 usb = true;
@@ -101,7 +103,17 @@ async fn main() -> Result<(), Error> {
                 // todo: tuner, rom
             }
 
-            dump_regs(serial.as_deref(), demod, usb, system, tuner, rom, path).await?;
+            dump_regs(
+                serial.as_deref(),
+                demod,
+                usb,
+                system,
+                tuner,
+                rom,
+                tuner_i2c,
+                path,
+            )
+            .await?;
         }
         Command::PrintRegDump {
             path,
@@ -145,42 +157,40 @@ async fn main() -> Result<(), Error> {
         Command::BiasTee { serial, command } => {
             gpio_command(serial.as_deref(), 0, command).await?;
         }
-        Command::Test { serial } => {
+        Command::Test { serial, stream } => {
             let mut device = open_device(serial.as_deref()).await?;
-            let rtl2832u = device.rtl2832();
 
-            //rtl2832u.set_test_mode(true).await?;
+            if stream {
+                let mut reader = device.reader(0x100000).await?;
 
-            // todo: reading fails "endpoint stalled".
-            rtl2832u.start_data_stream().await?;
+                run_til_shutdown(async {
+                    loop {
+                        match reader.fill_buf().await {
+                            Ok(buffer) => {
+                                let n = buffer.len() / 2;
+                                for k in 0..n {
+                                    // not exactly right but close enough
+                                    let _i = ((buffer[k * 2] as f32) - 128.0) / 255.0;
+                                    let _q = ((buffer[k * 2 + 1] as f32) - 128.0) / 255.0;
 
-            let mut reader = rtl2832u.reader(0x100000)?;
-
-            loop {
-                match reader.fill_buf().await {
-                    Ok(buffer) => {
-                        let n = buffer.len() / 2;
-                        for k in 0..n {
-                            // not exactly right but close enough
-                            let i = ((buffer[k * 2] as f32) - 128.0) / 255.0;
-                            let q = ((buffer[k * 2 + 1] as f32) - 128.0) / 255.0;
-
-                            println!("{i:.04}+{q:.04}i, ");
+                                    //println!("{i:.04}+{q:.04}i, ");
+                                }
+                            }
+                            Err(error) => {
+                                return if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                                    tracing::warn!("reader eof");
+                                }
+                                else {
+                                    tracing::warn!(%error, "reader error");
+                                };
+                            }
                         }
                     }
-                    Err(error) => {
-                        device.close().await?;
-                        return if error.kind() == std::io::ErrorKind::UnexpectedEof {
-                            tracing::warn!("reader eof");
-                            Ok(())
-                        }
-                        else {
-                            tracing::warn!(%error, "reader error");
-                            Err(error.into())
-                        };
-                    }
-                }
+                })
+                .await;
             }
+
+            device.close().await?;
         }
         Command::Tcp {
             serial,
@@ -259,6 +269,9 @@ enum Command {
         #[clap(long)]
         rom: bool,
 
+        #[clap(long)]
+        tuner_i2c: bool,
+
         #[clap(short, long)]
         output: Option<PathBuf>,
     },
@@ -310,6 +323,9 @@ enum Command {
     Test {
         #[clap(short, long)]
         serial: Option<String>,
+
+        #[clap(short, long)]
+        stream: bool,
     },
     Tcp {
         #[clap(short, long)]
@@ -341,4 +357,12 @@ fn shutdown_signal() -> CancellationToken {
     });
 
     cancellation_token
+}
+
+async fn run_til_shutdown<R>(fut: impl Future<Output = R>) -> Option<R> {
+    let cancellation_token = shutdown_signal();
+    tokio::select! {
+        _ = cancellation_token.cancelled() => None,
+        output = fut => Some(output),
+    }
 }

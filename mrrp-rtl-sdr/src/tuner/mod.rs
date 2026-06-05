@@ -31,6 +31,8 @@ pub trait TunerProbe: Clone + Debug + Sized + Send + Sync + 'static {
 
 pub trait Tuner: Debug + Sized + Send + Sync + 'static {
     type Error: TunerError;
+
+    fn name(&self) -> &str;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -143,14 +145,16 @@ impl TunerProbe for AnyTunerProbe {
 }
 
 trait AnyTunerTrait: Debug + Send + Sync + 'static {
-    // todo
+    fn name(&self) -> &str;
 }
 
 impl<T> AnyTunerTrait for T
 where
     T: Tuner,
 {
-    // todo
+    fn name(&self) -> &str {
+        Tuner::name(self)
+    }
 }
 
 pub struct AnyTuner(Box<dyn AnyTunerTrait>);
@@ -169,6 +173,10 @@ impl Debug for AnyTuner {
 
 impl Tuner for AnyTuner {
     type Error = AnyTunerError;
+
+    fn name(&self) -> &str {
+        self.0.name()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -176,6 +184,10 @@ pub struct NullTuner;
 
 impl Tuner for NullTuner {
     type Error = Infallible;
+
+    fn name(&self) -> &str {
+        "null"
+    }
 }
 
 impl TunerProbe for NullTuner {

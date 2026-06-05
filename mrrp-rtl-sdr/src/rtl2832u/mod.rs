@@ -31,6 +31,7 @@ use std::{
     time::Duration,
 };
 
+use bitfield::BitRangeMut;
 use pin_project_lite::pin_project;
 use tokio::io::{
     AsyncBufRead,
@@ -45,12 +46,17 @@ use crate::rtl2832u::{
         Bits,
         Register,
         RegisterValue,
-        shadow::ShadowMap,
+        shadow::{
+            self,
+            ShadowMap,
+        },
     },
 };
 
 pub const INTERFACE: u8 = 0;
 pub const DATA_ENDPOINT: u8 = 0x81;
+
+pub const DEFAULT_CRYSTAL_FREQUENCY: u32 = 28800000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -162,7 +168,7 @@ impl Rtl2832u {
     /// Read a statically typed [`Register`]
     pub async fn read_register<R>(&mut self) -> Result<R, Error>
     where
-        R: RegisterValue,
+        R: RegisterValue + shadow::ShadowRegister,
     {
         if let Some(value) = R::shadow_read(&self.shadow_map) {
             Ok(*value)
@@ -179,7 +185,7 @@ impl Rtl2832u {
     /// shadow map though.
     pub async fn read_register_no_shadow<R>(&mut self) -> Result<R, Error>
     where
-        R: RegisterValue,
+        R: RegisterValue + shadow::ShadowRegister,
     {
         let data = self
             .read(R::ADDRESS, <R::Bits as register::Bits>::LENGTH)
@@ -198,7 +204,7 @@ impl Rtl2832u {
     /// Write a statically typed [`Register`]
     pub async fn write_register<R>(&mut self, value: R) -> Result<(), Error>
     where
-        R: RegisterValue,
+        R: RegisterValue + shadow::ShadowRegister,
     {
         tracing::debug!(address = ?R::ADDRESS, ?value, "writing register");
 
@@ -237,7 +243,7 @@ impl Rtl2832u {
     /// ```
     pub async fn write_register_with<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
     where
-        R: RegisterValue,
+        R: RegisterValue + shadow::ShadowRegister,
     {
         let mut value = Default::default();
         f(&mut value);
@@ -247,7 +253,7 @@ impl Rtl2832u {
 
     pub async fn write_register_update<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
     where
-        R: RegisterValue,
+        R: RegisterValue + shadow::ShadowRegister,
     {
         let current_value = self.read_register::<R>().await?;
 
@@ -318,7 +324,7 @@ impl Rtl2832u {
         self.write_register(iic_repeat).await?;
 
         // disable spectrum inversion and adjacent channel rejection
-        self.write_register_with::<reg::demod::SPEC_INV>(|spec_inv| {
+        self.write_register_with::<reg::demod::SPEC_INV_EN_ACI>(|spec_inv| {
             spec_inv.set_spec_inv(false);
             spec_inv.set_en_aci(false);
         })
@@ -392,11 +398,8 @@ impl Rtl2832u {
         .await?;
 
         // zero-IF, DC cancellation,
-        self.write_register_with::<reg::demod::DC_CANCEL>(|dc_cancel| {
-            // this is disabled in rtl_test. i think this is only necessary for low
-            // frequencies.
-            //
-            // this is disabled later in rtlsdr_open when a r828d or r820t is detected
+        self.write_register_with::<reg::demod::ZERO_IF_IQ_COMP>(|dc_cancel| {
+            // Zero-IF mode
             dc_cancel.set_en_bbin(true);
 
             dc_cancel.set_en_dc_est(true);
@@ -424,6 +427,7 @@ impl Rtl2832u {
     pub async fn poweron_demod(&mut self) -> Result<(), Error> {
         self.write_register_with::<reg::sys::DEMOD_CTL>(|demod_ctl| {
             demod_ctl.set_pll_enable(true);
+            demod_ctl.set_hardware_reset(true);
         })
         .await?;
         Ok(())
@@ -491,6 +495,70 @@ impl Rtl2832u {
 
         Ok(Reader { endpoint_reader })
     }
+
+    pub async fn set_if_mode(&mut self, if_mode: IfMode) -> Result<(), Error> {
+        let is_zero_if = matches!(if_mode, IfMode::ZeroIf);
+
+        // this has already been initialized, so it's in the shadow map
+        self.write_register_update::<reg::demod::ZERO_IF_IQ_COMP>(|zero_if| {
+            zero_if.set_en_bbin(is_zero_if);
+        })
+        .await?;
+
+        // enable in-phase ADC input
+        //
+        // this has not been touched before, but we know the lower nibble has to be
+        // 0x0d. should be use `write_register_update` anyway? would be nice if
+        // we knew what that lower nibble actually encodes.
+        self.write_register_with::<reg::demod::ADC_ENABLE>(|adc_enable| {
+            adc_enable.set_en_i(true);
+            adc_enable.set_en_q(is_zero_if);
+
+            // idk what this is. it's this at startup and librtlsdr sets this, whenever they
+            // toggle ADC inputs
+            adc_enable.set_bit_range(3, 0, 0xd);
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn set_if_frequency(
+        &mut self,
+        frequency: u32,
+        crystal_frequency: u32,
+    ) -> Result<(), Error> {
+        let value = pset_iffreq_from_hz(frequency, crystal_frequency);
+
+        // todo: we made the pset_iffreq register 32bit for convenience, but there might
+        // be something important in the upper bits (DDC offset?). these bits
+        // are also not 0 at startup, so just to be sure, we'll to an update here and
+        // only change bits that we want changed.
+
+        self.write_register_update::<reg::demod::PSET_IFFREQ>(|pset_iffreq| {
+            pset_iffreq.set_pset_iffreq(value);
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn set_sample_frequency_correction(&mut self, ppm: i16) -> Result<(), Error> {
+        self.write_register_with::<reg::demod::SAMP_FREQ_CORR>(|samp_freq_corr| {
+            samp_freq_corr.set_samp_freq_corr(ppm);
+        })
+        .await
+    }
+
+    /// Enables or disables spectrum inversion
+    pub async fn enable_spectrum_inversion(&mut self, enable: bool) -> Result<(), Error> {
+        self.write_register_update::<reg::demod::SPEC_INV_EN_ACI>(|spec_inv| {
+            spec_inv.set_spec_inv(enable);
+        })
+        .await?;
+
+        Ok(())
+    }
 }
 
 pin_project! {
@@ -535,6 +603,12 @@ impl AsyncBufRead for Reader {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum IfMode {
+    If,
+    ZeroIf,
+}
+
 /// Calculate [`pset_iffreq`](reg::demod::PSET_IFFREQ) value from intermediate
 /// frequency and crystal frequency.
 ///
@@ -542,8 +616,16 @@ impl AsyncBufRead for Reader {
 ///
 /// - `f_if_d`: Intermediate frequency (IF) after sub-sampling
 /// - `f_crystal`: Crystal frequency
-pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
-    let f = -((f_if_d / f_crystal) * 4194304.0).floor();
+pub fn pset_iffreq_from_hz(f_if_d: u32, f_crystal: u32) -> u32 {
+    // librtlsdr does this with u32's but we're pretty sure that overflows.
+    //
+    // example: r82xx if is 3570000, multiplied by 4194304 is at least 44 bits. the
+    // division then would yield incorrect results, no?
+    //
+    // and since we're multiplying by 4194304 (2**22) floating-point arithmetic is
+    // well-suited here.
+
+    let f = -(f_if_d as f32 * 4194304.0 / f_crystal as f32).floor();
     (f as i32).cast_unsigned() & 0x003fffff
 }
 
@@ -556,7 +638,7 @@ mod tests {
 
     #[test]
     fn test_pset_iffreq_from_hz() {
-        let pset_iffreq = pset_iffreq_from_hz(4.57 * 1000000.0, 28.8 * 1000000.0);
+        let pset_iffreq = pset_iffreq_from_hz(4570000, 28800000);
         assert_eq!(pset_iffreq, 0x0035d82e);
     }
 

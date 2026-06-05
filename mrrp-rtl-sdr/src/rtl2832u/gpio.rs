@@ -64,6 +64,17 @@ impl PadConfig {
 }
 
 impl Rtl2832u {
+    /// Returns an unconfigured GPIO pin
+    ///
+    /// # TODO
+    ///
+    /// Make this take `&self` instead and keep track of which pins are being
+    /// used already. Then we'd want a `try_` variant that returns `None` if the
+    /// pin is already in use, otherwise we can wait for the lock.
+    ///
+    /// Note though that we'd need to synchronize access to the registers since
+    /// they're basically shared between pins. Also the shadow map needs locking
+    /// then.
     pub fn gpio(&mut self, pin: u8) -> GpioPin<'_> {
         assert!(pin < 8, "Invalid GPIO pin: {pin}");
         GpioPin {

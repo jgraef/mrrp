@@ -17,7 +17,10 @@
 //!
 //! [1]: https://docs.rs/embedded-hal-async/latest/embedded_hal_async/i2c/trait.I2c.html
 
-use std::fmt::Debug;
+use std::fmt::{
+    Debug,
+    Display,
+};
 
 use crate::rtl2832u::{
     Error,
@@ -75,14 +78,16 @@ impl Debug for I2cAddress {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+/*#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::From, derive_more::Into,
+)]
 pub struct I2cRegister(pub u8);
 
 impl Debug for I2cRegister {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "I2cRegister(0x{:02x})", self.0)
     }
-}
+}*/
 
 impl Rtl2832u {
     /// Reads data from the I2C device.
@@ -91,17 +96,19 @@ impl Rtl2832u {
         i2c_address: I2cAddress,
         length: u16,
     ) -> Result<Vec<u8>, Error> {
-        //        self.write(Register::I2c { i2c_address }, &[i2c_register])
-        //            .await?;
+        tracing::debug!(?i2c_address, ?length, "reading I2C");
 
         self.read(Register::I2c { i2c_address }, length).await
     }
 
     /// Writes data to the I2C device.
     pub async fn write_i2c(&mut self, i2c_address: I2cAddress, data: &[u8]) -> Result<(), Error> {
+        tracing::debug!(?i2c_address, ?data, "writing I2C");
+
         self.write(Register::I2c { i2c_address }, data).await
     }
 
+    /*
     /// Reads a register from the I2C device.
     ///
     /// First writes the register address to the device, then reads back data.
@@ -151,7 +158,7 @@ impl Rtl2832u {
         Ok(())
         */
         todo!("write_i2c_register");
-    }
+    } */
 
     /// Enable the I2C repeater
     ///
@@ -180,11 +187,14 @@ impl Rtl2832u {
     pub async fn with_i2c_repeater<F, R, E>(&mut self, mut f: F) -> Result<R, E>
     where
         F: AsyncFnMut(&mut Self) -> Result<R, E>,
-        E: From<Error>,
+        E: From<Error> + Display,
     {
         self.set_i2c_repeater(true).await?;
 
         let output = f(self).await;
+        if let Err(error) = &output {
+            tracing::error!(%error, "Error in I2C repeater transaction");
+        }
 
         let disable_result = self.set_i2c_repeater(false).await;
 
@@ -247,6 +257,7 @@ impl embedded_hal_async::i2c::I2c for Rtl2832u {
     }
 }
 
+/*
 #[derive(Clone, Copy)]
 pub struct I2cReadProbe {
     pub register: I2cRegister,
@@ -277,3 +288,4 @@ impl I2cReadProbe {
         }
     }
 }
+*/

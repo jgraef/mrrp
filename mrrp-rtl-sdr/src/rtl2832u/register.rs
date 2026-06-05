@@ -265,9 +265,7 @@ impl Register {
 /// fields in their bits (if applicable). This trait defines how to convert from
 /// this register value to plain bit type, e.g. `u8`, `u32`, but also large
 /// registers `[u8; 20]`.
-pub trait RegisterValue:
-    Debug + shadow::ShadowRegister + Default + Copy + Clone + PartialEq
-{
+pub trait RegisterValue<R = Register>: Debug + Default + Copy + Clone + PartialEq {
     const ADDRESS: Register;
     type Bits: Bits;
 
@@ -449,10 +447,7 @@ macro_rules! registers {
             )*
         }
 
-
         registers!(@generate_shadow([$((($($shadow)?), $name, $block)),*], []));
-
-
     };
     (@parse_address(demod, ($page:expr, $address:expr))) => {
         Register::demod($page, $address)
@@ -770,15 +765,17 @@ pub mod demod {
             /// MPEG_IO_OPT_1_0: 0, 0x07
             pub u8, mpeg_io_opt_1_0, set_mpeg_io_opt_1_0: 7, 6;
         };
-        AD_EN_REG1_AD_EN_REG: u8 = demod(0, 0x08) {
+        ADC_ENABLE: u8 = demod(0, 0x08) {
             /// AD_EN_REG1: 0, 0x08
             ///
             /// Enable ADC_Q
-            pub bool, ad_en_reg1, set_ad_en_reg1: 6;
+            pub bool, en_q, set_en_q: 6;
             /// AD_EN_REG: 0, 0x08
             ///
             /// Enable ADC_I
-            pub bool, ad_en_reg, set_ad_en_reg: 7;
+            pub bool, en_i, set_en_i: 7;
+
+            // note the lower 4 bits here are 0xd. they're this at startup, and librtlsdr always keeps them that way when toggling ADC inputs.
         };
         AD_AVI_AD_AVQ_AD_AV_REF: u8 = demod(0, 0x09) {
             /// AD_AVI: 0, 0x09
@@ -970,13 +967,16 @@ pub mod demod {
             /// DAGC_TRG_VAL: 1, 0x12
             pub u8, dagc_trg_val, set_dagc_trg_val: 7, 0;
         };
-        SPEC_INV: u8 = demod(1, 0x15) {
+        SPEC_INV_EN_ACI: u8 = demod(1, 0x15) {
             /// SPEC_INV: 1, 0x15
+            ///
+            /// Enable spectrum inversion - 1=on
             pub bool, spec_inv, set_spec_inv: 0;
             /// En_aci
+            ///
+            /// Enable adjacent channel rejection - 1=on
             pub bool, en_aci, set_en_aci: 1;
         };
-
         /// See PSET_IFFREQ
         UNK_DDC_OFFSET: u16 = demod(1, 0x16) {};
 
@@ -995,6 +995,12 @@ pub mod demod {
         /// [1]: https://code.googlesource.com/linux/torvalds/linux/+/6d36c728bc2e2d632f4b0dea00df5532e20dfdab/drivers/media/dvb-frontends/rtl2832_sdr.c#509
         PSET_IFFREQ: u32 = demod(1, 0x18) {
             /// PSET_IFFREQ: 1, 0x19
+            ///
+            /// ```plain
+            /// pset_iffreq = -floor(f_if / f_crystal * 4194304)
+            /// ```
+            ///
+            /// There's a helper function [`pset_iffreq_from_hz`](crate::rtl2832u::pset_iffreq_from_hz) for this.
             pub u32, pset_iffreq, set_pset_iffreq: 21, 0;
         };
         /// Not in datasheet, but both librtlsdr and the linux sdr driver put a 20 byte FIR filter here.
@@ -1004,6 +1010,26 @@ pub mod demod {
         EN_CACQ_NOTCH: u8 = demod(1, 0x61) {
             /// EN_CACQ_NOTCH: 1, 0x61
             pub bool, en_cacq_notch, set_en_cacq_notch: 4;
+        };
+        SAMP_FREQ_CORR: u16 = demod(1, 0x3e) {
+            /// Unknown
+            ///
+            /// In the rtl_test dump it's 0b00, but in my `small_init` dump it's 0b01.
+            ///
+            /// librtlsdr sets this to 0 when setting the frequency correction.
+            pub u8, unk_0, set_unk0: 15, 14;
+            /// Sample frequency correction
+            ///
+            /// In librtlsdr (`rtlsdr_set_sample_freq_correction`):
+            ///
+            /// ```c
+            /// int16_t offs = ppm * (-1) * TWO_POW(24) / 1000000;
+            /// tmp = offs & 0xff;
+            /// r |= rtlsdr_demod_write_reg(dev, 1, 0x3f, tmp, 1);
+            /// tmp = (offs >> 8) & 0x3f;
+            /// r |= rtlsdr_demod_write_r
+            /// ```
+            pub i16, samp_freq_corr, set_samp_freq_corr: 13, 0;
         };
         KB_P1_KB_P2: u8 = demod(1, 0x64) {
             /// KB_P1: 1, 0x64
@@ -1170,7 +1196,7 @@ pub mod demod {
             /// EN_BK_TRK: 1, 0xa6
             pub bool, en_bk_trk, set_en_bk_trk: 7;
         };
-        DC_CANCEL: u8 = demod(1, 0xb1) {
+        ZERO_IF_IQ_COMP: u8 = demod(1, 0xb1) {
             /// EN_BBIN: 1, 0xb1
             ///
             /// Enable Zero-IF input
