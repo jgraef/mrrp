@@ -17,10 +17,16 @@
 //!
 //! [1]: https://docs.rs/embedded-hal-async/latest/embedded_hal_async/i2c/trait.I2c.html
 
-use std::fmt::{
-    Debug,
-    Display,
+use std::{
+    collections::HashSet,
+    fmt::{
+        Debug,
+        Display,
+    },
+    sync::Arc,
 };
+
+use parking_lot::Mutex;
 
 use crate::rtl2832u::{
     Error,
@@ -29,6 +35,7 @@ use crate::rtl2832u::{
         Register,
         demod::SOFT_RST_IIC_REPEAT,
     },
+    usb::UsbInterface,
 };
 
 /// I2C address
@@ -78,87 +85,75 @@ impl Debug for I2cAddress {
     }
 }
 
-/*#[derive(
-    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::From, derive_more::Into,
-)]
-pub struct I2cRegister(pub u8);
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("The I2C device at {i2c_address:?} is already in use.")]
+pub struct I2cDeviceBusy {
+    pub i2c_address: I2cAddress,
+}
 
-impl Debug for I2cRegister {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "I2cRegister(0x{:02x})", self.0)
+#[derive(Debug)]
+pub struct I2cDevice {
+    usb_interface: UsbInterface,
+    i2c_address: I2cAddress,
+    i2c_device_locks: Arc<Mutex<HashSet<I2cAddress>>>,
+}
+
+impl I2cDevice {
+    pub fn address(&self) -> I2cAddress {
+        self.i2c_address
     }
-}*/
 
-impl Rtl2832u {
     /// Reads data from the I2C device.
-    pub async fn read_i2c(
-        &mut self,
-        i2c_address: I2cAddress,
-        length: u16,
-    ) -> Result<Vec<u8>, Error> {
-        tracing::debug!(?i2c_address, ?length, "reading I2C");
+    pub async fn read(&mut self, length: u16) -> Result<Vec<u8>, Error> {
+        tracing::debug!(i2c_address = ?self.i2c_address, ?length, "reading I2C");
 
-        self.read(Register::I2c { i2c_address }, length).await
+        self.usb_interface
+            .read(
+                Register::I2c {
+                    i2c_address: self.i2c_address,
+                },
+                length,
+            )
+            .await
     }
 
     /// Writes data to the I2C device.
-    pub async fn write_i2c(&mut self, i2c_address: I2cAddress, data: &[u8]) -> Result<(), Error> {
-        tracing::debug!(?i2c_address, ?data, "writing I2C");
+    pub async fn write(&mut self, data: &[u8]) -> Result<(), Error> {
+        tracing::debug!(i2c_address = ?self.i2c_address, ?data, "writing I2C");
 
-        self.write(Register::I2c { i2c_address }, data).await
+        self.usb_interface
+            .write(
+                Register::I2c {
+                    i2c_address: self.i2c_address,
+                },
+                data,
+            )
+            .await
     }
+}
 
-    /*
-    /// Reads a register from the I2C device.
-    ///
-    /// First writes the register address to the device, then reads back data.
-    pub async fn read_i2c_register(
-        &mut self,
-        i2c_address: I2cAddress,
-        i2c_register: I2cRegister,
-        length: u16,
-    ) -> Result<Vec<u8>, Error> {
-        tracing::debug!(?i2c_address, ?i2c_register, length, "read I2C registers");
-
-        self.write_i2c(i2c_address, &[i2c_register.0]).await?;
-        let data = self.read_i2c(i2c_address, length).await?;
-
-        tracing::debug!(
-            ?i2c_address,
-            ?i2c_register,
-            length,
-            ?data,
-            "read I2C registers"
-        );
-
-        Ok(data)
+impl Drop for I2cDevice {
+    fn drop(&mut self) {
+        let mut guard = self.i2c_device_locks.lock();
+        guard.remove(&self.i2c_address);
     }
+}
 
-    /// Writes data to the I2C device
-    pub async fn write_i2c_register(
-        &mut self,
-        i2c_address: I2cAddress,
-        i2c_register: I2cRegister,
-        data: &[u8],
-    ) -> Result<(), Error> {
-        tracing::debug!(?i2c_address, ?i2c_register, ?data, "write I2C registers");
+impl Rtl2832u {
+    pub fn try_open_i2c(&mut self, i2c_address: I2cAddress) -> Result<I2cDevice, I2cDeviceBusy> {
+        let mut guard = self.i2c_device_locks.lock();
 
-        /*
-        // take scratch buffer. can't borrow it because we call self.write
-        let mut buffer = std::mem::take(&mut self.scratch_buffer);
-        buffer.clear();
-        buffer.extend(std::iter::once(i2c_register.0).chain(data.iter().copied()));
-
-        self.write(Register::I2c { i2c_address }, &buffer).await?;
-
-        // give scratch buffer back
-        buffer.clear();
-        self.scratch_buffer = buffer;
-
-        Ok(())
-        */
-        todo!("write_i2c_register");
-    } */
+        if guard.insert(i2c_address) {
+            Ok(I2cDevice {
+                usb_interface: self.usb_interface.clone(),
+                i2c_address,
+                i2c_device_locks: self.i2c_device_locks.clone(),
+            })
+        }
+        else {
+            Err(I2cDeviceBusy { i2c_address })
+        }
+    }
 
     /// Enable the I2C repeater
     ///
@@ -206,54 +201,6 @@ impl Rtl2832u {
         else {
             output
         }
-    }
-}
-
-#[cfg(feature = "embedded-hal")]
-impl embedded_hal_async::i2c::Error for Error {
-    fn kind(&self) -> embedded_hal_async::i2c::ErrorKind {
-        // todo: can we determine the cause of an error?
-        embedded_hal_async::i2c::ErrorKind::Other
-    }
-}
-
-#[cfg(feature = "embedded-hal")]
-impl embedded_hal_async::i2c::ErrorType for Rtl2832u {
-    type Error = Error;
-}
-
-#[cfg(feature = "embedded-hal")]
-impl embedded_hal_async::i2c::I2c for Rtl2832u {
-    /// # TODO
-    ///
-    /// Not supported. We need to check if we can uphold the transaction
-    /// contract required by `embedded_hal`.
-    async fn transaction(
-        &mut self,
-        address: u8,
-        operations: &mut [embedded_hal_async::i2c::Operation<'_>],
-    ) -> Result<(), Self::Error> {
-        let _ = (address, operations);
-        todo!(
-            "we need to check if we can uphold the transaction contract required by embedded_hal"
-        );
-    }
-
-    async fn read(&mut self, address: u8, read: &mut [u8]) -> Result<(), Self::Error> {
-        let data = self
-            .read_i2c(
-                I2cAddress::from_right_aligned(address),
-                read.len().try_into().unwrap(),
-            )
-            .await?;
-        read.copy_from_slice(&data);
-        Ok(())
-    }
-
-    async fn write(&mut self, address: u8, write: &[u8]) -> Result<(), Self::Error> {
-        self.write_i2c(I2cAddress::from_right_aligned(address), write)
-            .await?;
-        Ok(())
     }
 }
 

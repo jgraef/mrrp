@@ -119,11 +119,9 @@ pub async fn dump_regs(
     if tuner_i2c {
         rtl2832u
             .with_i2c_repeater(async |rtl2832u| {
-                if let Some(mut tuner) = r82xx::R82xxProbe.try_open(rtl2832u).await? {
+                if let Some(tuner) = r82xx::R82xxProbe.try_open(rtl2832u).await? {
                     let name = tuner.name().to_owned();
                     tracing::info!("Found tuner: {name}");
-
-                    let _tuner = tuner.access(rtl2832u);
 
                     //let data = tuner.read_registers(0.into(), 0x10).await?;
                     //let data2 = tuner.read_registers(0x10.into(), 0x10).await?;

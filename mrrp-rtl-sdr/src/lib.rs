@@ -45,7 +45,7 @@ pub async fn open_any(options: OpenOptions) -> Result<Device, Error> {
 #[derive(Clone, Debug, Default)]
 pub struct OpenOptions {
     pub device: device::Options,
-    pub rtl2832u: rtl2832u::Options,
+    pub rtl2832u: rtl2832u::OpenOptions,
 }
 
 mod assert_send_sync {

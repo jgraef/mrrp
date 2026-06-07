@@ -73,7 +73,7 @@ async fn main() -> Result<(), Error> {
         Command::Reset { serial } => {
             let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
             rtl2832u.stop_data_stream().await?;
-            rtl2832u.reset().await?;
+            rtl2832u.reset(Default::default()).await?;
         }
         Command::DumpRegs {
             serial,

@@ -12,8 +12,8 @@ use crate::{
     OpenOptions,
     rtl2832u::{
         self,
-        INTERFACE,
         Rtl2832u,
+        usb::INTERFACE,
     },
 };
 
@@ -120,7 +120,7 @@ impl DeviceInfo {
     }
 
     /// Open a low-level [`Rtl2832u`] interface to the device.
-    pub async fn open_rtl2832u(&self, options: rtl2832u::Options) -> Result<Rtl2832u, Error> {
+    pub async fn open_rtl2832u(&self, options: rtl2832u::OpenOptions) -> Result<Rtl2832u, Error> {
         let usb_device = self.usb.open().await?;
 
         if options.detach_kernel_driver {

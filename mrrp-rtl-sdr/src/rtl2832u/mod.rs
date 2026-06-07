@@ -20,27 +20,22 @@ pub mod filter;
 pub mod gpio;
 pub mod i2c;
 pub mod register;
+pub(crate) mod usb;
 
 use std::{
+    collections::HashSet,
     fmt::Debug,
-    pin::Pin,
-    task::{
-        Context,
-        Poll,
-    },
+    sync::Arc,
     time::Duration,
 };
 
 use bitfield::BitRangeMut;
-use pin_project_lite::pin_project;
-use tokio::io::{
-    AsyncBufRead,
-    AsyncRead,
-    ReadBuf,
-};
+use parking_lot::Mutex;
 
+pub use crate::rtl2832u::usb::Reader;
 use crate::rtl2832u::{
     filter::FirFilter,
+    i2c::I2cAddress,
     register::{
         self as reg,
         Bits,
@@ -51,10 +46,8 @@ use crate::rtl2832u::{
             ShadowMap,
         },
     },
+    usb::UsbInterface,
 };
-
-pub const INTERFACE: u8 = 0;
-pub const DATA_ENDPOINT: u8 = 0x81;
 
 pub const DEFAULT_CRYSTAL_FREQUENCY: u32 = 28800000;
 
@@ -77,7 +70,7 @@ pub enum Error {
 
 /// Options for [`Rtl2832u`]
 #[derive(Clone, Debug)]
-pub struct Options {
+pub struct OpenOptions {
     /// Detach the kernel driver before claiming the USB interface.
     ///
     /// This only works on Linux, and is ignored on other platforms.
@@ -87,7 +80,7 @@ pub struct Options {
     pub control_timeout: Duration,
 }
 
-impl Default for Options {
+impl Default for OpenOptions {
     fn default() -> Self {
         Self {
             detach_kernel_driver: false,
@@ -96,14 +89,32 @@ impl Default for Options {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct ResetOptions {
+    pub stop_data_stream: bool,
+    pub poweroff_demod: bool,
+    pub reset_gpio: bool,
+}
+
+impl Default for ResetOptions {
+    fn default() -> Self {
+        Self {
+            stop_data_stream: true,
+            poweroff_demod: true,
+            reset_gpio: true,
+        }
+    }
+}
+
 /// Low-level interface to the `RTL2832U` chip via USB.
 #[derive(Debug)]
 pub struct Rtl2832u {
-    usb_interface: nusb::Interface,
-    control_timeout: Duration,
-    _scratch_buffer: Vec<u8>,
+    usb_interface: UsbInterface,
     i2c_repeater_enabled: bool,
     shadow_map: ShadowMap,
+
+    // note: a bitset would also be nice
+    i2c_device_locks: Arc<Mutex<HashSet<I2cAddress>>>,
 }
 
 impl Rtl2832u {
@@ -113,11 +124,10 @@ impl Rtl2832u {
     /// with the device at all.
     pub fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
         Self {
-            usb_interface,
-            control_timeout,
-            _scratch_buffer: vec![],
+            usb_interface: UsbInterface::new(usb_interface, control_timeout),
             i2c_repeater_enabled: false,
             shadow_map: ShadowMap::default(),
+            i2c_device_locks: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -127,24 +137,7 @@ impl Rtl2832u {
     /// length) and returns the raw bytes from these registers. See
     /// [`read_register`](Self::read_register) for a statically typed variant.
     pub async fn read(&mut self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
-        let request = address.control_in(length);
-
-        tracing::trace!(?request, "sending control request");
-
-        // wish they didn't allocate
-        let response_data = self
-            .usb_interface
-            .control_in(request, self.control_timeout)
-            .await?;
-
-        if response_data.len() != response_data.len() {
-            return Err(Error::InvalidControlResponse {
-                expected_length: length,
-                response_length: response_data.len(),
-            });
-        }
-
-        Ok(response_data)
+        self.usb_interface.read(address, length).await
     }
 
     /// Write raw registers
@@ -155,14 +148,7 @@ impl Rtl2832u {
     /// and [`write_register_update`](Self::write_register_update) for
     /// statically typed variants.
     pub async fn write(&mut self, address: Register, data: &[u8]) -> Result<(), Error> {
-        let request = address.control_out(data);
-
-        tracing::trace!(?request, "sending control request");
-
-        self.usb_interface
-            .control_out(request, self.control_timeout)
-            .await?;
-        Ok(())
+        self.usb_interface.write(address, data).await
     }
 
     /// Read a statically typed [`Register`]
@@ -433,32 +419,36 @@ impl Rtl2832u {
         Ok(())
     }
 
-    pub async fn reset(&mut self) -> Result<(), Error> {
+    pub async fn reset(&mut self, options: ResetOptions) -> Result<(), Error> {
         tracing::debug!("resetting device");
-
-        self.stop_data_stream().await?;
-
-        // todo: reset tuner
 
         // turn off I2C repeater, if it is on.
         self.set_i2c_repeater(false).await?;
 
-        // `rtlsdr_deinit_baseband` sets DEMOD_CTL to 0x20, meaning PLL, ADC I/Q are
-        // disabled, but the reset flag is inverted, so it's released. I think the PLL
-        // enable actually determines if the demod chip is powered.
+        if options.stop_data_stream {
+            self.stop_data_stream().await?;
+        }
 
-        // disable demod PLL, ADC I and Q
-        self.write_register_with::<reg::sys::DEMOD_CTL>(|demod_ctl| {
-            demod_ctl.set_hardware_reset(true);
-        })
-        .await?;
+        if options.poweroff_demod {
+            // `rtlsdr_deinit_baseband` sets DEMOD_CTL to 0x20, meaning PLL, ADC I/Q are
+            // disabled, but the reset flag is inverted, so it's released. I think the PLL
+            // enable actually determines if the demod chip is powered.
 
-        // disable GPIO outputs
-        //
-        // reset state from datasheet
-        self.write_register::<reg::sys::GPO>(0x18.into()).await?;
-        self.write_register::<reg::sys::GPOE>(0x19.into()).await?;
-        self.write_register::<reg::sys::GPD>(0x0e.into()).await?;
+            // disable demod PLL, ADC I and Q
+            self.write_register_with::<reg::sys::DEMOD_CTL>(|demod_ctl| {
+                demod_ctl.set_hardware_reset(true);
+            })
+            .await?;
+        }
+
+        if options.reset_gpio {
+            // disable GPIO outputs
+            //
+            // reset state from datasheet
+            self.write_register::<reg::sys::GPO>(0x18.into()).await?;
+            self.write_register::<reg::sys::GPOE>(0x19.into()).await?;
+            self.write_register::<reg::sys::GPD>(0x0e.into()).await?;
+        }
 
         Ok(())
     }
@@ -486,14 +476,7 @@ impl Rtl2832u {
     }
 
     pub fn reader(&mut self, buffer_size: usize) -> Result<Reader, Error> {
-        let endpoint = self.usb_interface.endpoint(DATA_ENDPOINT)?;
-
-        // buffer_size is the transfer_size from end EndpointRead docs.
-        //
-        // default num_transfer=1
-        let endpoint_reader = endpoint.reader(buffer_size);
-
-        Ok(Reader { endpoint_reader })
+        self.usb_interface.data_endpoint_reader(buffer_size)
     }
 
     pub async fn set_if_mode(&mut self, if_mode: IfMode) -> Result<(), Error> {
@@ -525,8 +508,8 @@ impl Rtl2832u {
 
     pub async fn set_if_frequency(
         &mut self,
-        frequency: u32,
-        crystal_frequency: u32,
+        frequency: f32,
+        crystal_frequency: f32,
     ) -> Result<(), Error> {
         let value = pset_iffreq_from_hz(frequency, crystal_frequency);
 
@@ -559,47 +542,36 @@ impl Rtl2832u {
 
         Ok(())
     }
-}
 
-pin_project! {
-    pub struct Reader {
-        #[pin]
-        endpoint_reader: nusb::io::EndpointRead<nusb::transfer::Bulk>,
-    }
-}
+    pub async fn set_sample_rate(
+        &mut self,
+        sample_rate: f32,
+        crystal_frequency: f32,
+    ) -> Result<(), Error> {
+        // librtlsdr ensures the sample_rate is valid. is there something in the
+        // datasheet about this?
+        //
+        // if (sample_rate <= 225000)
+        //    || (sample_rate > 3200000)
+        //    || ((sample_rate > 300000) && (sample_rate <= 900000))
+        //{}
 
-impl Reader {
-    pub fn set_num_transfers(&mut self, num_transfers: usize) {
-        self.endpoint_reader.set_num_transfers(num_transfers);
-    }
-}
+        self.write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|rsamp_ratio| {
+            rsamp_ratio.set_rsamp_ratio(rsamp_ratio_from_hz(crystal_frequency, sample_rate));
+        })
+        .await?;
 
-impl Debug for Reader {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Reader").finish_non_exhaustive()
-    }
-}
+        // reset demod (soft reset)
+        self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
+            soft_rst.set_soft_rst(true);
+        })
+        .await?;
+        self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
+            soft_rst.set_soft_rst(false);
+        })
+        .await?;
 
-impl AsyncRead for Reader {
-    #[inline(always)]
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        self.project().endpoint_reader.poll_read(cx, buf)
-    }
-}
-
-impl AsyncBufRead for Reader {
-    #[inline(always)]
-    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
-        self.project().endpoint_reader.poll_fill_buf(cx)
-    }
-
-    #[inline(always)]
-    fn consume(mut self: Pin<&mut Self>, amt: usize) {
-        Pin::new(&mut self.endpoint_reader).consume(amt);
+        Ok(())
     }
 }
 
@@ -616,7 +588,7 @@ pub enum IfMode {
 ///
 /// - `f_if_d`: Intermediate frequency (IF) after sub-sampling
 /// - `f_crystal`: Crystal frequency
-pub fn pset_iffreq_from_hz(f_if_d: u32, f_crystal: u32) -> u32 {
+pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
     // librtlsdr does this with u32's but we're pretty sure that overflows.
     //
     // example: r82xx if is 3570000, multiplied by 4194304 is at least 44 bits. the
@@ -625,8 +597,14 @@ pub fn pset_iffreq_from_hz(f_if_d: u32, f_crystal: u32) -> u32 {
     // and since we're multiplying by 4194304 (2**22) floating-point arithmetic is
     // well-suited here.
 
-    let f = -(f_if_d as f32 * 4194304.0 / f_crystal as f32).floor();
-    (f as i32).cast_unsigned() & 0x003fffff
+    let f = -(f_if_d * 4194304.0 / f_crystal).floor();
+    (f as i32).cast_unsigned() & 0x003f_ffff
+}
+
+pub fn rsamp_ratio_from_hz(f_symbol: f32, f_crystal: f32) -> u32 {
+    let r = (f_crystal * 4194304.0 / f_symbol).floor();
+    dbg!(r);
+    (r as u32) & 0x03ff_ffff
 }
 
 #[cfg(test)]
@@ -634,12 +612,34 @@ mod tests {
     use crate::rtl2832u::{
         FirFilter,
         pset_iffreq_from_hz,
+        rsamp_ratio_from_hz,
     };
 
     #[test]
     fn test_pset_iffreq_from_hz() {
-        let pset_iffreq = pset_iffreq_from_hz(4570000, 28800000);
-        assert_eq!(pset_iffreq, 0x0035d82e);
+        assert_eq!(pset_iffreq_from_hz(4570000.0, 28800000.0), 0x0035_d82e);
+        assert_eq!(pset_iffreq_from_hz(36167000.0, 28800000.0), 0x002f_a0ff);
+        assert_eq!(pset_iffreq_from_hz(36125000.0, 28800000.0), 0x002f_b8e4);
+        assert_eq!(pset_iffreq_from_hz(0.0, 28800000.0), 0);
+    }
+
+    #[test]
+    fn test_rsamp_ratio_from_hz() {
+        assert_eq!(
+            rsamp_ratio_from_hz(64.0 * 1000000.0 / 7.0, 28800000.0),
+            // tried debugging the discrepancy and we're pretty sure it's because of
+            // rounding of f_symbol
+            0x00c9_9999 + 1
+        );
+        assert_eq!(
+            rsamp_ratio_from_hz(8.0 * 1000000.0, 28800000.0),
+            0x00e6_6666
+        );
+        assert_eq!(
+            rsamp_ratio_from_hz(48.0 * 1000000.0 / 7.0, 28800000.0),
+            // note that this has one more c than the datasheet. probably a typo
+            0x010c_cccc
+        );
     }
 
     const ENCODED_FILTER: &[u8; 20] =

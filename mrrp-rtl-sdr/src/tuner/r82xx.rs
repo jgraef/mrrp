@@ -29,7 +29,10 @@ use crate::{
     rtl2832u::{
         self,
         Rtl2832u,
-        i2c::I2cAddress,
+        i2c::{
+            I2cAddress,
+            I2cDevice,
+        },
     },
     tuner::{
         Tuner,
@@ -82,22 +85,19 @@ impl Variant {
         }
     }
 
-    pub async fn probe(&self, rtl2832u: &mut Rtl2832u) -> Result<bool, Error> {
-        if let Ok(data) = rtl2832u.read_i2c(self.i2c_address(), 1).await {
-            // According to datasheet this is 0x96, but the chip sends data from LSB
-            // to MSB, while the RTL2832U decodes it the other way.
-            Ok(data[0] == 0x69)
+    pub async fn probe(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<I2cDevice>, Error> {
+        let mut i2c_device = rtl2832u.try_open_i2c(self.i2c_address())?;
+
+        // According to datasheet this is 0x96, but the chip sends data from LSB
+        // to MSB, while the RTL2832U decodes it the other way.
+
+        if let Ok(data) = i2c_device.read(1).await
+            && data[0] == 0x69
+        {
+            Ok(Some(i2c_device))
         }
         else {
-            Ok(false)
-        }
-    }
-
-    pub fn create_state(&self) -> R82xxState {
-        R82xxState {
-            variant: *self,
-            registers: Default::default(),
-            if_frequency: DEFAULT_IF_FREQUENCY,
+            Ok(None)
         }
     }
 }
@@ -106,7 +106,9 @@ impl Variant {
 pub enum Error {
     #[error(transparent)]
     Rtl2823u(#[from] rtl2832u::Error),
-    // todo
+
+    #[error(transparent)]
+    I2cDeviceBusy(#[from] rtl2832u::i2c::I2cDeviceBusy),
 }
 
 impl TunerError for Error {}
@@ -116,20 +118,19 @@ pub struct R82xxProbe;
 
 impl TunerProbe for R82xxProbe {
     type Error = Error;
-    type Tuner = R82xxState;
+    type Tuner = R82xx;
 
     async fn try_open(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
         for variant in Variant::ALL {
             tracing::debug!("probing for {}", variant.name());
 
-            if variant.probe(rtl2832u).await? {
+            if let Some(i2c_device) = variant.probe(rtl2832u).await? {
                 tracing::debug!("{} found", variant.name());
 
-                let mut state = variant.create_state();
-                let mut r82xx = state.access(rtl2832u);
+                let mut r82xx = R82xx::new(i2c_device, *variant);
                 r82xx.initialize().await?;
 
-                return Ok(Some(state));
+                return Ok(Some(r82xx));
             }
         }
 
@@ -147,13 +148,6 @@ pub struct R82xxState {
 }
 
 impl R82xxState {
-    pub fn access<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> R82xx<'a> {
-        R82xx {
-            state: self,
-            rtl2832u,
-        }
-    }
-
     #[inline(always)]
     pub fn variant(&self) -> Variant {
         self.variant
@@ -199,14 +193,6 @@ impl R82xxState {
     }
 }
 
-impl Tuner for R82xxState {
-    type Error = Error;
-
-    fn name(&self) -> &str {
-        self.variant.name()
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RfInput {
     /// RF-IN on R820T, Air-In on R828D
@@ -218,12 +204,23 @@ pub enum RfInput {
 }
 
 #[derive(Debug)]
-pub struct R82xx<'a> {
-    state: &'a mut R82xxState,
-    rtl2832u: &'a mut Rtl2832u,
+pub struct R82xx {
+    i2c_device: I2cDevice,
+    state: R82xxState,
 }
 
-impl<'a> R82xx<'a> {
+impl R82xx {
+    pub fn new(i2c_device: I2cDevice, variant: Variant) -> Self {
+        Self {
+            i2c_device,
+            state: R82xxState {
+                variant,
+                registers: Default::default(),
+                if_frequency: DEFAULT_IF_FREQUENCY,
+            },
+        }
+    }
+
     pub async fn initialize(&mut self) -> Result<(), Error> {
         tracing::debug!(tuner = ?self.state.variant, "initializing");
         //tracing::debug!("initial state: {:#?}", self.state);
@@ -523,10 +520,7 @@ impl<'a> R82xx<'a> {
     /// The R82xx sends bits in reversed order. This accounts for this and
     /// reverses the received bits.
     pub async fn read(&mut self, n: u8) -> Result<(), Error> {
-        let data = self
-            .rtl2832u
-            .read_i2c(self.state.variant.i2c_address(), n.into())
-            .await?;
+        let data = self.i2c_device.read(n.into()).await?;
 
         for i in 0..n {
             if !self.state.registers.is_dirty(i) {
@@ -562,9 +556,7 @@ impl<'a> R82xx<'a> {
 
             tracing::debug!(?run, ?command, "write registers");
 
-            self.rtl2832u
-                .write_i2c(self.state.variant.i2c_address(), &command)
-                .await
+            self.i2c_device.write(&command).await
         };
 
         for i in 0..NUM_REGISTERS {
@@ -588,6 +580,18 @@ impl<'a> R82xx<'a> {
         }
 
         Ok(())
+    }
+}
+
+impl Tuner for R82xx {
+    type Error = Error;
+
+    fn name(&self) -> &str {
+        self.state.variant.name()
+    }
+
+    async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
+        todo!();
     }
 }
 

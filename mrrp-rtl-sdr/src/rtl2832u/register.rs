@@ -765,7 +765,7 @@ pub mod demod {
             /// MPEG_IO_OPT_1_0: 0, 0x07
             pub u8, mpeg_io_opt_1_0, set_mpeg_io_opt_1_0: 7, 6;
         };
-        ADC_ENABLE: u8 = demod(0, 0x08) {
+        ADC_ENABLE: u8 = demod(0, 0x08) shadow {
             /// AD_EN_REG1: 0, 0x08
             ///
             /// Enable ADC_Q
@@ -896,7 +896,7 @@ pub mod demod {
         /// `librtlsdr` sets this to `0x14` and `0x10` in `rtlsdr_init_baseband`
         /// with comment `reset demod (bit 3, soft_rst)`. It's really bit 2 if you
         /// count properly.
-        SOFT_RST_IIC_REPEAT: u8 = demod(1, 0x01) {
+        SOFT_RST_IIC_REPEAT: u8 = demod(1, 0x01) shadow {
             /// SOFT_RST: 1, 0x01
             pub bool, soft_rst, set_soft_rst: 2;
             /// IIC_REPEAT: 1, 0x01
@@ -967,7 +967,7 @@ pub mod demod {
             /// DAGC_TRG_VAL: 1, 0x12
             pub u8, dagc_trg_val, set_dagc_trg_val: 7, 0;
         };
-        SPEC_INV_EN_ACI: u8 = demod(1, 0x15) {
+        SPEC_INV_EN_ACI: u8 = demod(1, 0x15) shadow {
             /// SPEC_INV: 1, 0x15
             ///
             /// Enable spectrum inversion - 1=on
@@ -993,7 +993,7 @@ pub mod demod {
         /// [Linux sdr driver][1] also sets this to 0
         ///
         /// [1]: https://code.googlesource.com/linux/torvalds/linux/+/6d36c728bc2e2d632f4b0dea00df5532e20dfdab/drivers/media/dvb-frontends/rtl2832_sdr.c#509
-        PSET_IFFREQ: u32 = demod(1, 0x18) {
+        PSET_IFFREQ: u32 = demod(1, 0x18) shadow {
             /// PSET_IFFREQ: 1, 0x19
             ///
             /// ```plain
@@ -1011,7 +1011,7 @@ pub mod demod {
             /// EN_CACQ_NOTCH: 1, 0x61
             pub bool, en_cacq_notch, set_en_cacq_notch: 4;
         };
-        SAMP_FREQ_CORR: u16 = demod(1, 0x3e) {
+        SAMP_FREQ_CORR: u16 = demod(1, 0x3e) shadow {
             /// Unknown
             ///
             /// In the rtl_test dump it's 0b00, but in my `small_init` dump it's 0b01.
@@ -1186,7 +1186,7 @@ pub mod demod {
         /// 0xa1   rrrrrrrr
         /// 0xa2   rrrrrr--
         /// ```
-        CFREQ_OFF_RATIO_RSAMP_RATIO: u64 = demod(1, 0x9b) {
+        CFREQ_OFF_RATIO_RSAMP_RATIO: u64 = demod(1, 0x9b) shadow {
             /// CFREQ_OFF_RATIO: 1, 0x9d
             pub u32, cfreq_off_ratio, set_cfreq_off_ratio: 47, 28;
             /// RSAMP_RATIO: 1, 0x9f
@@ -1196,7 +1196,7 @@ pub mod demod {
             /// EN_BK_TRK: 1, 0xa6
             pub bool, en_bk_trk, set_en_bk_trk: 7;
         };
-        ZERO_IF_IQ_COMP: u8 = demod(1, 0xb1) {
+        ZERO_IF_IQ_COMP: u8 = demod(1, 0xb1) shadow {
             /// EN_BBIN: 1, 0xb1
             ///
             /// Enable Zero-IF input

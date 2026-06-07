@@ -2,7 +2,7 @@ use crate::{
     Error,
     enumerate::DeviceInfo,
     rtl2832u::{
-        DEFAULT_CRYSTAL_FREQUENCY,
+        self,
         IfMode,
         Reader,
         Rtl2832u,
@@ -11,6 +11,7 @@ use crate::{
     tuner::{
         AnyTuner,
         AnyTunerProbe,
+        Tuner,
         TunerProbe,
         r82xx,
     },
@@ -79,7 +80,10 @@ impl Device {
         // librtlsdr uses the corrected crystal frequency
         rtl2832u.set_if_mode(IfMode::If).await?;
         rtl2832u
-            .set_if_frequency(r82xx::DEFAULT_IF_FREQUENCY, DEFAULT_CRYSTAL_FREQUENCY)
+            .set_if_frequency(
+                r82xx::DEFAULT_IF_FREQUENCY as f32,
+                rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32,
+            )
             .await?;
         rtl2832u.enable_spectrum_inversion(true).await?;
 
@@ -115,7 +119,7 @@ impl Device {
     }
 
     /// todo: pub for testing only
-    pub fn rtl2832(&mut self) -> &mut Rtl2832u {
+    pub fn rtl2832u(&mut self) -> &mut Rtl2832u {
         &mut self.expect_inner_mut().rtl2832u
     }
 
@@ -142,13 +146,30 @@ impl Device {
                 "frequency_correction must be between -8192 and 8191 inclusive: {frequency_correction}"
             );
 
-            self.rtl2832()
+            self.rtl2832u()
                 .set_sample_frequency_correction(frequency_correction)
                 .await?;
 
             self.frequency_correction = frequency_correction;
         }
 
+        Ok(())
+    }
+
+    pub async fn set_sample_rate(&mut self, sample_rate: f32) -> Result<(), Error> {
+        let inner = self.expect_inner_mut();
+
+        // librtlsdr sets the "exact" sample rate here. We think they basically convert
+        // from the encoded value back to Hz. But they also do some bit-manipulation.
+        inner.tuner.set_bandwidth(sample_rate).await?;
+
+        inner
+            .rtl2832u
+            .set_sample_rate(
+                sample_rate as f32,
+                rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32,
+            )
+            .await?;
         Ok(())
     }
 }
@@ -161,9 +182,7 @@ struct Inner {
 
 impl Inner {
     async fn reset(&mut self) -> Result<(), Error> {
-        // todo: reset gpio
-
-        self.rtl2832u.reset().await?;
+        self.rtl2832u.reset(Default::default()).await?;
 
         Ok(())
     }
@@ -186,7 +205,7 @@ impl Drop for Device {
 }
 
 /// Applies `correction` (in PPM) to `frequency` (in Hz).
-#[inline]
+#[inline(always)]
 pub fn apply_frequency_correction(frequency: u32, correction: i16) -> u32 {
     // todo: check for overflow?
     (frequency as f32 * (1.0 + correction as f32 / 1.0e6)) as u32
