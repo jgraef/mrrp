@@ -49,7 +49,10 @@ impl UsbInterface {
         let response_data = self
             .usb_interface
             .control_in(request, self.control_timeout)
-            .await?;
+            .await
+            .inspect_err(
+                |error| tracing::error!(%error, ?address, ?length, "USB error during read"),
+            )?;
 
         if response_data.len() != response_data.len() {
             return Err(Error::InvalidControlResponse {
@@ -68,7 +71,10 @@ impl UsbInterface {
 
         self.usb_interface
             .control_out(request, self.control_timeout)
-            .await?;
+            .await
+            .inspect_err(
+                |error| tracing::error!(%error, ?address, ?data, "USB error during write"),
+            )?;
         Ok(())
     }
 

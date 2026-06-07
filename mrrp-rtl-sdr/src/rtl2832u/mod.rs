@@ -23,19 +23,17 @@ pub mod register;
 pub(crate) mod usb;
 
 use std::{
-    collections::HashSet,
     fmt::Debug,
     sync::Arc,
     time::Duration,
 };
 
 use bitfield::BitRangeMut;
-use parking_lot::Mutex;
 
 pub use crate::rtl2832u::usb::Reader;
 use crate::rtl2832u::{
     filter::FirFilter,
-    i2c::I2cAddress,
+    i2c::I2cShared,
     register::{
         self as reg,
         Bits,
@@ -110,11 +108,9 @@ impl Default for ResetOptions {
 #[derive(Debug)]
 pub struct Rtl2832u {
     usb_interface: UsbInterface,
-    i2c_repeater_enabled: bool,
     shadow_map: ShadowMap,
 
-    // note: a bitset would also be nice
-    i2c_device_locks: Arc<Mutex<HashSet<I2cAddress>>>,
+    i2c_shared: Arc<I2cShared>,
 }
 
 impl Rtl2832u {
@@ -125,9 +121,8 @@ impl Rtl2832u {
     pub fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
         Self {
             usb_interface: UsbInterface::new(usb_interface, control_timeout),
-            i2c_repeater_enabled: false,
             shadow_map: ShadowMap::default(),
-            i2c_device_locks: Arc::new(Mutex::new(HashSet::new())),
+            i2c_shared: Default::default(),
         }
     }
 

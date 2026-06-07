@@ -215,12 +215,13 @@ async fn handle_commands(
     }
 }
 
-#[tracing::instrument(skip(device))]
 async fn handle_command(
     device: &mut mrrp_rtl_sdr::Device,
     command: mrrp_rtl_tcp::protocol::Command,
 ) -> Result<(), Error> {
     use mrrp_rtl_tcp::protocol::Command;
+
+    tracing::debug!(?command, "handling command");
 
     match command {
         Command::SetSampleRate { sample_rate } => {

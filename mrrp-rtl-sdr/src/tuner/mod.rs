@@ -38,6 +38,8 @@ pub trait Tuner: Debug + Sized + Send + Sync + 'static {
         &mut self,
         bandwidth: f32,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+
+    fn shutdown(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -155,6 +157,9 @@ trait AnyTunerTrait: Debug + Send + Sync + 'static {
         &'a mut self,
         bandwidth: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
+    fn shutdown<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
 }
 
 impl<T> AnyTunerTrait for T
@@ -170,6 +175,12 @@ where
         bandwidth: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>> {
         Box::pin(Tuner::set_bandwidth(self, bandwidth).map_err(AnyTunerError::new))
+    }
+
+    fn shutdown<'a>(
+        &'a mut self,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>> {
+        Box::pin(Tuner::shutdown(self).map_err(AnyTunerError::new))
     }
 }
 
@@ -197,6 +208,10 @@ impl Tuner for AnyTuner {
     fn set_bandwidth(&mut self, bandwidth: f32) -> impl Future<Output = Result<(), Self::Error>> {
         self.0.set_bandwidth(bandwidth)
     }
+
+    fn shutdown(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
+        self.0.shutdown()
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -210,6 +225,10 @@ impl Tuner for NullTuner {
     }
 
     async fn set_bandwidth(&mut self, _bandwidth: f32) -> Result<(), Self::Error> {
+        Ok(())
+    }
+
+    async fn shutdown(&mut self) -> Result<(), Self::Error> {
         Ok(())
     }
 }

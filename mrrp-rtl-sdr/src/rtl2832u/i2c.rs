@@ -24,7 +24,13 @@ use std::{
         Deref,
         DerefMut,
     },
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{
+            AtomicBool,
+            Ordering,
+        },
+    },
 };
 
 use parking_lot::Mutex;
@@ -96,7 +102,21 @@ pub struct I2cDeviceBusy {
 pub struct I2cDevice {
     usb_interface: UsbInterface,
     i2c_address: I2cAddress,
-    i2c_device_locks: Arc<Mutex<HashSet<I2cAddress>>>,
+    shared: Arc<I2cShared>,
+}
+
+#[derive(Debug, Default)]
+pub(super) struct I2cShared {
+    repeater_enabled: AtomicBool,
+
+    // note: a bitset would also be nice
+    device_locks: Mutex<HashSet<I2cAddress>>,
+}
+
+impl I2cShared {
+    fn repeater_enabled(&self) -> bool {
+        self.repeater_enabled.load(Ordering::Relaxed)
+    }
 }
 
 impl I2cDevice {
@@ -106,7 +126,7 @@ impl I2cDevice {
 
     /// Reads data from the I2C device.
     pub async fn read(&mut self, length: u16) -> Result<Vec<u8>, Error> {
-        tracing::debug!(i2c_address = ?self.i2c_address, ?length, "reading I2C");
+        tracing::debug!(i2c_address = ?self.i2c_address, i2c_repeater_enabled = ?self.shared.repeater_enabled(), ?length, "reading I2C");
 
         self.usb_interface
             .read(
@@ -120,7 +140,7 @@ impl I2cDevice {
 
     /// Writes data to the I2C device.
     pub async fn write(&mut self, data: &[u8]) -> Result<(), Error> {
-        tracing::debug!(i2c_address = ?self.i2c_address, ?data, "writing I2C");
+        tracing::debug!(i2c_address = ?self.i2c_address, i2c_repeater_enabled = ?self.shared.repeater_enabled(), ?data, "writing I2C");
 
         self.usb_interface
             .write(
@@ -135,7 +155,7 @@ impl I2cDevice {
 
 impl Drop for I2cDevice {
     fn drop(&mut self) {
-        let mut guard = self.i2c_device_locks.lock();
+        let mut guard = self.shared.device_locks.lock();
         guard.remove(&self.i2c_address);
     }
 }
@@ -160,13 +180,13 @@ impl Rtl2832u {
     /// [`set_i2c_repeater`](Self::set_i2c_repeater) or
     /// [`with_i2c_repeater`](Self::with_i2c_repeater).
     pub fn try_open_i2c(&mut self, i2c_address: I2cAddress) -> Result<I2cDevice, I2cDeviceBusy> {
-        let mut guard = self.i2c_device_locks.lock();
+        let mut guard = self.i2c_shared.device_locks.lock();
 
         if guard.insert(i2c_address) {
             Ok(I2cDevice {
                 usb_interface: self.usb_interface.clone(),
                 i2c_address,
-                i2c_device_locks: self.i2c_device_locks.clone(),
+                shared: self.i2c_shared.clone(),
             })
         }
         else {
@@ -182,13 +202,11 @@ impl Rtl2832u {
         // we think it's better to have a proper flag tracking this. then it still works
         // if we decide to disable shadow on this register
 
-        if self.i2c_repeater_enabled != on {
+        if self.i2c_shared.repeater_enabled.swap(on, Ordering::Relaxed) != on {
             self.write_register_update::<SOFT_RST_IIC_REPEAT>(|iic_repeat| {
                 iic_repeat.set_iic_repeat(on);
             })
             .await?;
-
-            self.i2c_repeater_enabled = on;
         }
 
         Ok(())
@@ -200,8 +218,9 @@ impl Rtl2832u {
         Ok(I2cRepeaterGuard { rtl2832u: self })
     }
 
+    #[inline(always)]
     pub fn i2c_repeater_enabled(&self) -> bool {
-        self.i2c_repeater_enabled
+        self.i2c_shared.repeater_enabled()
     }
 }
 
@@ -234,7 +253,7 @@ impl<'a> DerefMut for I2cRepeaterGuard<'a> {
 
 impl<'a> Drop for I2cRepeaterGuard<'a> {
     fn drop(&mut self) {
-        if self.rtl2832u.i2c_repeater_enabled {
+        if self.rtl2832u.i2c_repeater_enabled() {
             tracing::warn!("Dropped I2cRepeaterGuard without disabling repeater");
         }
     }

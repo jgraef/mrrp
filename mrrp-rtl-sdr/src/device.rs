@@ -225,6 +225,10 @@ struct Inner {
 
 impl Inner {
     async fn reset(&mut self) -> Result<(), Error> {
+        //let i2c_repeater_guard = self.rtl2832u.enable_i2c_repeater().await?;
+        //self.tuner.shutdown().await?;
+        //i2c_repeater_guard.disable().await?;
+
         self.rtl2832u.reset(Default::default()).await?;
 
         Ok(())

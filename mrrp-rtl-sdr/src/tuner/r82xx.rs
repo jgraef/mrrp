@@ -10,7 +10,7 @@
 //!
 //! And [this post](https://www.rtl-sdr.com/new-rtl-sdr-tuner-chip-r828d/) even quotes a Reddit comment from a driver author, mentioning the 3 inputs "Air-In, Cable1, Cable2".
 //!
-//! [Registers of R82xx](http://www.erlendervik.no/r820-reg.ods)
+//! [Registers of R82xx](http://www.erlendervik.no/r820-reg.ods) (this is the "spreadsheet" we're referrring to)
 //!
 //! ![R828D pinout](https://www.erlendervik.no/r828d.png)
 
@@ -342,6 +342,47 @@ impl R82xxState {
         self.registers.set_unk_bw_1_7mhz(filter_setting.bw_1_7mhz);
         self.registers.set_filt_bw(filter_setting.filt_bw);
         self.if_frequency = filter_setting.center_frequency;
+    }
+
+    pub fn shutdown(&mut self) {
+        tracing::debug!("setting r82xx to standby");
+
+        self.registers.set_pwd_lt(true); // turn off loop-through
+        self.registers.set_pwd_lna1(true); // turn off lna 1
+        self.registers.set_pwd_pdet1(true); // turn off pdet1
+        self.registers.set_pwd_pdet3(false); // turn off pdet3
+        self.registers.set_pwd_mix(false); // turn mixer off
+        self.registers.set_pw0_mix(true); // mixer low power setting
+        self.registers.set_pwd_amp(false); // turn off amplifier
+        self.registers.set_pw0_amp(true); // amplifier low power setting
+
+        self.registers.set_pwd_iffilt(true); // IF filter power off
+        self.registers.set_pw1_iffilt(true); // IF filter low power setting
+
+        self.registers.set_pwd_filt(false); // filter power off
+        self.registers.set_pw_filt(0b11); // filter low power setting
+
+        self.registers.set_pwd_vga(false); // turn off vga
+        self.registers.set_unk_pw0_vga(true); // low power setting
+
+        // todo: this is set to 0x68 for standby, but it's also initialized that way.
+        // the spreadsheet lists ldo5vh and pwd_ldo_5v here that seem power-related, but
+        // we never switch them(?). need to investigate these.
+        //
+        // also librtlsdr sets pwd_ldo_5v=0 for standby, but according to spreadsheet,
+        // this means on.
+
+        self.registers.set_pw_ldo_a(0);
+        self.registers.set_unk_cp_cur(0);
+
+        self.registers.set_pw_ldo_d(0b11);
+        self.registers.set_unk_div_buf_cur(0b11);
+
+        self.registers.set_unk_pw_iq(0b10);
+
+        // librtlsdr sets ring_pw (0x19 [3:2]) to 0b11, but it's initialized as that.
+        self.registers.set_pwd_rffilt(false); // turn off RF filter power
+        self.registers.set_unk_rf_poly_filter_current(0);
     }
 }
 
@@ -744,6 +785,11 @@ impl Tuner for R82xx {
 
     async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
         self.state.set_bandwidth(bandwidth);
+        self.flush().await
+    }
+
+    async fn shutdown(&mut self) -> Result<(), Self::Error> {
+        self.state.shutdown();
         self.flush().await
     }
 }
@@ -1180,6 +1226,10 @@ registers! {
     0x0c: {
         /// VGA power control - 0=off, 1=on
         pwd_vga: [6],
+        /// VGA power setting (not in datasheet)
+        ///
+        /// If it's like the other power settings 0=high, 1=low. This is confirmed because librtlsdr sets this to 1 when going into standby.
+        unk_pw0_vga: [5],
         /// VGA gain manual / pin selector - 1=IF vga gain controlled by vagc pin, 0=IF vga gain controlled by `vga_code[5:0]`
         vga_mode: [4],
         /// IF VGA manual gain control - 0000=-12 dB, 1111=40.5 dB; -3.5 dB/step
@@ -1265,7 +1315,16 @@ registers! {
         /// ```
         ///
         /// CP pin - PLL charge pump?
+        ///
+        /// Set to 0b000 for standby. So the 0b000=low/off, 0b111=highest maybe?
         unk_cp_cur: [5:3],
+
+        /// Undocumented
+        ///
+        /// No idea what this does.
+        ///
+        /// It's initialized as 0b11 and set to 0b11 on standby. Spreadsheet just names it.
+        unk_bias_hf: [0:1],
     };
     0x12: {
         /// Not in datasheet
@@ -1339,6 +1398,8 @@ registers! {
         /// rc = r82xx_write_reg_mask(priv, 0x17, div_buf_cur, 0x30);
         /// ```
         ///
+        /// Set to 0b11 for standby.
+        ///
         /// Looks like:
         ///  - 0b11 = 150 uA
         ///  - 0b10 = 200 uA
@@ -1347,6 +1408,18 @@ registers! {
         unk_div_buf_cur: [5:4],
         /// Open drain - 0=high-z, 1=low-z
         open_d: [3],
+        /// Not in datasheet
+        ///
+        /// librtlsdr: initializes to 0b00, sets to 0b10 for standby.
+        ///
+        /// spreadsheet labels this "1 0 pw_IQ" in power group.
+        unk_pw_iq: [2:1],
+        /// Not in datasheet
+        ///
+        /// librtlsdr: initializes to 0, sets to 0 for standby.
+        ///
+        /// spreadsheet labels this "1 0 pw_IQ" in power group. Also labels it as 0=on
+        unk_pwd_iq: [0],
     };
     0x19: {
         /// RF filter power - 0=off, 1=on
@@ -1371,6 +1444,7 @@ registers! {
         /// rc = r82xx_write_reg(priv, 0x19, 0x0c);
         /// ```
         ///
+        /// Spreadsheet splits this into "ring_cp_current" and "POLYFIL_CUR"
         unk_rf_poly_filter_current: [6:5],
         /// Switch agc_pin
         ///
@@ -1645,5 +1719,30 @@ r82xx-reg-dump rtl-sdr-blog/src/tuner_r82xx.c 792 83 30 75 c0 40 d5 6b f0 53 75 
         }
 
         (reg_0a, reg_0b, int_freq)
+    }
+
+    #[test]
+    fn shutdown_regs() {
+        let writes = [
+            (0x06, 0xb1),
+            (0x05, 0xa0),
+            (0x07, 0x3a),
+            (0x08, 0x40),
+            (0x09, 0xc0),
+            (0x0a, 0x36),
+            (0x0c, 0x35),
+            (0x0f, 0x68),
+            (0x11, 0x03),
+            (0x17, 0xf4),
+            (0x19, 0x0c),
+        ];
+
+        let mut registers = Registers::default();
+
+        for (register, value) in writes {
+            registers[register] = value;
+        }
+
+        println!("{registers:#?}");
     }
 }
