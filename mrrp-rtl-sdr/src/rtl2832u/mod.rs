@@ -543,11 +543,16 @@ impl Rtl2832u {
         Ok(())
     }
 
+    /// Set sample rate
+    ///
+    /// This will set the sample rate to the closest possible value to the
+    /// provided sample rate, and return the actual sample rate set in the
+    /// device.
     pub async fn set_sample_rate(
         &mut self,
         sample_rate: f32,
         crystal_frequency: f32,
-    ) -> Result<(), Error> {
+    ) -> Result<f32, Error> {
         // librtlsdr ensures the sample_rate is valid. is there something in the
         // datasheet about this?
         //
@@ -556,8 +561,11 @@ impl Rtl2832u {
         //    || ((sample_rate > 300000) && (sample_rate <= 900000))
         //{}
 
-        self.write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|rsamp_ratio| {
-            rsamp_ratio.set_rsamp_ratio(rsamp_ratio_from_hz(crystal_frequency, sample_rate));
+        let rsamp_ratio = rsamp_ratio_from_hz(sample_rate, crystal_frequency);
+        let actual_sample_rate = rsamp_ratio_to_hz(rsamp_ratio, crystal_frequency);
+
+        self.write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|register| {
+            register.set_rsamp_ratio(rsamp_ratio);
         })
         .await?;
 
@@ -571,7 +579,17 @@ impl Rtl2832u {
         })
         .await?;
 
-        Ok(())
+        Ok(actual_sample_rate)
+    }
+
+    pub async fn get_sample_rate(&mut self, crystal_frequency: f32) -> Result<f32, Error> {
+        let rsamp_ratio = self
+            .read_register::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>()
+            .await?;
+        Ok(rsamp_ratio_to_hz(
+            rsamp_ratio.rsamp_ratio(),
+            crystal_frequency,
+        ))
     }
 }
 
@@ -603,8 +621,11 @@ pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
 
 pub fn rsamp_ratio_from_hz(f_symbol: f32, f_crystal: f32) -> u32 {
     let r = (f_crystal * 4194304.0 / f_symbol).floor();
-    dbg!(r);
     (r as u32) & 0x03ff_ffff
+}
+
+pub fn rsamp_ratio_to_hz(rsamp_ratio: u32, f_crystal: f32) -> f32 {
+    f_crystal * 4194304.0 / rsamp_ratio as f32
 }
 
 #[cfg(test)]

@@ -46,11 +46,21 @@ impl ServerHandler {
         let (data_sender, data_subscriber) = ring_buffer::channel(buffer_size);
 
         let _command_task = tokio::spawn(handle_commands(device, command_receiver));
-        let _data_task = tokio::spawn(handle_data(
-            data_sender,
-            command_sender.clone(),
-            buffer_size,
-        ));
+        let _data_task = tokio::spawn({
+            let command_sender = command_sender.clone();
+
+            async move {
+                if let Err(error) =
+                    handle_data(data_sender, command_sender.clone(), buffer_size).await
+                {
+                    // todo: we need to propagate the error to the actual server
+                    tracing::error!(%error, "server data handler error");
+                    let _ = command_sender.send(Command::Shutdown {
+                        result_sender: None,
+                    });
+                }
+            }
+        });
 
         Ok(Self {
             command_sender,
@@ -85,7 +95,9 @@ impl server::Handler for ServerHandler {
         let (result_sender, result_receiver) = oneshot::channel();
         let _ = self
             .command_sender
-            .send(Command::Shutdown { result_sender })
+            .send(Command::Shutdown {
+                result_sender: Some(result_sender),
+            })
             .await;
         result_receiver.await.unwrap_or(Ok(()))
     }
@@ -103,10 +115,17 @@ impl server::CommandHandler for CommandHandler {
         &mut self,
         command: mrrp_rtl_tcp::protocol::Command,
     ) -> Result<(), Self::Error> {
+        let (result_sender, result_receiver) = oneshot::channel();
+
         self.command_sender
-            .send(Command::Client(command))
+            .send(Command::Client {
+                command,
+                result_sender,
+            })
             .await
-            .map_err(|_| anyhow!("reactor dead"))
+            .map_err(|_| anyhow!("reactor dead"))?;
+
+        result_receiver.await?
     }
 }
 
@@ -166,28 +185,49 @@ impl<'a> Buf for Buffer<'a> {
 async fn handle_commands(
     mut device: mrrp_rtl_sdr::Device,
     mut command_receiver: mpsc::Receiver<Command>,
-) -> Result<(), Error> {
+) {
     while let Some(command) = command_receiver.recv().await {
         match command {
-            Command::Client(command) => {
-                tracing::debug!(?command, "todo: client command")
+            Command::Client {
+                command,
+                result_sender,
+            } => {
+                let result = handle_command(&mut device, command).await;
+                let _ = result_sender.send(result);
             }
             Command::GetReader {
                 buffer_size,
                 result_sender,
             } => {
-                let reader = device.reader(buffer_size).await?;
-                let _ = result_sender.send(reader);
+                let result = device.reader(buffer_size).await.map_err(Into::into);
+                let _ = result_sender.send(result);
             }
             Command::Shutdown { result_sender } => {
                 let result = device.close().await.map_err(Into::into);
-                let _ = result_sender.send(result);
+
+                if let Some(result_sender) = result_sender {
+                    let _ = result_sender.send(result);
+                }
+
                 break;
             }
         }
     }
+}
 
-    tracing::debug!("done");
+#[tracing::instrument(skip(device))]
+async fn handle_command(
+    device: &mut mrrp_rtl_sdr::Device,
+    command: mrrp_rtl_tcp::protocol::Command,
+) -> Result<(), Error> {
+    use mrrp_rtl_tcp::protocol::Command;
+
+    match command {
+        Command::SetSampleRate { sample_rate } => {
+            device.set_sample_rate(sample_rate as f32).await?;
+        }
+        _ => tracing::debug!(?command, "ignored command"),
+    }
 
     Ok(())
 }
@@ -251,7 +291,9 @@ async fn handle_data(
             else {
                 break;
             };
-            tracing::debug!(?reader, "got reader");
+            let reader = reader?;
+
+            tracing::debug!(?reader, "start reading");
             reader_opt = Some(reader);
         }
     }
@@ -262,13 +304,16 @@ async fn handle_data(
 }
 
 enum Command {
-    Client(mrrp_rtl_tcp::protocol::Command),
+    Client {
+        command: mrrp_rtl_tcp::protocol::Command,
+        result_sender: oneshot::Sender<Result<(), Error>>,
+    },
     GetReader {
         buffer_size: usize,
-        result_sender: oneshot::Sender<mrrp_rtl_sdr::Reader>,
+        result_sender: oneshot::Sender<Result<mrrp_rtl_sdr::Reader, Error>>,
     },
     Shutdown {
-        result_sender: oneshot::Sender<Result<(), Error>>,
+        result_sender: Option<oneshot::Sender<Result<(), Error>>>,
     },
 }
 

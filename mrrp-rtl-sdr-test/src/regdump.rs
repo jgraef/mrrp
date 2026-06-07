@@ -117,28 +117,26 @@ pub async fn dump_regs(
     }
 
     if tuner_i2c {
-        rtl2832u
-            .with_i2c_repeater(async |rtl2832u| {
-                if let Some(tuner) = r82xx::R82xxProbe.try_open(rtl2832u).await? {
-                    let name = tuner.name().to_owned();
-                    tracing::info!("Found tuner: {name}");
+        let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
 
-                    //let data = tuner.read_registers(0.into(), 0x10).await?;
-                    //let data2 = tuner.read_registers(0x10.into(), 0x10).await?;
+        if let Some(tuner) = r82xx::R82xxProbe.try_open(&mut *i2c_repeater_guard).await? {
+            let name = tuner.name().to_owned();
+            tracing::info!("Found tuner: {name}");
 
-                    //hexyl(&data, 0);
-                    //hexyl(&data2, 0x10);
+            //let data = tuner.read_registers(0.into(), 0x10).await?;
+            //let data2 = tuner.read_registers(0x10.into(), 0x10).await?;
 
-                    //std::fs::write(path.join(format!("tuner_i2c_{name}.dat")), &data)?;
-                    todo!();
-                }
-                else {
-                    tracing::warn!("No tuner found");
-                }
+            //hexyl(&data, 0);
+            //hexyl(&data2, 0x10);
 
-                Ok::<(), Error>(())
-            })
-            .await?;
+            //std::fs::write(path.join(format!("tuner_i2c_{name}.dat")),
+            // &data)?;
+        }
+        else {
+            tracing::warn!("No tuner found");
+        }
+
+        i2c_repeater_guard.disable().await?;
     }
 
     Ok(())

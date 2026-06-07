@@ -42,6 +42,7 @@ use crate::{
     },
 };
 
+// todo: remove this. the IF frequency depends on the bandwidth
 pub const DEFAULT_IF_FREQUENCY: u32 = 3570000;
 pub const CRYSTAL_FREQ: u32 = 16000000;
 
@@ -61,6 +62,144 @@ pub const INITIAL: &[u8] = &[
 
 pub const MAX_I2C_MESSAGE_LENGTH: u8 = 0x08;
 pub const VERSION_VALUE: u8 = 0x31;
+
+#[derive(Clone, Copy, Debug)]
+pub struct FilterSetting {
+    pub min_bandwidth: f32,
+    pub max_bandwidth: f32,
+    pub low_q: bool,
+    pub bw_1_7mhz: bool,
+    pub filt_bw: u8,
+    pub hpf: u8,
+    pub center_frequency: f32,
+}
+
+pub const FILTER_SETTINGS: &[FilterSetting] = &[
+    FilterSetting {
+        min_bandwidth: 7000000.0,
+        max_bandwidth: 8000000.0,
+        low_q: true,
+        bw_1_7mhz: false,
+        filt_bw: 0,
+        hpf: 11,
+        center_frequency: 4570000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 6000000.0,
+        max_bandwidth: 7000000.0,
+        low_q: true,
+        bw_1_7mhz: false,
+        filt_bw: 1,
+        hpf: 10,
+        center_frequency: 4570000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 2430000.0,
+        max_bandwidth: 6000000.0,
+        low_q: true,
+        bw_1_7mhz: false,
+        filt_bw: 3,
+        hpf: 11,
+        center_frequency: 3570000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 2050000.0,
+        max_bandwidth: 2430000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 2,
+        hpf: 15,
+        center_frequency: 1640000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 1700000.0,
+        max_bandwidth: 2050000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 1,
+        hpf: 12,
+        center_frequency: 1750000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 1600000.0,
+        max_bandwidth: 1700000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 3,
+        hpf: 15,
+        center_frequency: 1450000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 1550000.0,
+        max_bandwidth: 1600000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 3,
+        hpf: 14,
+        center_frequency: 1500000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 1450000.0,
+        max_bandwidth: 1550000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 3,
+        hpf: 13,
+        center_frequency: 1525000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 1200000.0,
+        max_bandwidth: 1450000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 3,
+        hpf: 12,
+        center_frequency: 1575000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 700000.0,
+        max_bandwidth: 1200000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 3,
+        hpf: 10,
+        center_frequency: 1850000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 550000.0,
+        max_bandwidth: 700000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 3,
+        hpf: 9,
+        center_frequency: 1950000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 450000.0,
+        max_bandwidth: 550000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 3,
+        hpf: 8,
+        center_frequency: 2025000.0,
+    },
+    FilterSetting {
+        min_bandwidth: 350000.0,
+        max_bandwidth: 450000.0,
+        low_q: false,
+        bw_1_7mhz: true,
+        filt_bw: 3,
+        hpf: 7,
+        center_frequency: 2075000.0,
+    },
+];
+
+pub fn filter_setting_for_bandwidth(bandwidth: f32) -> &'static FilterSetting {
+    FILTER_SETTINGS
+        .iter()
+        .find(|filter_setting| filter_setting.min_bandwidth < bandwidth)
+        .unwrap_or_else(|| FILTER_SETTINGS.last().unwrap())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Variant {
@@ -142,9 +281,7 @@ impl TunerProbe for R82xxProbe {
 pub struct R82xxState {
     variant: Variant,
     registers: Registers,
-
-    // todo: can this actually be changed?
-    if_frequency: u32,
+    if_frequency: f32,
 }
 
 impl R82xxState {
@@ -191,6 +328,21 @@ impl R82xxState {
             [true, true] => panic!("Invalid state: Both cable_1 and cable_2 enabled."),
         }
     }
+
+    pub fn set_bandwidth(&mut self, bandwidth: f32) {
+        tracing::debug!(?bandwidth, "setting bandwidth");
+
+        self.set_filter_setting(filter_setting_for_bandwidth(bandwidth));
+    }
+
+    pub fn set_filter_setting(&mut self, filter_setting: &FilterSetting) {
+        tracing::debug!(?filter_setting, "setting filter setting");
+
+        self.registers.set_unk_filt_q(filter_setting.low_q);
+        self.registers.set_unk_bw_1_7mhz(filter_setting.bw_1_7mhz);
+        self.registers.set_filt_bw(filter_setting.filt_bw);
+        self.if_frequency = filter_setting.center_frequency;
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -216,7 +368,7 @@ impl R82xx {
             state: R82xxState {
                 variant,
                 registers: Default::default(),
-                if_frequency: DEFAULT_IF_FREQUENCY,
+                if_frequency: DEFAULT_IF_FREQUENCY as f32,
             },
         }
     }
@@ -541,8 +693,6 @@ impl R82xx {
     /// This will ever only write registers that are marked as dirty, but it'll
     /// try to do so in as few write commands as possible.
     pub async fn flush(&mut self) -> Result<(), Error> {
-        tracing::debug!("flushing registers: {:#?}", self.state.registers);
-
         let mut run = None;
         let mut buf = [0u8; 0x20];
 
@@ -579,6 +729,8 @@ impl R82xx {
             flush_run(run).await?;
         }
 
+        self.state.registers.clear_dirty();
+
         Ok(())
     }
 }
@@ -591,7 +743,8 @@ impl Tuner for R82xx {
     }
 
     async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
-        todo!();
+        self.state.set_bandwidth(bandwidth);
+        self.flush().await
     }
 }
 
@@ -1002,6 +1155,8 @@ registers! {
         /// ```
         ///
         /// Set also by `r82xx_set_bandwidth`
+        ///
+        /// Spreadsheet: "Low-Q: should give less sharp filter edges"
         unk_filt_q: [4],
         /// Filter bandwidth manual fine tune - 0000=widest, 1111=narrowest
         ///
@@ -1009,8 +1164,16 @@ registers! {
         filt_code: [3:0],
     };
     0x0b: {
+        /// Undocumented
+        ///
+        /// Seems to enable filtering with < 1.7 MHz bandwidth
+        unk_bw_1_7mhz: [7],
         /// Filter bandwidth manual coarse tunnel - 00=widest, 10 or 01=middle, 11=narrowest
         filt_bw: [6:5],
+        /// Undocumented
+        ///
+        /// Is this the bit that triggers calibration?
+        unk_cal_trig: [4],
         /// High pass filter corner control - 0000=high, 1111=low
         hpf: [3:0],
     };
@@ -1386,5 +1549,101 @@ r82xx-reg-dump rtl-sdr-blog/src/tuner_r82xx.c 792 83 30 75 c0 40 d5 6b f0 53 75 
                 );
             }
         }
+    }
+
+    #[test]
+    fn filter_configs() {
+        let bws = [
+            8000000, 7000000, 6000000, 2430000, 2050000, 1700000, 1600000, 1550000, 1450000,
+            1200000, 700000, 550000, 450000, 350000, 0,
+        ];
+
+        for i in 1..14 {
+            let (reg_0a, reg_0b, int_freq) = filter_config(bws[i] + 1);
+
+            let low_q = reg_0a != 0;
+            let bw_1_7mhz = reg_0b & 0x80 != 0;
+            let filt_bw = (reg_0b >> 5) & 3;
+            let hpf = reg_0b & 0xf;
+
+            println!(
+                "{{ min_bandwidth: {:?}, max_bandwidth: {:?}, low_q: {low_q:?}, bw_1_7mhz: {bw_1_7mhz:?}, filt_bw: {filt_bw}, hpf: {hpf}, int_freq: {:?} }}",
+                bws[i] as f32,
+                bws[i - 1] as f32,
+                int_freq as f32,
+            );
+        }
+    }
+
+    #[allow(dead_code)]
+    fn filter_config(mut bw: u32) -> (u8, u8, u32) {
+        const R82XX_IF_LOW_PASS_BW_TABLE: [u32; 10] = [
+            1700000, 1600000, 1550000, 1450000, 1200000, 900000, 700000, 550000, 450000, 350000,
+        ];
+        const FILT_HP_BW1: u32 = 350000;
+        const FILT_HP_BW2: u32 = 380000;
+
+        let reg_0a: u8;
+        let mut reg_0b: u8;
+        let mut int_freq;
+        let mut real_bw = 0;
+
+        if bw > 7000000 {
+            // BW: 8 MHz
+            reg_0a = 0x10;
+            reg_0b = 0x0b;
+            int_freq = 4570000;
+        }
+        else if bw > 6000000 {
+            // BW: 7 MHz
+            reg_0a = 0x10;
+            reg_0b = 0x2a;
+            int_freq = 4570000;
+        }
+        else if bw > R82XX_IF_LOW_PASS_BW_TABLE[0] + FILT_HP_BW1 + FILT_HP_BW2 {
+            // BW: 6 MHz
+            reg_0a = 0x10;
+            reg_0b = 0x6b;
+            int_freq = 3570000;
+        }
+        else {
+            reg_0a = 0x00;
+            reg_0b = 0x80;
+            int_freq = 2300000;
+
+            if bw > R82XX_IF_LOW_PASS_BW_TABLE[0] + FILT_HP_BW1 {
+                bw -= FILT_HP_BW2;
+                int_freq += FILT_HP_BW2;
+                real_bw += FILT_HP_BW2;
+            }
+            else {
+                reg_0b |= 0x20;
+            }
+
+            if bw > R82XX_IF_LOW_PASS_BW_TABLE[0] {
+                bw -= FILT_HP_BW1;
+                int_freq += FILT_HP_BW1;
+                real_bw += FILT_HP_BW1;
+            }
+            else {
+                reg_0b |= 0x40;
+            }
+
+            // find low-pass filter
+            let mut i: u8 = 0;
+            while i < 10 {
+                if bw > R82XX_IF_LOW_PASS_BW_TABLE[usize::from(i)] {
+                    break;
+                }
+                i += 1;
+            }
+            i -= 1;
+            reg_0b |= 15 - i;
+            real_bw += R82XX_IF_LOW_PASS_BW_TABLE[usize::from(i)];
+
+            int_freq -= real_bw / 2;
+        }
+
+        (reg_0a, reg_0b, int_freq)
     }
 }
