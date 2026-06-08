@@ -7,12 +7,14 @@ pub mod tuner;
 
 use crate::tuner::AnyTunerError;
 pub use crate::{
-    device::Device,
+    device::{
+        Device,
+        Reader,
+    },
     enumerate::{
         DeviceInfo,
         enumerate_devices,
     },
-    rtl2832u::Reader,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -70,6 +72,13 @@ mod assert_send_sync {
     {
     }
 
+    #[allow(dead_code)]
+    fn assert_unpin<T>()
+    where
+        T: Unpin,
+    {
+    }
+
     /// this makes sure that [`Device`] is `Send + Sync`
     fn assert_device_is_send_sync() {
         assert_send::<Device>();
@@ -83,8 +92,9 @@ mod assert_send_sync {
     }
 
     /// this makes sure that [`Reader`] is `Send + Sync`
-    fn assert_reader_is_send_sync() {
+    fn assert_reader_is_send_sync_unpin() {
         assert_send::<Reader>();
         assert_sync::<Reader>();
+        assert_unpin::<Reader>();
     }
 }

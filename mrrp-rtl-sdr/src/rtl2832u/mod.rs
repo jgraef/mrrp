@@ -20,20 +20,37 @@ pub mod filter;
 pub mod gpio;
 pub mod i2c;
 pub mod register;
-pub(crate) mod usb;
 
 use std::{
     fmt::Debug,
-    sync::Arc,
+    pin::Pin,
+    sync::{
+        Arc,
+        atomic::AtomicU8,
+    },
+    task::{
+        Context,
+        Poll,
+    },
     time::Duration,
 };
 
 use bitfield::BitRangeMut;
+use tokio::{
+    io::{
+        AsyncBufRead,
+        AsyncRead,
+        ReadBuf,
+    },
+    sync::{
+        Mutex as AsyncMutex,
+        MutexGuard as AsyncMutexGuard,
+    },
+};
 
-pub use crate::rtl2832u::usb::Reader;
 use crate::rtl2832u::{
     filter::FirFilter,
-    i2c::I2cShared,
+    i2c::I2cState,
     register::{
         self as reg,
         Bits,
@@ -44,8 +61,10 @@ use crate::rtl2832u::{
             ShadowMap,
         },
     },
-    usb::UsbInterface,
 };
+
+pub const USB_INTERFACE: u8 = 0;
+pub const USB_DATA_ENDPOINT: u8 = 0x81;
 
 pub const DEFAULT_CRYSTAL_FREQUENCY: u32 = 28800000;
 
@@ -89,7 +108,7 @@ impl Default for OpenOptions {
 
 #[derive(Clone, Debug)]
 pub struct ResetOptions {
-    pub stop_data_stream: bool,
+    pub stop_epa: bool,
     pub poweroff_demod: bool,
     pub reset_gpio: bool,
 }
@@ -97,7 +116,7 @@ pub struct ResetOptions {
 impl Default for ResetOptions {
     fn default() -> Self {
         Self {
-            stop_data_stream: true,
+            stop_epa: true,
             poweroff_demod: true,
             reset_gpio: true,
         }
@@ -105,12 +124,94 @@ impl Default for ResetOptions {
 }
 
 /// Low-level interface to the `RTL2832U` chip via USB.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Rtl2832u {
-    usb_interface: UsbInterface,
-    shadow_map: ShadowMap,
+    /// Other shared state
+    shared: Arc<Shared>,
+}
 
-    i2c_shared: Arc<I2cShared>,
+#[derive(Debug)]
+struct Shared {
+    /// The underlying USB interface.
+    ///
+    /// Note that [`nusb::Interface`] internally uses an [`Arc`] and operations
+    /// on it only require a shared borrow. [`Reader`] uses exclusive access of
+    /// endpoint A, which can be acquired via [`nusb::Interface::endpoint`], but
+    /// also needs to write to [`regs::usb::EPA_CTL`].
+    usb_interface: nusb::Interface,
+
+    /// How long to wait for control commands.
+    control_timeout: Duration,
+
+    /// Stores cached values for registers to avoid redundant reads.
+    ///
+    /// This is a `[`tokio::sync::RwLock`] because we need to hold it across
+    /// await points (the USB reads and writes).
+    shadow_map: AsyncMutex<ShadowMap>,
+
+    i2c_state: I2cState,
+
+    /// Keeps track which GPIO pin is currently in use, meaning a [`GpioPin`] or
+    /// derived [`InputPin`], or [`OutputPin`], exist for it.
+    gpio_pin_locks: AtomicU8,
+}
+
+impl Shared {
+    async fn read(&self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
+        let request = address.control_in(length);
+
+        tracing::trace!(?request, "sending control request");
+
+        let response_data = self
+            .usb_interface
+            .control_in(request, self.control_timeout)
+            .await
+            .inspect_err(
+                |error| tracing::error!(%error, ?address, ?length, "USB error during read"),
+            )?;
+
+        if response_data.len() != response_data.len() {
+            return Err(Error::InvalidControlResponse {
+                expected_length: length,
+                response_length: response_data.len(),
+            });
+        }
+
+        Ok(response_data)
+    }
+
+    async fn write(&self, address: Register, data: &[u8]) -> Result<(), Error> {
+        let request = address.control_out(data);
+
+        tracing::trace!(?request, "sending control request");
+
+        self.usb_interface
+            .control_out(request, self.control_timeout)
+            .await
+            .inspect_err(
+                |error| tracing::error!(%error, ?address, ?data, "USB error during write"),
+            )?;
+        Ok(())
+    }
+
+    pub fn epa_reader(&self, buffer_size: usize) -> Result<EpaReader, Error> {
+        let endpoint = self.usb_interface.endpoint(USB_DATA_ENDPOINT)?;
+
+        // buffer_size is the transfer_size from end EndpointRead docs.
+        //
+        // default num_transfer=1
+        let endpoint_reader = endpoint.reader(buffer_size);
+
+        Ok(EpaReader { endpoint_reader })
+    }
+
+    async fn begin_transaction(&self) -> Transaction<'_> {
+        let shadow_map_guard = self.shadow_map.lock().await;
+        Transaction {
+            shared: self,
+            shadow_map_guard,
+        }
+    }
 }
 
 impl Rtl2832u {
@@ -120,10 +221,29 @@ impl Rtl2832u {
     /// with the device at all.
     pub fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
         Self {
-            usb_interface: UsbInterface::new(usb_interface, control_timeout),
-            shadow_map: ShadowMap::default(),
-            i2c_shared: Default::default(),
+            shared: Arc::new(Shared {
+                usb_interface,
+                control_timeout,
+                shadow_map: AsyncMutex::new(ShadowMap::default()),
+                i2c_state: Default::default(),
+                gpio_pin_locks: AtomicU8::new(0),
+            }),
         }
+    }
+
+    /// Begin a transaction
+    ///
+    /// The transaction actually allows to write to registers, i.e. configuring
+    /// the device. But only one transaction can take place at a time, to ensure
+    /// the device is in a predictable state at the end of the transaction.
+    /// Furthermore this synchronizes access to the internal register shadow
+    /// map.
+    ///
+    /// All commands send with a transaction will take place immediately and no
+    /// final commit or discard is needed. The [`Transaction`] can just be
+    /// dropped when done.
+    pub async fn begin_transaction(&self) -> Transaction<'_> {
+        self.shared.begin_transaction().await
     }
 
     /// Read raw registers
@@ -131,8 +251,11 @@ impl Rtl2832u {
     /// This is a low-level function that takes a dynamic register address (and
     /// length) and returns the raw bytes from these registers. See
     /// [`read_register`](Self::read_register) for a statically typed variant.
-    pub async fn read(&mut self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
-        self.usb_interface.read(address, length).await
+    ///
+    /// This variant specifically doesn't access the shadow map and is not
+    /// synchronized with other reads and writes.
+    pub async fn read(&self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
+        self.shared.read(address, length).await
     }
 
     /// Write raw registers
@@ -142,16 +265,39 @@ impl Rtl2832u {
     /// [`write_register_with`](Self::write_register_with),
     /// and [`write_register_update`](Self::write_register_update) for
     /// statically typed variants.
-    pub async fn write(&mut self, address: Register, data: &[u8]) -> Result<(), Error> {
-        self.usb_interface.write(address, data).await
+    ///
+    /// This variant specifically doesn't access the shadow map and is not
+    /// synchronized with other reads and writes.
+    pub async fn write(&self, address: Register, data: &[u8]) -> Result<(), Error> {
+        self.shared.write(address, data).await
     }
 
+    /// Gets a [`Reader`] for the data endpoint (EPA).
+    ///
+    /// This does not clear the `fifo_reset` or `stall_endpoint` flags. You can
+    /// do this with [`Transaction::start_epa`].
+    pub fn epa_reader(&self, buffer_size: usize) -> Result<EpaReader, Error> {
+        self.shared.epa_reader(buffer_size)
+    }
+}
+
+#[derive(Debug)]
+pub struct Transaction<'a> {
+    shared: &'a Shared,
+    shadow_map_guard: AsyncMutexGuard<'a, ShadowMap>,
+}
+
+impl<'a> Transaction<'a> {
     /// Read a statically typed [`Register`]
+    ///
+    /// This will not read from the device if the value is already in the shadow
+    /// map. Use [`read_registers_no_shadow`][Self::read_register_no_shadow] if
+    /// you want force a read to go to the device.
     pub async fn read_register<R>(&mut self) -> Result<R, Error>
     where
         R: RegisterValue + shadow::ShadowRegister,
     {
-        if let Some(value) = R::shadow_read(&self.shadow_map) {
+        if let Some(value) = R::shadow_read(&self.shadow_map_guard) {
             Ok(*value)
         }
         else {
@@ -169,6 +315,7 @@ impl Rtl2832u {
         R: RegisterValue + shadow::ShadowRegister,
     {
         let data = self
+            .shared
             .read(R::ADDRESS, <R::Bits as register::Bits>::LENGTH)
             .await?;
 
@@ -177,7 +324,7 @@ impl Rtl2832u {
 
         tracing::debug!(address = ?R::ADDRESS, ?value, "read register");
 
-        value.shadow_write(&mut self.shadow_map);
+        value.shadow_write(&mut self.shadow_map_guard);
 
         Ok(value)
     }
@@ -192,9 +339,9 @@ impl Rtl2832u {
         let bits = value.as_bits();
         let data = bits.into_bytes();
 
-        self.write(R::ADDRESS, data.as_ref()).await?;
+        self.shared.write(R::ADDRESS, data.as_ref()).await?;
 
-        value.shadow_write(&mut self.shadow_map);
+        value.shadow_write(&mut self.shadow_map_guard);
 
         Ok(())
     }
@@ -232,6 +379,15 @@ impl Rtl2832u {
         self.write_register(value).await
     }
 
+    /// Modify a register value
+    ///
+    /// This reads the current value in the register, if possible from the
+    /// shadow map, calls the provided closure with a mut-borrow of it, and
+    /// writes it back to the register afterwards.
+    ///
+    /// The write to the device will be omitted, if the value didn't change.
+    /// After the value was written to the device, the value in the shadow map
+    /// is updated as well.
     pub async fn write_register_update<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
     where
         R: RegisterValue + shadow::ShadowRegister,
@@ -420,8 +576,8 @@ impl Rtl2832u {
         // turn off I2C repeater, if it is on.
         self.set_i2c_repeater(false).await?;
 
-        if options.stop_data_stream {
-            self.stop_data_stream().await?;
+        if options.stop_epa {
+            self.stop_epa().await?;
         }
 
         if options.poweroff_demod {
@@ -448,7 +604,7 @@ impl Rtl2832u {
         Ok(())
     }
 
-    pub async fn start_data_stream(&mut self) -> Result<(), Error> {
+    pub async fn start_epa(&mut self) -> Result<(), Error> {
         tracing::debug!("start data stream");
 
         self.write_register_update::<reg::usb::EPA_CTL>(|epa_ctl| {
@@ -459,7 +615,7 @@ impl Rtl2832u {
         Ok(())
     }
 
-    pub async fn stop_data_stream(&mut self) -> Result<(), Error> {
+    pub async fn stop_epa(&mut self) -> Result<(), Error> {
         tracing::debug!("stop data stream");
 
         self.write_register_update::<reg::usb::EPA_CTL>(|epa_ctl| {
@@ -468,10 +624,6 @@ impl Rtl2832u {
         })
         .await?;
         Ok(())
-    }
-
-    pub fn reader(&mut self, buffer_size: usize) -> Result<Reader, Error> {
-        self.usb_interface.data_endpoint_reader(buffer_size)
     }
 
     pub async fn set_if_mode(&mut self, if_mode: IfMode) -> Result<(), Error> {
@@ -585,6 +737,41 @@ impl Rtl2832u {
             rsamp_ratio.rsamp_ratio(),
             crystal_frequency,
         ))
+    }
+}
+
+#[derive(derive_more::Debug)]
+pub struct EpaReader {
+    #[debug(skip)]
+    endpoint_reader: nusb::io::EndpointRead<nusb::transfer::Bulk>,
+}
+
+impl EpaReader {
+    pub fn set_num_transfers(&mut self, num_transfers: usize) {
+        self.endpoint_reader.set_num_transfers(num_transfers);
+    }
+}
+
+impl AsyncRead for EpaReader {
+    #[inline(always)]
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.get_mut().endpoint_reader).poll_read(cx, buf)
+    }
+}
+
+impl AsyncBufRead for EpaReader {
+    #[inline(always)]
+    fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
+        Pin::new(&mut self.get_mut().endpoint_reader).poll_fill_buf(cx)
+    }
+
+    #[inline(always)]
+    fn consume(self: Pin<&mut Self>, amt: usize) {
+        Pin::new(&mut self.get_mut().endpoint_reader).consume(amt);
     }
 }
 

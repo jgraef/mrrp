@@ -223,22 +223,6 @@ impl Variant {
             Variant::R828D => I2cAddress::from_left_aligned(0x74),
         }
     }
-
-    pub async fn probe(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<I2cDevice>, Error> {
-        let mut i2c_device = rtl2832u.try_open_i2c(self.i2c_address())?;
-
-        // According to datasheet this is 0x96, but the chip sends data from LSB
-        // to MSB, while the RTL2832U decodes it the other way.
-
-        if let Ok(data) = i2c_device.read(1).await
-            && data[0] == 0x69
-        {
-            Ok(Some(i2c_device))
-        }
-        else {
-            Ok(None)
-        }
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -259,11 +243,20 @@ impl TunerProbe for R82xxProbe {
     type Error = Error;
     type Tuner = R82xx;
 
-    async fn try_open(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
+    async fn try_open(&self, rtl2832u: &Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
         for variant in Variant::ALL {
             tracing::debug!("probing for {}", variant.name());
 
-            if let Some(i2c_device) = variant.probe(rtl2832u).await? {
+            let mut i2c_device = rtl2832u
+                .try_open_i2c(variant.i2c_address())?
+                .with_repeater();
+
+            // According to datasheet this is 0x96, but the chip sends data from LSB
+            // to MSB, while the RTL2832U decodes it the other way.
+
+            if let Ok(data) = i2c_device.read(1).await
+                && data[0] == 0x69
+            {
                 tracing::debug!("{} found", variant.name());
 
                 let mut r82xx = R82xx::new(i2c_device, *variant);

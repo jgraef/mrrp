@@ -67,13 +67,14 @@ async fn main() -> Result<(), Error> {
             }
         }
         Command::PoweronDemod { serial } => {
-            let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
-            rtl2832u.poweron_demod().await?;
+            let rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            let mut transaction = rtl2832u.begin_transaction().await;
+            transaction.poweron_demod().await?;
         }
         Command::Reset { serial } => {
-            let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
-            rtl2832u.stop_data_stream().await?;
-            rtl2832u.reset(Default::default()).await?;
+            let rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            let mut transaction = rtl2832u.begin_transaction().await;
+            transaction.reset(Default::default()).await?;
         }
         Command::DumpRegs {
             serial,
@@ -139,7 +140,7 @@ async fn main() -> Result<(), Error> {
 
             let mut writer = BufWriter::new(File::create(&output)?);
 
-            let mut rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            let rtl2832u = open_rtl2832u(serial.as_deref()).await?;
 
             let data = rtl2832u
                 .read(reg::Register::Rom { address: 0 }, length)
@@ -158,7 +159,7 @@ async fn main() -> Result<(), Error> {
             gpio_command(serial.as_deref(), 0, command).await?;
         }
         Command::Test { serial, stream } => {
-            let mut device = open_device(serial.as_deref()).await?;
+            let device = open_device(serial.as_deref()).await?;
 
             if stream {
                 let mut reader = device.reader(0x100000).await?;

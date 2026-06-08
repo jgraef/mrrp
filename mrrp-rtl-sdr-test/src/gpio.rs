@@ -24,11 +24,11 @@ pub async fn gpio_command(
     pin: u8,
     command: GpioCommand,
 ) -> Result<(), Error> {
-    let mut rtl2832u = open_rtl2832u(serial).await?;
+    let rtl2832u = open_rtl2832u(serial).await?;
 
     match command {
         GpioCommand::Mode => {
-            let mut pin = rtl2832u.gpio(pin);
+            let mut pin = rtl2832u.try_gpio(pin)?;
             let direction = pin.direction().await?;
             let pad_config = pin.pad_config().await?;
             println!("Direction:  {direction:?}");
@@ -36,17 +36,17 @@ pub async fn gpio_command(
         }
         GpioCommand::Read { output_state } => {
             let state = if output_state {
-                let mut pin = rtl2832u.gpio(pin).into_output().await?;
+                let mut pin = rtl2832u.try_gpio(pin)?.into_output().await?;
                 pin.get_state().await?
             }
             else {
-                let mut pin = rtl2832u.gpio(pin).into_input().await?;
+                let mut pin = rtl2832u.try_gpio(pin)?.into_input().await?;
                 pin.read().await?
             };
             println!("{state:?}");
         }
         GpioCommand::Write { value } => {
-            let mut pin = rtl2832u.gpio(pin).into_output().await?;
+            let mut pin = rtl2832u.try_gpio(pin)?.into_output().await?;
             pin.write(value).await?;
         }
     }

@@ -25,7 +25,7 @@ pub trait TunerProbe: Clone + Debug + Sized + Send + Sync + 'static {
     /// The I2C repeater must be enabled by the caller.
     fn try_open<'a>(
         &'a self,
-        rtl2832u: &'a mut Rtl2832u,
+        rtl2832u: &'a Rtl2832u,
     ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a;
 }
 
@@ -61,7 +61,7 @@ impl TunerProbe for BultinTunerProbe {
     type Error = AnyTunerError;
     type Tuner = AnyTuner;
 
-    async fn try_open(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
+    async fn try_open(&self, rtl2832u: &Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
         macro_rules! probe {
                 {$($probe:expr,)*} => {
                     $(
@@ -89,7 +89,7 @@ trait AnyTunerProbeTrait: Debug + Send + Sync + 'static {
 
     fn any_try_open<'a>(
         &'a self,
-        rtl2832u: &'a mut Rtl2832u,
+        rtl2832u: &'a Rtl2832u,
     ) -> Pin<Box<dyn Future<Output = Result<Option<AnyTuner>, AnyTunerError>> + Send + 'a>>;
 }
 
@@ -103,7 +103,7 @@ where
 
     fn any_try_open<'a>(
         &'a self,
-        rtl2832u: &'a mut Rtl2832u,
+        rtl2832u: &'a Rtl2832u,
     ) -> Pin<Box<dyn Future<Output = Result<Option<AnyTuner>, AnyTunerError>> + Send + 'a>> {
         Box::pin(
             self.try_open(rtl2832u)
@@ -145,7 +145,7 @@ impl TunerProbe for AnyTunerProbe {
 
     fn try_open<'a>(
         &'a self,
-        rtl2832u: &'a mut Rtl2832u,
+        rtl2832u: &'a Rtl2832u,
     ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a {
         self.0.any_try_open(rtl2832u)
     }
@@ -239,7 +239,7 @@ impl TunerProbe for NullTuner {
 
     fn try_open<'a>(
         &'a self,
-        rtl2832u: &'a mut Rtl2832u,
+        rtl2832u: &'a Rtl2832u,
     ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a {
         let _ = rtl2832u;
         std::future::ready(Ok(Some(Self)))

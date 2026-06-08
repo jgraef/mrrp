@@ -13,7 +13,7 @@ use crate::{
     rtl2832u::{
         self,
         Rtl2832u,
-        usb::INTERFACE,
+        USB_INTERFACE,
     },
 };
 
@@ -124,10 +124,10 @@ impl DeviceInfo {
         let usb_device = self.usb.open().await?;
 
         if options.detach_kernel_driver {
-            usb_device.detach_kernel_driver(INTERFACE)?;
+            usb_device.detach_kernel_driver(USB_INTERFACE)?;
         }
 
-        let usb_interface = usb_device.claim_interface(INTERFACE).await?;
+        let usb_interface = usb_device.claim_interface(USB_INTERFACE).await?;
 
         // create interface to RTL2832U device
         Ok(Rtl2832u::new(usb_interface, options.control_timeout))
