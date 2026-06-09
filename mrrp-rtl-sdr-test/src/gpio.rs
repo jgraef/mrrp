@@ -24,7 +24,7 @@ pub async fn gpio_command(
     pin: u8,
     command: GpioCommand,
 ) -> Result<(), Error> {
-    let rtl2832u = open_rtl2832u(serial).await?;
+    let (rtl2832u, _) = open_rtl2832u(serial).await?;
 
     match command {
         GpioCommand::Mode => {

@@ -284,11 +284,6 @@ impl R82xxState {
         }
     }
 
-    #[inline(always)]
-    pub fn model(&self) -> Model {
-        self.model
-    }
-
     /// Select RF input
     ///
     /// Panics for R820T, if `input` is not [`Air`](RfInput::Air)
@@ -297,6 +292,8 @@ impl R82xxState {
             matches!(input, RfInput::Air) || !matches!(self.model, Model::R820T),
             "R820T only has one input RfInput::Air"
         );
+
+        tracing::debug!(?input, "selecting RF input");
 
         let [cable_1, cable_2] = match input {
             RfInput::Air => [false, false],
@@ -310,21 +307,21 @@ impl R82xxState {
 
     /// Determines selected RF input from register state.
     ///
-    /// This panics if both [`Cable1`](RfInput::Cable1) and
-    /// [`Cable2`](RfInput::Cable2) have been enabled previously by explicitely
-    /// writing to the registers.
+    /// This returns an error if both [`Cable1`](RfInput::Cable1) and
+    /// [`Cable2`](RfInput::Cable2) have been enabled, e.g. previously by
+    /// explicitely writing to the registers.
     ///
     /// This won't read the registers from the device, as we initialize them to
     /// a known state, and they don't change on their own.
-    pub fn selected_rf_input(&self) -> RfInput {
+    pub fn selected_rf_input(&self) -> Result<RfInput, InvalidRfInputState> {
         let cable_1 = self.registers.unk_cable_1_in();
         let cable_2 = self.registers.unk_cable_2_in();
 
         match [cable_1, cable_2] {
-            [false, false] => RfInput::Air,
-            [true, false] => RfInput::Cable1,
-            [false, true] => RfInput::Cable2,
-            [true, true] => panic!("Invalid state: Both cable_1 and cable_2 enabled."),
+            [false, false] => Ok(RfInput::Air),
+            [true, false] => Ok(RfInput::Cable1),
+            [false, true] => Ok(RfInput::Cable2),
+            _ => Err(InvalidRfInputState { cable_1, cable_2 }),
         }
     }
 
@@ -332,6 +329,12 @@ impl R82xxState {
         tracing::debug!(?bandwidth, "setting bandwidth");
 
         self.set_filter_setting(filter_setting_for_bandwidth(bandwidth));
+    }
+
+    pub fn set_center_frequency(&mut self, center_frequency: f32) {
+        tracing::debug!(?center_frequency, "setting center freqiency");
+
+        todo!();
     }
 
     pub fn set_filter_setting(&mut self, filter_setting: &FilterSetting) {
@@ -466,6 +469,13 @@ pub enum RfInput {
     Cable2,
 }
 
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("Invalid RFInputState: cable_1={cable_1:?}, cable_2={cable_2:?}")]
+pub struct InvalidRfInputState {
+    pub cable_1: bool,
+    pub cable_2: bool,
+}
+
 #[derive(Debug)]
 pub struct R82xx {
     i2c_device: I2cDevice,
@@ -478,6 +488,11 @@ impl R82xx {
             i2c_device,
             state: R82xxState::new(model),
         }
+    }
+
+    #[inline(always)]
+    pub fn model(&self) -> Model {
+        self.state.model
     }
 
     pub async fn initialize(&mut self) -> Result<(), Error> {
@@ -759,6 +774,15 @@ impl R82xx {
         Ok(())
     }
 
+    pub async fn select_rf_input(&mut self, rf_input: RfInput) -> Result<(), Error> {
+        self.state.select_rf_input(rf_input);
+        self.flush().await
+    }
+
+    pub fn selected_rf_input(&self) -> Result<RfInput, InvalidRfInputState> {
+        self.state.selected_rf_input()
+    }
+
     /// Reads the first `n` registers from the device into the local cache.
     ///
     /// Always starts reading from register 0x00.
@@ -849,6 +873,14 @@ impl Tuner for R82xx {
 
     async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
         self.state.set_bandwidth(bandwidth);
+        self.flush().await
+    }
+
+    async fn set_center_frequency<'a>(
+        &'a mut self,
+        center_frequency: f32,
+    ) -> Result<(), Self::Error> {
+        self.state.set_center_frequency(center_frequency);
         self.flush().await
     }
 

@@ -1,3 +1,4 @@
+pub mod blog;
 pub mod r82xx;
 
 use std::{
@@ -32,14 +33,19 @@ pub trait TunerProbe: Clone + Debug + Sized + Send + Sync + 'static {
 pub trait Tuner: Debug + Sized + Send + Sync + 'static {
     type Error: TunerError;
 
-    fn name(&self) -> &str;
+    fn name<'a>(&'a self) -> &'a str;
 
-    fn set_bandwidth(
-        &mut self,
+    fn set_bandwidth<'a>(
+        &'a mut self,
         bandwidth: f32,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 
-    fn shutdown(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    fn set_center_frequency<'a>(
+        &'a mut self,
+        center_frequency: f32,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
+
+    fn shutdown<'a>(&'a mut self) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -55,9 +61,9 @@ impl AnyTunerError {
 impl TunerError for AnyTunerError {}
 
 #[derive(Clone, Debug)]
-pub struct BultinTunerProbe;
+pub struct FallbackTunerProbe;
 
-impl TunerProbe for BultinTunerProbe {
+impl TunerProbe for FallbackTunerProbe {
     type Error = AnyTunerError;
     type Tuner = AnyTuner;
 
@@ -117,7 +123,7 @@ pub struct AnyTunerProbe(Box<dyn AnyTunerProbeTrait>);
 
 impl Default for AnyTunerProbe {
     fn default() -> Self {
-        Self::new(BultinTunerProbe)
+        Self::new(FallbackTunerProbe)
     }
 }
 
@@ -153,10 +159,17 @@ impl TunerProbe for AnyTunerProbe {
 
 trait AnyTunerTrait: Debug + Send + Sync + 'static {
     fn name(&self) -> &str;
+
     fn set_bandwidth<'a>(
         &'a mut self,
         bandwidth: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
+
+    fn set_center_frequency<'a>(
+        &'a mut self,
+        center_frequency: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
+
     fn shutdown<'a>(
         &'a mut self,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
@@ -175,6 +188,13 @@ where
         bandwidth: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>> {
         Box::pin(Tuner::set_bandwidth(self, bandwidth).map_err(AnyTunerError::new))
+    }
+
+    fn set_center_frequency<'a>(
+        &'a mut self,
+        center_frequency: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>> {
+        Box::pin(Tuner::set_center_frequency(self, center_frequency).map_err(AnyTunerError::new))
     }
 
     fn shutdown<'a>(
@@ -209,6 +229,13 @@ impl Tuner for AnyTuner {
         self.0.set_bandwidth(bandwidth)
     }
 
+    fn set_center_frequency<'a>(
+        &'a mut self,
+        center_frequency: f32,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
+        self.0.set_center_frequency(center_frequency)
+    }
+
     fn shutdown(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
         self.0.shutdown()
     }
@@ -224,7 +251,16 @@ impl Tuner for NullTuner {
         "null"
     }
 
-    async fn set_bandwidth(&mut self, _bandwidth: f32) -> Result<(), Self::Error> {
+    async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
+        let _ = bandwidth;
+        Ok(())
+    }
+
+    async fn set_center_frequency<'a>(
+        &'a mut self,
+        center_frequency: f32,
+    ) -> Result<(), Self::Error> {
+        let _ = center_frequency;
         Ok(())
     }
 

@@ -68,12 +68,12 @@ async fn main() -> Result<(), Error> {
             }
         }
         Command::PoweronDemod { serial } => {
-            let rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            let (rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
             let mut transaction = rtl2832u.begin_transaction().await;
             transaction.poweron_demod().await?;
         }
         Command::Reset { serial } => {
-            let rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            let (rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
             let mut transaction = rtl2832u.begin_transaction().await;
             transaction.reset(Default::default()).await?;
         }
@@ -141,7 +141,7 @@ async fn main() -> Result<(), Error> {
 
             let mut writer = BufWriter::new(File::create(&output)?);
 
-            let rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            let (rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
 
             let data = rtl2832u
                 .read(reg::Register::Rom { address: 0 }, length)
@@ -159,8 +159,15 @@ async fn main() -> Result<(), Error> {
         Command::BiasTee { serial, command } => {
             gpio_command(serial.as_deref(), 0, command).await?;
         }
-        Command::Test { serial, stream } => {
-            let device = open_device(serial.as_deref()).await?;
+        Command::Test {
+            serial,
+            stream,
+            sample_rate,
+            center_frequency,
+        } => {
+            let mut device = open_device(serial.as_deref()).await?;
+
+            device.set_sample_rate(sample_rate).await?;
 
             if stream {
                 let mut reader = device.reader(0x100000).await?;
@@ -224,7 +231,7 @@ async fn main() -> Result<(), Error> {
         Command::SysDump { serial, output } => {
             let mut writer = BufWriter::new(File::create(&output)?);
 
-            let rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+            let (rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
 
             let length = 0x1000;
 
@@ -356,6 +363,12 @@ enum Command {
     Test {
         #[clap(short, long)]
         serial: Option<String>,
+
+        #[clap(short = 'S', long, default_value = "2400000")]
+        sample_rate: f32,
+
+        #[clap(short = 'F', long, default_value = "144000000")]
+        center_frequency: f32,
 
         #[clap(short, long)]
         stream: bool,

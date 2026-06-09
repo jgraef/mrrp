@@ -190,17 +190,23 @@ impl GpioPin {
     ///
     /// This ensures the pin is configured for output, and the pin state is
     /// initialized before it's enabled.
-    pub async fn gp_output_init(self, initial_state: bool) -> Result<OutputPin, Error> {
+    pub async fn into_output_init(self, initial_state: bool) -> Result<OutputPin, Error> {
         let pin = self.pin;
-        self.into_output_inner(async |transaction| {
-            // set initial state
-            transaction
-                .write_register_update::<reg::GPO>(|gpo| {
-                    gpo.0.set_bit(pin.into(), initial_state);
-                })
-                .await
-        })
-        .await
+
+        let mut pin = self
+            .into_output_inner(async |transaction| {
+                // set initial state
+                transaction
+                    .write_register_update::<reg::GPO>(|gpo| {
+                        gpo.0.set_bit(pin.into(), initial_state);
+                    })
+                    .await
+            })
+            .await?;
+
+        pin.cached_state = Some(initial_state);
+
+        Ok(pin)
     }
 
     /// Returns an output pin with an initial state.
@@ -238,7 +244,10 @@ impl GpioPin {
 
         drop(transaction);
 
-        Ok(OutputPin { pin: self })
+        Ok(OutputPin {
+            pin: self,
+            cached_state: None,
+        })
     }
 }
 
@@ -280,32 +289,71 @@ impl<'a> DerefMut for InputPin {
 #[derive(Debug)]
 pub struct OutputPin {
     pin: GpioPin,
+
+    /// Cache the currently known state of the pin.
+    ///
+    /// This is technically also cached in the shadow map in [`Rtl2832u`], but
+    /// we would need to get a lock for this (i.e. a transaction) to read it.
+    /// And since we have exclusive access to this pin, we can cache it here.
+    cached_state: Option<bool>,
 }
 
 impl OutputPin {
     /// Read the current output logic level of this pin.
     pub async fn get_state(&mut self) -> Result<bool, Error> {
-        let gpo = self
-            .pin
-            .shared
-            .begin_transaction()
-            .await
-            .read_register::<reg::GPO>()
-            .await?;
-        Ok(gpo.0.bit(self.pin.pin.into()))
+        if let Some(cached_state) = self.cached_state {
+            Ok(cached_state)
+        }
+        else {
+            let gpo = self
+                .pin
+                .shared
+                .begin_transaction()
+                .await
+                .read_register::<reg::GPO>()
+                .await?;
+
+            let state = gpo.0.bit(self.pin.pin.into());
+
+            self.cached_state = Some(state);
+
+            Ok(state)
+        }
     }
 
     /// Set the output logic level for this pin.
     pub async fn write(&mut self, state: bool) -> Result<(), Error> {
-        self.pin
-            .shared
-            .begin_transaction()
-            .await
-            .write_register_update::<reg::GPO>(|gpo| {
-                gpo.0.set_bit(self.pin.pin.into(), state);
-            })
-            .await?;
+        if self
+            .cached_state
+            .is_none_or(|cached_state| cached_state != state)
+        {
+            self.pin
+                .shared
+                .begin_transaction()
+                .await
+                .write_register_update::<reg::GPO>(|gpo| {
+                    gpo.0.set_bit(self.pin.pin.into(), state);
+                })
+                .await?;
+
+            self.cached_state = Some(state);
+        }
+
         Ok(())
+    }
+
+    /// Returns the state without reading from the device, if it is known.
+    ///
+    /// This can be done without even acquiring a transaction on the
+    /// [`Rtl2832u`], so it doesn't an async context, and can't fail with an
+    /// errorr.
+    ///
+    /// But this can only return a state if it was previously set, read via
+    /// [`get_state`](Self::get_state), or initialized via
+    /// [`into_output_init`](GpioPin::into_output_init).
+    #[inline(always)]
+    pub fn get_known_state(&self) -> Option<bool> {
+        self.cached_state
     }
 }
 

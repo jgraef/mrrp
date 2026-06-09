@@ -98,6 +98,8 @@ impl Device {
 
         i2c_repeater_guard.disable().await?;
 
+        tracing::info!(tuner = tuner.name(), "found tuner");
+
         // todo: this is specifically for R828D and Blog v4 for testing
 
         // if **not** blog v4, set tuner_xtal = R828D_XTAL_FREQ, otherwise use rtl_xtal.
@@ -234,8 +236,24 @@ impl Device {
         self.sample_rate
     }
 
-    pub fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
+    pub async fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
         tracing::debug!(?center_frequency, "setting center frequency");
+
+        let inner = self.inner.expect_mut();
+
+        let mut transaction = inner.rtl2832u.begin_transaction().await;
+
+        // librtlsdr sets the "exact" sample rate here. We think they basically convert
+        // from the encoded value back to Hz. But they also do some bit-manipulation.
+        {
+            let i2c_repeater_guard = transaction.enable_i2c_repeater().await?;
+            //inner.tuner.set_
+            i2c_repeater_guard.disable().await?;
+        }
+
+        //transaction.set_if_mode(if_mode).await?;
+
+        //transaction.set_if_frequency(if_frequency).await?;
 
         todo!();
     }

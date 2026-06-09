@@ -60,7 +60,7 @@ pub async fn dump_regs(
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    let rtl2832u = open_rtl2832u(serial).await?;
+    let (rtl2832u, _) = open_rtl2832u(serial).await?;
     let mut transaction = rtl2832u.begin_transaction().await;
 
     if !demod.is_empty() || tuner_i2c {

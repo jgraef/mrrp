@@ -15,6 +15,10 @@ use crate::{
         Rtl2832u,
         USB_INTERFACE,
     },
+    tuner::{
+        AnyTunerProbe,
+        blog::BlogTunerProbe,
+    },
 };
 
 /// Enumerate RTL2832U devices via USB.
@@ -156,10 +160,11 @@ where
 }
 
 /// Specific features of this device that we need to know about.
-#[derive(Clone, derive_more::Debug)]
+#[derive(Clone, Debug)]
 pub struct DeviceConfig {
     pub name: Cow<'static, str>,
-    // todo: info about if it has a builtin upconverter, i.e. is a blog v4(l), etc.
+
+    pub tuner_probe: Option<AnyTunerProbe>,
 }
 
 /// Detects all builtin devices
@@ -259,21 +264,11 @@ impl KnownDevices for BuiltinKnownDevices {
     fn detect(&self, device_info: &nusb::DeviceInfo) -> Option<DeviceConfig> {
         let device = self.get(device_info.vendor_id(), device_info.product_id())?;
 
-        match (
-            device_info.manufacturer_string(),
-            device_info.product_string(),
-        ) {
-            (Some("RTLSDRBlog"), Some("Blog V4")) => {
-                // todo
-            }
-            (Some("RTLSDRBlog"), Some("Blog V4L")) => {
-                // todo
-            }
-            _ => {}
-        }
+        let tuner_probe = BlogTunerProbe::try_from_device_info(device_info).map(AnyTunerProbe::new);
 
         Some(DeviceConfig {
             name: device.name.into(),
+            tuner_probe,
         })
     }
 }
