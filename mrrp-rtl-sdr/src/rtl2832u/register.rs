@@ -111,18 +111,34 @@ impl Block {
 ///
 /// Block addresses must include base addresses where applicable (usb, system,
 /// tuner).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, derive_more::Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Register {
     /// Register in demod block
-    Demod { page: u8, address: u8 },
+    Demod {
+        page: u8,
+        #[debug("0x{address:02x}")]
+        address: u8,
+    },
     /// Register in USB block
-    Usb { address: u16 },
+    Usb {
+        #[debug("0x{address:04x}")]
+        address: u16,
+    },
     /// Register in system block
-    System { address: u16 },
+    System {
+        #[debug("0x{address:04x}")]
+        address: u16,
+    },
     /// Tuner block (unusued)
-    Tuner { address: u16 },
+    Tuner {
+        #[debug("0x{address:04x}")]
+        address: u16,
+    },
     /// ROM (might be locked down)
-    Rom { address: u16 },
+    Rom {
+        #[debug("0x{address:04x}")]
+        address: u16,
+    },
     /// I2C relay
     ///
     /// `i2c_address` is a left-aligned I2C device address.
@@ -624,7 +640,7 @@ pub mod usb {
 
         /// Configures the max packet size.
         ///
-        /// Valid values are `0..=1024` (10 bits)
+        /// Valid values are `0..=2048` (11 bits)
         EPA_MAXPKT: u32 = usb(0x2158) shadow {
             pub u16, max_packet_size, set_max_packet_size: 10, 0;
         };
@@ -632,7 +648,7 @@ pub mod usb {
         /// Configures FIFO
         ///
         /// `fifo_size` can be `0..=8` (3 bits)
-        EPA_FIFO_CFG: u32 = usb(0x2160) shadow {
+        EPA_FIFO_CFG: u32 = usb(0x2160) {
             pub u8, block_drop_counter, set_block_drop_counter: 31, 24;
             pub u8, fifo_size, set_fifo_size: 3, 0;
         };

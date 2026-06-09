@@ -24,6 +24,7 @@ use std::{
 };
 
 use paste::paste;
+use pretty_hex::PrettyHex;
 
 use crate::{
     rtl2832u::{
@@ -38,7 +39,6 @@ use crate::{
         Tuner,
         TunerError,
         TunerProbe,
-        r82xx::test::assert_regs,
     },
 };
 
@@ -202,25 +202,25 @@ pub fn filter_setting_for_bandwidth(bandwidth: f32) -> &'static FilterSetting {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Variant {
+pub enum Model {
     R820T,
     R828D,
 }
 
-impl Variant {
+impl Model {
     pub const ALL: &[Self] = &[Self::R820T, Self::R828D];
 
     pub const fn name(&self) -> &'static str {
         match self {
-            Variant::R820T => "R820T",
-            Variant::R828D => "R828D",
+            Model::R820T => "R820T",
+            Model::R828D => "R828D",
         }
     }
 
     pub const fn i2c_address(&self) -> I2cAddress {
         match self {
-            Variant::R820T => I2cAddress::from_left_aligned(0x34),
-            Variant::R828D => I2cAddress::from_left_aligned(0x74),
+            Model::R820T => I2cAddress::from_left_aligned(0x34),
+            Model::R828D => I2cAddress::from_left_aligned(0x74),
         }
     }
 }
@@ -244,12 +244,10 @@ impl TunerProbe for R82xxProbe {
     type Tuner = R82xx;
 
     async fn try_open(&self, rtl2832u: &Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
-        for variant in Variant::ALL {
-            tracing::debug!("probing for {}", variant.name());
+        for model in Model::ALL {
+            tracing::debug!("probing for {}", model.name());
 
-            let mut i2c_device = rtl2832u
-                .try_open_i2c(variant.i2c_address())?
-                .with_repeater();
+            let mut i2c_device = rtl2832u.try_open_i2c(model.i2c_address())?.with_repeater();
 
             // According to datasheet this is 0x96, but the chip sends data from LSB
             // to MSB, while the RTL2832U decodes it the other way.
@@ -257,9 +255,9 @@ impl TunerProbe for R82xxProbe {
             if let Ok(data) = i2c_device.read(1).await
                 && data[0] == 0x69
             {
-                tracing::debug!("{} found", variant.name());
+                tracing::debug!("{} found", model.name());
 
-                let mut r82xx = R82xx::new(i2c_device, *variant);
+                let mut r82xx = R82xx::new(i2c_device, *model);
                 r82xx.initialize().await?;
 
                 return Ok(Some(r82xx));
@@ -272,15 +270,23 @@ impl TunerProbe for R82xxProbe {
 
 #[derive(Debug)]
 pub struct R82xxState {
-    variant: Variant,
+    model: Model,
     registers: Registers,
     if_frequency: f32,
 }
 
 impl R82xxState {
+    pub fn new(model: Model) -> Self {
+        Self {
+            model,
+            registers: Default::default(),
+            if_frequency: DEFAULT_IF_FREQUENCY as f32,
+        }
+    }
+
     #[inline(always)]
-    pub fn variant(&self) -> Variant {
-        self.variant
+    pub fn model(&self) -> Model {
+        self.model
     }
 
     /// Select RF input
@@ -288,7 +294,7 @@ impl R82xxState {
     /// Panics for R820T, if `input` is not [`Air`](RfInput::Air)
     pub fn select_rf_input(&mut self, input: RfInput) {
         assert!(
-            matches!(input, RfInput::Air) || !matches!(self.variant, Variant::R820T),
+            matches!(input, RfInput::Air) || !matches!(self.model, Model::R820T),
             "R820T only has one input RfInput::Air"
         );
 
@@ -340,23 +346,68 @@ impl R82xxState {
     pub fn shutdown(&mut self) {
         tracing::debug!("setting r82xx to standby");
 
+        self.shutdown_ours();
+        //self.shutdown_librtlsdr();
+    }
+
+    #[allow(dead_code)]
+    fn shutdown_librtlsdr(&mut self) {
+        let writes = [
+            (0x06, 0xb1),
+            (0x05, 0xa0),
+            (0x07, 0x3a),
+            (0x08, 0x40),
+            (0x09, 0xc0),
+            (0x0a, 0x36),
+            (0x0c, 0x35),
+            (0x0f, 0x68),
+            (0x11, 0x03),
+            (0x17, 0xf4),
+            (0x19, 0x0c),
+        ];
+
+        for (address, value) in writes {
+            self.registers[address] = value;
+        }
+    }
+
+    #[allow(dead_code)]
+    fn shutdown_ours(&mut self) {
+        // 0x05
         self.registers.set_pwd_lt(true); // turn off loop-through
         self.registers.set_pwd_lna1(true); // turn off lna 1
+        self.registers.set_lna_gain(0); // set lna gain to min
+
+        // 0x06
         self.registers.set_pwd_pdet1(true); // turn off pdet1
         self.registers.set_pwd_pdet3(false); // turn off pdet3
+        self.registers.set_pw_lna(0b001); // don't know why librtlsdr sets this to 0b001, instead of 0b111(min)
+
+        // 0x07
         self.registers.set_pwd_mix(false); // turn mixer off
         self.registers.set_pw0_mix(true); // mixer low power setting
+        self.registers.set_mix_gain(0b1010); // don't know why librtlsdr sets this to 0b1010, instead of 0b0000(min)
+
+        // 0x08
         self.registers.set_pwd_amp(false); // turn off amplifier
         self.registers.set_pw0_amp(true); // amplifier low power setting
 
+        // 0x09
         self.registers.set_pwd_iffilt(true); // IF filter power off
         self.registers.set_pw1_iffilt(true); // IF filter low power setting
 
+        // 0x0a
         self.registers.set_pwd_filt(false); // filter power off
-        self.registers.set_pw_filt(0b11); // filter low power setting
+        self.registers.set_pw_filt(0b01); // don't know why librtlsdr sets this to 0b01 instead of 0b11(min)
+        self.registers.set_filt_code(0b0110); // librtlsdr sets this on standby
 
+        // 0x0c
         self.registers.set_pwd_vga(false); // turn off vga
         self.registers.set_unk_pw0_vga(true); // low power setting
+        self.registers.set_unk_adc_enable(false); // disable ADC
+        self.registers.set_vga_code(0b0101); // librtlsdr sets this on standby
+
+        // 0x11
 
         // todo: this is set to 0x68 for standby, but it's also initialized that way.
         // the spreadsheet lists ldo5vh and pwd_ldo_5v here that seem power-related, but
@@ -368,14 +419,40 @@ impl R82xxState {
         self.registers.set_pw_ldo_a(0);
         self.registers.set_unk_cp_cur(0);
 
+        // 0x17
         self.registers.set_pw_ldo_d(0b11);
         self.registers.set_unk_div_buf_cur(0b11);
-
         self.registers.set_unk_pw_iq(0b10);
 
+        // 0x19
         // librtlsdr sets ring_pw (0x19 [3:2]) to 0b11, but it's initialized as that.
         self.registers.set_pwd_rffilt(false); // turn off RF filter power
         self.registers.set_unk_rf_poly_filter_current(0);
+
+        /*
+        Note: Nvm, it's working now. We'll leave this here for a while, in case problems return.
+
+        This still produces very strange behavior when trying to initialize the R828D after standby.
+        Sometimes the R828D doesn't respond (USB timeout), but usually the DEMOD actually stalls (e.g. setting IIC_repeat fails).
+        Sometimes the errors would appear on the second time sending to standby - meaning the whole init procedure worked after standby and then it broke.
+        Sometimes even rtl_test will report errors after (demod, dropped sample). Though they go away after running it again.
+
+        this is what we flush
+
+        0000:   00 00 00 00  00 a0 b1 3a  40 c0 36 6b  35 53 75 68   .......:@.6k5Suh
+        0010:   8c 03 06 31  84 72 1c f4  48 0c 68 00  24 dd 6e 40   ...1.r..H.h.$.n@
+
+        this is what rtl_test dumps after standby (tuner_r82xx.c:1382)
+
+        0000    __ __ __ __  __ a0 b1 3a  40 c0 36 af  35 53 75 68
+        0010:   a4 03 06 31  05 38 ce f4  48 0c 68 00  24 dd 6e 40
+
+                ours                   librtlsdr                initial
+        0x0b:   0x6b, 0b0110_1011      0xaf, 0b1010_1111        0x6c, 0b0110_1100       filter settings
+        0x10:   0x8c, 0b1000_1100      0xa4, 0b1010_0100        0x6c, 0b0110_1100       pll settings
+
+        0x14..=0x16 are just tuning
+         */
     }
 }
 
@@ -396,19 +473,15 @@ pub struct R82xx {
 }
 
 impl R82xx {
-    pub fn new(i2c_device: I2cDevice, variant: Variant) -> Self {
+    pub fn new(i2c_device: I2cDevice, model: Model) -> Self {
         Self {
             i2c_device,
-            state: R82xxState {
-                variant,
-                registers: Default::default(),
-                if_frequency: DEFAULT_IF_FREQUENCY as f32,
-            },
+            state: R82xxState::new(model),
         }
     }
 
     pub async fn initialize(&mut self) -> Result<(), Error> {
-        tracing::debug!(tuner = ?self.state.variant, "initializing");
+        tracing::debug!(tuner = ?self.state.model, "initializing");
         //tracing::debug!("initial state: {:#?}", self.state);
 
         //self.sync().await?;
@@ -419,8 +492,6 @@ impl R82xx {
         // after. we would still have to keep this to initialize some bits that are
         // never changed. though librtlsdr uses this in a few places.
         self.state.registers[5..NUM_REGISTERS].copy_from_slice(&INITIAL);
-
-        assert_regs(&self.state.registers, 826);
 
         // the following initialization is derived from `r82xx_set_tv_standard`
         //
@@ -514,8 +585,6 @@ impl R82xx {
         // librtlsdr doesn't do this explicitely here, but it's in the initialized
         // register bytes.
         self.state.registers.set_pwd_rffilt(true);
-
-        assert_regs(&self.state.registers, 953);
 
         // the following is from `r82xx_sysfreq_sel`
 
@@ -651,7 +720,6 @@ impl R82xx {
 
         // in librtlsdr there's a commented-out sleep here.
         // is this why they now set everything to different values?
-        assert_regs(&self.state.registers, 732);
 
         // set LNA TOP (again???)
         // /* write LNA TOP = 3 */
@@ -684,8 +752,6 @@ impl R82xx {
         // /* agc clk 60hz */
         // rc = r82xx_write_reg_mask(priv, 0x1a, 0x20, 0x30);
         self.state.registers.set_unk_agc_clk(0b10);
-
-        assert_regs(&self.state.registers, 792);
 
         // flush
         self.flush().await?;
@@ -727,6 +793,11 @@ impl R82xx {
     /// This will ever only write registers that are marked as dirty, but it'll
     /// try to do so in as few write commands as possible.
     pub async fn flush(&mut self) -> Result<(), Error> {
+        tracing::debug!(
+            "flushing registers\n{:?}",
+            self.state.registers.cache.hex_dump()
+        );
+
         let mut run = None;
         let mut buf = [0u8; 0x20];
 
@@ -773,7 +844,7 @@ impl Tuner for R82xx {
     type Error = Error;
 
     fn name(&self) -> &str {
-        self.state.variant.name()
+        self.state.model.name()
     }
 
     async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
@@ -915,12 +986,7 @@ impl Registers {
 
 #[inline(always)]
 fn range_mask(start: u8, end: u8) -> u32 {
-    let end_mask = if end == 0x20 {
-        u32::MAX
-    }
-    else {
-        (1 << end) - 1
-    };
+    let end_mask = if end == 32 { u32::MAX } else { (1 << end) - 1 };
     let start_mask = (1 << start) - 1;
 
     end_mask ^ start_mask
@@ -1217,6 +1283,10 @@ registers! {
         hpf: [3:0],
     };
     0x0c: {
+        /// Undocumented
+        ///
+        /// In spreadsheet: 0=on, 1=off
+        unk_adc_enable: [7],
         /// VGA power control - 0=off, 1=on
         pwd_vga: [6],
         /// VGA power setting (not in datasheet)
@@ -1310,6 +1380,8 @@ registers! {
         /// CP pin - PLL charge pump?
         ///
         /// Set to 0b000 for standby. So the 0b000=low/off, 0b111=highest maybe?
+        ///
+        /// The spreadsheet lists this as 0=on
         unk_cp_cur: [5:3],
 
         /// Undocumented
@@ -1317,7 +1389,7 @@ registers! {
         /// No idea what this does.
         ///
         /// It's initialized as 0b11 and set to 0b11 on standby. Spreadsheet just names it.
-        unk_bias_hf: [0:1],
+        unk_bias_hf: [1:0],
     };
     0x12: {
         /// Not in datasheet
@@ -1551,191 +1623,4 @@ registers! {
         unk_lt_att: [7],
     };
 
-}
-
-mod test {
-    use std::sync::OnceLock;
-
-    use crate::tuner::r82xx::Registers;
-
-    const DUMP: &str = r#"
-r82xx-reg-dump rtl-sdr-blog/src/tuner_r82xx.c 826 83 30 75 c0 40 d6 6c f5 63 75 68 6c 83 80 00 0f 00 c0 30 48 cc 60 00 54 ae 4a c0 00 00 00
-r82xx-reg-dump rtl-sdr-blog/src/tuner_r82xx.c 953 83 30 75 c0 40 d5 6b f0 63 75 68 8c 83 06 31 84 72 1c 30 48 ec 68 00 54 86 6a 40 00 00 00
-r82xx-reg-dump rtl-sdr-blog/src/tuner_r82xx.c 732 83 30 75 c0 40 d5 6b f0 53 75 68 8c bb 06 31 84 72 1c 20 48 ec 78 00 20 c5 6a 40 00 00 00
-r82xx-reg-dump rtl-sdr-blog/src/tuner_r82xx.c 792 83 30 75 c0 40 d5 6b f0 53 75 68 8c bb 06 31 84 72 1c 20 48 ec 68 00 24 dd 6e 40 00 00 00
-    "#;
-
-    pub struct Dump {
-        file: &'static str,
-        line: usize,
-        registers: [u8; 0x20],
-    }
-
-    pub fn parse_dumps() -> &'static [Dump] {
-        // dumps always start at register 0x05, because librtlsdr's shadow store begins
-        // there. but they have 30 registers! so are there more than 32
-        // registers on R82xx? for now we'll ignore anything >= 32
-
-        static ONCE: OnceLock<Vec<Dump>> = OnceLock::new();
-        ONCE.get_or_init(|| {
-            DUMP.lines()
-                .filter_map(|line| {
-                    let line = line.trim();
-                    line.strip_prefix("r82xx-reg-dump").map(|line| {
-                        let line = line.trim();
-                        let mut it = line.split_whitespace();
-                        let file = it.next().unwrap();
-                        let line = it.next().unwrap().parse().unwrap();
-                        let mut registers = [0; 0x20];
-                        for i in 5..0x20 {
-                            registers[i] = u8::from_str_radix(it.next().unwrap(), 16).unwrap();
-                        }
-                        Dump {
-                            file,
-                            line,
-                            registers,
-                        }
-                    })
-                })
-                .collect()
-        })
-    }
-
-    #[track_caller]
-    pub fn assert_regs(registers: &Registers, line: usize) {
-        let expected = parse_dumps()
-            .iter()
-            .find(|dump| dump.line == line)
-            .unwrap_or_else(|| panic!("Dump not found: Line {line}"));
-
-        for i in 5..0x20 {
-            if registers.cache[i] != expected.registers[i] {
-                panic!(
-                    "Register at address 0x{i:02x} differ:\n  expected: 0x{0:02x} 0b{0:08b}\n  provided: 0x{1:02x} 0b{1:08b}\nCorresponding line in librtlsdr:\n  {2}:{3}",
-                    expected.registers[i], registers.cache[i], expected.file, expected.line,
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn filter_configs() {
-        let bws = [
-            8000000, 7000000, 6000000, 2430000, 2050000, 1700000, 1600000, 1550000, 1450000,
-            1200000, 700000, 550000, 450000, 350000, 0,
-        ];
-
-        for i in 1..14 {
-            let (reg_0a, reg_0b, int_freq) = filter_config(bws[i] + 1);
-
-            let low_q = reg_0a != 0;
-            let bw_1_7mhz = reg_0b & 0x80 != 0;
-            let filt_bw = (reg_0b >> 5) & 3;
-            let hpf = reg_0b & 0xf;
-
-            println!(
-                "{{ min_bandwidth: {:?}, max_bandwidth: {:?}, low_q: {low_q:?}, bw_1_7mhz: {bw_1_7mhz:?}, filt_bw: {filt_bw}, hpf: {hpf}, int_freq: {:?} }}",
-                bws[i] as f32,
-                bws[i - 1] as f32,
-                int_freq as f32,
-            );
-        }
-    }
-
-    #[allow(dead_code)]
-    fn filter_config(mut bw: u32) -> (u8, u8, u32) {
-        const R82XX_IF_LOW_PASS_BW_TABLE: [u32; 10] = [
-            1700000, 1600000, 1550000, 1450000, 1200000, 900000, 700000, 550000, 450000, 350000,
-        ];
-        const FILT_HP_BW1: u32 = 350000;
-        const FILT_HP_BW2: u32 = 380000;
-
-        let reg_0a: u8;
-        let mut reg_0b: u8;
-        let mut int_freq;
-        let mut real_bw = 0;
-
-        if bw > 7000000 {
-            // BW: 8 MHz
-            reg_0a = 0x10;
-            reg_0b = 0x0b;
-            int_freq = 4570000;
-        }
-        else if bw > 6000000 {
-            // BW: 7 MHz
-            reg_0a = 0x10;
-            reg_0b = 0x2a;
-            int_freq = 4570000;
-        }
-        else if bw > R82XX_IF_LOW_PASS_BW_TABLE[0] + FILT_HP_BW1 + FILT_HP_BW2 {
-            // BW: 6 MHz
-            reg_0a = 0x10;
-            reg_0b = 0x6b;
-            int_freq = 3570000;
-        }
-        else {
-            reg_0a = 0x00;
-            reg_0b = 0x80;
-            int_freq = 2300000;
-
-            if bw > R82XX_IF_LOW_PASS_BW_TABLE[0] + FILT_HP_BW1 {
-                bw -= FILT_HP_BW2;
-                int_freq += FILT_HP_BW2;
-                real_bw += FILT_HP_BW2;
-            }
-            else {
-                reg_0b |= 0x20;
-            }
-
-            if bw > R82XX_IF_LOW_PASS_BW_TABLE[0] {
-                bw -= FILT_HP_BW1;
-                int_freq += FILT_HP_BW1;
-                real_bw += FILT_HP_BW1;
-            }
-            else {
-                reg_0b |= 0x40;
-            }
-
-            // find low-pass filter
-            let mut i: u8 = 0;
-            while i < 10 {
-                if bw > R82XX_IF_LOW_PASS_BW_TABLE[usize::from(i)] {
-                    break;
-                }
-                i += 1;
-            }
-            i -= 1;
-            reg_0b |= 15 - i;
-            real_bw += R82XX_IF_LOW_PASS_BW_TABLE[usize::from(i)];
-
-            int_freq -= real_bw / 2;
-        }
-
-        (reg_0a, reg_0b, int_freq)
-    }
-
-    #[test]
-    fn shutdown_regs() {
-        let writes = [
-            (0x06, 0xb1),
-            (0x05, 0xa0),
-            (0x07, 0x3a),
-            (0x08, 0x40),
-            (0x09, 0xc0),
-            (0x0a, 0x36),
-            (0x0c, 0x35),
-            (0x0f, 0x68),
-            (0x11, 0x03),
-            (0x17, 0xf4),
-            (0x19, 0x0c),
-        ];
-
-        let mut registers = Registers::default();
-
-        for (register, value) in writes {
-            registers[register] = value;
-        }
-
-        println!("{registers:#?}");
-    }
 }

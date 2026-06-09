@@ -48,8 +48,8 @@ use crate::rtl2832u::{
 ///
 /// **Be careful** to use the right addressing scheme, or you could potentially
 /// write to the wrong device, e.g. the EEPROM.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct I2cAddress(u8);
+#[derive(Clone, Copy, derive_more::Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct I2cAddress(#[debug("0x{_0:02x}")] u8);
 
 impl I2cAddress {
     /// This is the format the RTL2832U expects.
@@ -78,12 +78,6 @@ impl I2cAddress {
     /// Returns the "right-aligned" address
     pub fn right_aligned(&self) -> u8 {
         self.0 >> 1
-    }
-}
-
-impl Debug for I2cAddress {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "I2cAddress(0x{:02x})", self.0)
     }
 }
 

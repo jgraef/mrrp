@@ -265,9 +265,9 @@ impl Inner {
     async fn reset(&mut self) -> Result<(), Error> {
         let mut transaction = self.rtl2832u.begin_transaction().await;
 
-        //let i2c_repeater_guard = self.rtl2832u.enable_i2c_repeater().await?;
-        //self.tuner.shutdown().await?;
-        //i2c_repeater_guard.disable().await?;
+        let i2c_repeater_guard = transaction.enable_i2c_repeater().await?;
+        self.tuner.shutdown().await?;
+        i2c_repeater_guard.disable().await?;
 
         transaction.reset(Default::default()).await?;
 
