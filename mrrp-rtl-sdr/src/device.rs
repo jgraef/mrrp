@@ -233,6 +233,12 @@ impl Device {
     pub fn sample_rate(&self) -> f32 {
         self.sample_rate
     }
+
+    pub fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
+        tracing::debug!(?center_frequency, "setting center frequency");
+
+        todo!();
+    }
 }
 
 #[derive(derive_more::Debug)]

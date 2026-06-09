@@ -48,6 +48,7 @@ use crate::{
     },
     regdump::{
         dump_regs,
+        hexyl,
         print_reg_dump,
     },
     server::ServerHandler,
@@ -220,6 +221,34 @@ async fn main() -> Result<(), Error> {
                 })
                 .await?;
         }
+        Command::SysDump { serial, output } => {
+            let mut writer = BufWriter::new(File::create(&output)?);
+
+            let rtl2832u = open_rtl2832u(serial.as_deref()).await?;
+
+            let length = 0x1000;
+
+            for i in 0..0x10 {
+                let address = i * length;
+                tracing::info!(?address, ?length, "dumping");
+
+                match rtl2832u
+                    .read(reg::Register::System { address }, length)
+                    .await
+                {
+                    Ok(data) => {
+                        hexyl(&data, address.try_into().unwrap());
+                        writer.write_all(&data)?;
+                    }
+                    Err(error) => {
+                        tracing::error!(?address, ?length, %error, "dump failed");
+                        for _ in 0..length {
+                            writer.write_all(&[0])?;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(())
@@ -277,6 +306,9 @@ enum Command {
         output: Option<PathBuf>,
     },
     /// Print register dump
+    ///
+    /// This dumps registers as documented in the datasheet. Specifically this
+    /// reads from the specified base addresses.
     PrintRegDump {
         path: Option<PathBuf>,
         #[clap(short, long)]
@@ -337,6 +369,18 @@ enum Command {
 
         #[clap(short, long, default_value = "65536")]
         buffer_size: usize,
+    },
+    /// Dumps system memory.
+    ///
+    /// This reads from the system block, but doesn't respect the
+    /// datasheet-specified base address. It reads 0x00000 .. 0x10000 in chunks
+    /// of 0x1000.
+    SysDump {
+        #[clap(short, long)]
+        serial: Option<String>,
+
+        #[clap(short, long)]
+        output: PathBuf,
     },
 }
 

@@ -226,7 +226,7 @@ impl<'a> reg::Visitor for PrintRegs<'a> {
     }
 }
 
-fn hexyl(data: &[u8], offset: usize) {
+pub fn hexyl(data: &[u8], offset: usize) {
     let mut stdout = stdout();
     let mut printer = hexyl::PrinterBuilder::new(&mut stdout).build();
     printer.display_offset(offset.try_into().unwrap());
