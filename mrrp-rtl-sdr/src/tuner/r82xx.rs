@@ -258,7 +258,10 @@ impl TunerProbe for R82xxProbe {
                 tracing::debug!("{} found", model.name());
 
                 let mut r82xx = R82xx::new(i2c_device, *model);
-                r82xx.initialize().await?;
+
+                let mut transaction = r82xx.begin_transaction();
+                transaction.initialize().await?;
+                transaction.commit().await?;
 
                 return Ok(Some(r82xx));
             }
@@ -268,20 +271,449 @@ impl TunerProbe for R82xxProbe {
     }
 }
 
+/// R82xx tuner
 #[derive(Debug)]
-pub struct R82xxState {
+pub struct R82xx {
     model: Model,
-    registers: Registers,
+    i2c_device: I2cDevice,
+    register_state: [u8; NUM_REGISTERS as usize],
     if_frequency: f32,
 }
 
-impl R82xxState {
-    pub fn new(model: Model) -> Self {
+impl R82xx {
+    pub fn new(i2c_device: I2cDevice, model: Model) -> Self {
         Self {
             model,
-            registers: Default::default(),
+            i2c_device,
+            register_state: Default::default(),
             if_frequency: DEFAULT_IF_FREQUENCY as f32,
         }
+    }
+
+    #[inline(always)]
+    pub fn model(&self) -> Model {
+        self.model
+    }
+
+    /// Begin a transaction that can read and write registers.
+    ///
+    /// This is mostly used to batch writes. You can flush writes with
+    /// [`flush`](Self::flush), or call [`commit`](Self::commit) when you're
+    /// done. The latter consumes the transaction, but also flushes all writes.
+    pub fn begin_transaction<'a>(&'a mut self) -> Transaction<'a> {
+        let registers = RegisterBuffer {
+            state: self.register_state,
+            modified: 0,
+        };
+
+        let if_frequency = self.if_frequency;
+
+        Transaction {
+            r82xx: self,
+            registers,
+            if_frequency,
+            warn_on_uncomitted_drop: true,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Transaction<'a> {
+    r82xx: &'a mut R82xx,
+    pub registers: RegisterBuffer,
+    if_frequency: f32,
+    pub warn_on_uncomitted_drop: bool,
+}
+
+impl<'a> Transaction<'a> {
+    #[inline(always)]
+    pub fn r82xx(&self) -> &R82xx {
+        &self.r82xx
+    }
+
+    #[inline(always)]
+    pub fn model(&self) -> Model {
+        self.r82xx.model
+    }
+
+    /// Reads the first `n` registers from the device into the local cache.
+    ///
+    /// Always starts reading from register 0x00.
+    ///
+    /// The max message length of 0x08 is used by librtlsdr for R82xx. While
+    /// testing we were able to read upto 0x10 bytes. We'll only ever need the
+    /// first 5 bytes though.
+    ///
+    /// This doesn't read any registers that have been modified during this
+    /// transaction.
+    ///
+    /// The R82xx sends bits in reversed order. This accounts for this and
+    /// reverses the received bits.
+    pub async fn read(&mut self, n: u8) -> Result<(), Error> {
+        let data = self.r82xx.i2c_device.read(n.into()).await?;
+
+        for i in 0..n {
+            if !self.registers.is_modified(i) {
+                // R82xx sends bytes with bits reversed.
+                let value = data[usize::from(i)].reverse_bits();
+
+                // Don't deref_mut into registers directly to avoid setting the dirty bit.
+                self.registers.state[usize::from(i)] = value;
+
+                // also write into backing storage
+                self.r82xx.register_state[usize::from(i)] = value;
+            }
+        }
+
+        tracing::debug!(registers = ?self.registers.state[..usize::from(n)], "read registers");
+
+        Ok(())
+    }
+
+    pub async fn commit(mut self) -> Result<(), Error> {
+        self.flush().await
+    }
+
+    /// Write out any dirty registers
+    ///
+    /// This will ever only write registers that are marked as dirty, but it'll
+    /// try to do so in as few write commands as possible.
+    pub async fn flush(&mut self) -> Result<(), Error> {
+        tracing::debug!(
+            "flushing registers\nmodified: {:?}\n{:?}",
+            FormatRegisterBitMap(self.registers.modified),
+            self.registers.state.hex_dump()
+        );
+
+        let mut run = None;
+        let mut buf = [0u8; 0x20];
+
+        let mut flush_run = async |run: Range<u8>| -> Result<(), Error> {
+            buf[0] = run.start;
+            buf[1..usize::from(run.end) - usize::from(run.start) + 1]
+                .copy_from_slice(&self.registers[run.clone()]);
+
+            let buf_len = 1 + run.end - run.start;
+            let command = &buf[..buf_len.into()];
+
+            tracing::debug!(?run, ?command, "write registers");
+
+            self.r82xx.i2c_device.write(&command).await?;
+
+            Ok(())
+        };
+
+        for i in 0..NUM_REGISTERS {
+            if run
+                .as_ref()
+                .is_some_and(|run: &Range<u8>| run.end - run.start + 1 == MAX_I2C_MESSAGE_LENGTH)
+            {
+                flush_run(run.take().unwrap()).await?;
+            }
+
+            if self.registers.is_modified(i)
+                && self.registers[i] != self.r82xx.register_state[usize::from(i)]
+            {
+                run.get_or_insert_with(|| i..i).end += 1;
+            }
+            else if let Some(run) = run.take() {
+                flush_run(run).await?;
+            }
+        }
+
+        if let Some(run) = run.take() {
+            flush_run(run).await?;
+        }
+
+        // write registers back into backing state
+        self.r82xx.register_state = self.registers.state;
+
+        // clear all modified flags
+        self.registers.modified = 0;
+
+        Ok(())
+    }
+
+    /// Initializes the R82xx
+    ///
+    /// Since this needs to peform calibration, it needs to flush the
+    /// transaction during initialization. But it will not flush the transaction
+    /// when it's done initializing. The caller has to do this - so they might
+    /// queue up more writes.
+    pub async fn initialize(&mut self) -> Result<(), Error> {
+        tracing::debug!(tuner = ?self.r82xx.model, "initializing");
+        //tracing::debug!("initial state: {:#?}", self.state);
+
+        //self.sync().await?;
+        //tracing::debug!("synced state: {state:#?}");
+
+        // TODO: do we want to remove this and instead explicitely initialize registers
+        // via setters? we should also remove anything that is overwritten immediately
+        // after. we would still have to keep this to initialize some bits that are
+        // never changed. though librtlsdr uses this in a few places.
+        self.registers[5..NUM_REGISTERS].copy_from_slice(&INITIAL);
+
+        // the following initialization is derived from `r82xx_set_tv_standard`
+        //
+        // note: right now this doesn't do any async, so we could have this on the state
+        // instead. but the librtlsdr code also calibrates the device, which would need
+        // to flush.
+
+        // initialize VGA gain
+        // on, controlled by vagc pin
+        self.registers.set_pwd_vga(true);
+        self.registers.set_vga_mode(true);
+        self.registers.set_vga_code(0);
+
+        // VCO band
+        // rc = r82xx_write_reg_mask(priv, 0x13, VER_NUM, 0x3f);
+        self.registers.set_unk_vco_band(VERSION_VALUE);
+
+        // for LT (loop-through) gain test?
+        // only if not analog tv
+        self.registers.set_pdet1_gain(0);
+
+        // todo: calibration
+        // here during calibration librtlsdr will call r82xx_set_pll, which will set
+        // sel_div.
+
+        // this also done in r82xx_set_pll, which we'll hardcode here for testing
+        //
+        // /* set VCO current = 100 */
+        // /* rc = r82xx_write_reg_mask(priv, 0x12, 0x80, 0xe0); */
+        // /* RTL-SDR Blog Modification: Set VCO current to MAX */
+        // rc = r82xx_write_reg_mask(priv, 0x12, 0x06, 0xff);
+        //
+        self.registers.set_unk_vco_current(0b000);
+        self.registers.set_unk_cp_offset(0b11);
+        self.registers.set_s_i2c(0b10);
+        self.registers.set_n_i2c(0b000100);
+        self.registers.set_sdm_in(0x1c72); // 72 1c
+        self.registers.set_pll_auto_clk(0b10);
+
+        // todo: hard-coded for testing
+        self.registers.set_sel_div(0b100);
+
+        // filter bandwidth manual fine tune: widest
+        //
+        // librtlsdr falls back to 0b0000.
+        //
+        // we'll use 0b0101, since that's what rtl_tcp dumped when instrumented.
+        let filt_code = 0b0101;
+        self.registers.set_filt_code(filt_code);
+
+        // unknown
+        self.registers.set_unk_filt_q(true);
+
+        // filter bandwidth: narrowest
+        self.registers.set_filt_bw(0b11);
+
+        // HPF corner control
+        self.registers.set_hpf(0b1011);
+
+        // set img_r?
+        self.registers.set_unk_img_r(false);
+
+        // set filter gain to 3 dB
+        self.registers.set_filt_3db(true);
+
+        // unknown
+        self.registers.set_unk_v6mhz(true);
+
+        // channel filter extension on
+        self.registers.set_filter_ext(true);
+
+        // librtlsdr comments this as "r30[5]:1 ext at lna max-1", but only sets the msb
+        // of pdet_clk to 1, while the rest is still `0b_1010` from initialization.
+        // this is now split from pdet_clk
+        self.registers.set_ext_enable(true);
+
+        // pwd loop-through off
+        self.registers.set_pwd_lt(true);
+
+        // loop-through attenuation on
+        self.registers.set_unk_lt_att(false);
+
+        // filter extension widest: off
+        self.registers.set_unk_filt_ext_widest(false);
+
+        // RF poly filter current
+        // unknown, this might be minimum
+        self.registers.set_unk_rf_poly_filter_current(0b11);
+
+        // Enable RF filter power
+        // librtlsdr doesn't do this explicitely here, but it's in the initialized
+        // register bytes.
+        self.registers.set_pwd_rffilt(true);
+
+        // the following is from `r82xx_sysfreq_sel`
+
+        // lna_top = 0xe5;		/* detect bw 3, lna top:4, predet top:2 */
+        // rc = r82xx_write_reg_mask(priv, 0x1d, lna_top, 0xc7);
+        // mask    = 0b1100_0111
+        // lna_top = 0b1110_0101
+        // ugh, what the hell are they doing here?
+        self.registers.set_unk_detect_bw(3);
+        self.registers.set_pdet1_gain(4);
+        self.registers.set_pdet2_gain(5);
+
+        // mixer_top = 0x14;	/* mixer top:14 , top-1, low-discharge */
+        // mixer_top = 0x24;	/* mixer top:13 , top-1, low-discharge */
+        // rc = r82xx_write_reg_mask(priv, 0x1c, mixer_top, 0xf8);
+        // mask      = 0b1111_1000
+        // mixer_top(0x14) = 0b0001_0100
+        // mixer_top(0x24) = 0b0010_0100
+        //                     GGGG TDso
+        // g=pdet1_gain, t=lna_top_p1, d=discharge_mode, s=mixer_src, o=vco_out
+        //
+        // note the write mask, so discharge_mode, mixer_src and vco_out are not
+        // changed.
+        //
+        // mixer_top is always 0x24, except DVBT freqiencies 506000000, 666000000,
+        // 818000000
+        self.registers.set_pdet3_gain(2);
+        self.registers.set_unk_lna_top_p1(false);
+
+        // lna_vth_l = 0x53;		/* lna vth 0.84	,  vtl 0.64 */ for ISDBT they use another
+        // value rc = r82xx_write_reg(priv, 0x0d, lna_vth_l);
+        //
+        // => LNA_VTH_H = 0x05, 0b0101 => 0.873V - you'll get 0.84V with rounded step
+        // => LNA_VTH_L = 0x03, 0b0011 => 0.660V - you'll get 0.64V with rounded step
+        //
+        // asserts are here to check if their rounding makes a difference.
+
+        let lna_vth_h = voltage_to_lna_vth(0.84);
+        //let lna_vth_h = voltage_to_lna_vth(0.873);
+        assert_eq!(lna_vth_h, 0x05);
+        self.registers.set_lnavth_h(lna_vth_h);
+
+        let lna_vth_l = voltage_to_lna_vth(0.64);
+        //let lna_vth_l = voltage_to_lna_vth(0.660);
+        assert_eq!(lna_vth_l, 0x03);
+        self.registers.set_lnavth_l(lna_vth_l);
+
+        // mixer_vth_l = 0x75;		/* mixer vth 1.04, vtl 0.84 */
+        // rc = r82xx_write_reg(priv, 0x0e, mixer_vth_l);
+        //
+        // => MIX_VTH_H = 0x07, 0b0111 => 1.086 - you'll get 1.04 with rounded step
+        // => MIX_VTH_L = 0x05, 0b0101 => 0.873V - you'll get 0.84V with rounded step
+        //
+        let mixer_vth_h = voltage_to_lna_vth(1.04);
+        assert_eq!(mixer_vth_h, 0x07);
+        self.registers.set_mixvth_h(mixer_vth_h);
+
+        let mixer_vth_l = voltage_to_lna_vth(0.84);
+        assert_eq!(mixer_vth_l, 0x05);
+        self.registers.set_mixvth_l(mixer_vth_l);
+
+        // air_cable1_in = 0
+        // /* Air-IN only for Astrometa */
+        // rc = r82xx_write_reg_mask(priv, 0x05, air_cable1_in, 0x60);
+        // mask = 0b0110_0000
+        //
+        // so set PWD_LNA1 = 0(on). this is also labelled `air_in` in librtlsdr.
+        // but we think it's just that they only turn the LNA on for the air_in, and
+        // `cable_1_in`, or `cable_2_in` switch to the other inputs on the R828D.
+        //
+        // and bit 6 to 0, but it is initialized as that and is fixed to that in the
+        // datasheet. this seems to be another input `cable_1_in`
+        //
+        // note that the R820T only has one RF_in. The R828D has 3 inputs: air_in
+        // (RF_in), cable_1_in, cable_2_in
+        //
+        // todo: merge this into a `select_input` method on `R82xxState`.
+        //self.registers.set_pwd_lna1(false); // LNA power on
+        //self.registers.set_unk_cable_1_in(false); // Cable 1 input off
+        //
+        // cable2_in = 0x00;
+        // rc = r82xx_write_reg_mask(priv, 0x06, cable2_in, 0x08);
+        //self.registers.set_unk_cable_2_in(false); // Cable 2 input off
+
+        // instead of the above nonsense, we'll do this.
+        // but we'll keep the above for a while for reference.
+
+        // power on LNA
+        // todo: ideally expose this via method on state too.
+        self.registers.set_pwd_lna1(false);
+        self.select_rf_input(RfInput::Air);
+
+        // what is this? librtlsdr only says that 0b111 means auto
+        //
+        // there's a CP pin - PLL charge pump
+        self.registers.set_unk_cp_cur(0b111);
+
+        // set div_buf_cur
+        //
+        // RTL-SDR Blog Hack. Improve L-band performance by setting PLL drop out to 2.0v
+        // div_buf_cur = 0xa0;
+        // rc = r82xx_write_reg_mask(priv, 0x17, div_buf_cur, 0x30);
+        //
+        // this write is masked with 0x30, so it just sets 0b10.
+        self.registers.set_unk_div_buf_cur(0b10);
+
+        // setup LNA
+
+        // this actually sets it to the highest setting
+        // /* LNA TOP: lowest */
+        // rc = r82xx_write_reg_mask(priv, 0x1d, 0, 0x38);
+        // mask = 0b0011_1000
+        //
+        // this was previously set to 4. so what should it be?
+        self.registers.set_pdet1_gain(0);
+
+        // /* 0: normal mode */
+        // rc = r82xx_write_reg_mask(priv, 0x1c, 0, 0x04);
+        self.registers.set_unk_discharge_mode(false);
+
+        // todo: we really need to figure out what each power detector is for
+        //
+        // /* 0: PRE_DECT off */
+        // rc = r82xx_write_reg_mask(priv, 0x06, 0, 0x40);
+        self.registers.set_pwd_pdet3(false);
+
+        // set AGC clock.
+        // this is also set to 0b11 from the INIT array
+        //
+        // /* agc clk 250hz */
+        // rc = r82xx_write_reg_mask(priv, 0x1a, 0x30, 0x30);
+        self.registers.set_unk_agc_clk(0b11);
+
+        // in librtlsdr there's a commented-out sleep here.
+        // is this why they now set everything to different values?
+
+        // set LNA TOP (again???)
+        // /* write LNA TOP = 3 */
+        // rc = r82xx_write_reg_mask(priv, 0x1d, 0x18, 0x38);
+        // mask = 0b0011_1000
+        self.registers.set_pdet1_gain(3);
+
+        // set discharge mode
+        //
+        // mixer_top = 0x14;	/* mixer top:14 , top-1, low-discharge */
+        // /*
+        //  * write discharge mode
+        //  * FIXME: IMHO, the mask here is wrong, but it matches
+        //  * what's there at the original driver
+        //  */
+        // rc = r82xx_write_reg_mask(priv, 0x1c, mixer_top, 0x04);
+        //
+        // the mask looks fine
+        self.registers.set_unk_discharge_mode(true);
+
+        // set LNA discharge current??
+        //
+        // /* LNA discharge current */
+        // lna_discharge = 14; // 0x0e = 0b0000_1110
+        // rc = r82xx_write_reg_mask(priv, 0x1e, lna_discharge, 0x1f);
+        // mask = 0b0001_1111
+        self.registers.set_pdet_clk(14);
+
+        // set AGC clock (again???)
+        // /* agc clk 60hz */
+        // rc = r82xx_write_reg_mask(priv, 0x1a, 0x20, 0x30);
+        self.registers.set_unk_agc_clk(0b10);
+
+        Ok(())
     }
 
     /// Select RF input
@@ -289,7 +721,7 @@ impl R82xxState {
     /// Panics for R820T, if `input` is not [`Air`](RfInput::Air)
     pub fn select_rf_input(&mut self, input: RfInput) {
         assert!(
-            matches!(input, RfInput::Air) || !matches!(self.model, Model::R820T),
+            matches!(input, RfInput::Air) || !matches!(self.r82xx.model, Model::R820T),
             "R820T only has one input RfInput::Air"
         );
 
@@ -347,7 +779,7 @@ impl R82xxState {
     }
 
     pub fn shutdown(&mut self) {
-        tracing::debug!("setting r82xx to standby");
+        tracing::debug!("setting {:?} to standby", self.model());
 
         self.shutdown_ours();
         //self.shutdown_librtlsdr();
@@ -459,6 +891,48 @@ impl R82xxState {
     }
 }
 
+impl<'a> Drop for Transaction<'a> {
+    fn drop(&mut self) {
+        if self.warn_on_uncomitted_drop {
+            if self.registers.modified != 0 {
+                tracing::warn!(
+                    modified = ?FormatRegisterBitMap(self.registers.modified),
+                    "dropping Transaction with modified registers"
+                );
+            }
+        }
+    }
+}
+
+impl Tuner for R82xx {
+    type Error = Error;
+
+    fn name(&self) -> &str {
+        self.model.name()
+    }
+
+    async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
+        let mut transaction = self.begin_transaction();
+        transaction.set_bandwidth(bandwidth);
+        transaction.commit().await
+    }
+
+    async fn set_center_frequency<'a>(
+        &'a mut self,
+        center_frequency: f32,
+    ) -> Result<(), Self::Error> {
+        let mut transaction = self.begin_transaction();
+        transaction.set_center_frequency(center_frequency);
+        transaction.commit().await
+    }
+
+    async fn shutdown(&mut self) -> Result<(), Self::Error> {
+        let mut transaction = self.begin_transaction();
+        transaction.shutdown();
+        transaction.commit().await
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RfInput {
     /// RF-IN on R820T, Air-In on R828D
@@ -476,420 +950,6 @@ pub struct InvalidRfInputState {
     pub cable_2: bool,
 }
 
-#[derive(Debug)]
-pub struct R82xx {
-    i2c_device: I2cDevice,
-    state: R82xxState,
-}
-
-impl R82xx {
-    pub fn new(i2c_device: I2cDevice, model: Model) -> Self {
-        Self {
-            i2c_device,
-            state: R82xxState::new(model),
-        }
-    }
-
-    #[inline(always)]
-    pub fn model(&self) -> Model {
-        self.state.model
-    }
-
-    pub async fn initialize(&mut self) -> Result<(), Error> {
-        tracing::debug!(tuner = ?self.state.model, "initializing");
-        //tracing::debug!("initial state: {:#?}", self.state);
-
-        //self.sync().await?;
-        //tracing::debug!("synced state: {state:#?}");
-
-        // TODO: do we want to remove this and instead explicitely initialize registers
-        // via setters? we should also remove anything that is overwritten immediately
-        // after. we would still have to keep this to initialize some bits that are
-        // never changed. though librtlsdr uses this in a few places.
-        self.state.registers[5..NUM_REGISTERS].copy_from_slice(&INITIAL);
-
-        // the following initialization is derived from `r82xx_set_tv_standard`
-        //
-        // note: right now this doesn't do any async, so we could have this on the state
-        // instead. but the librtlsdr code also calibrates the device, which would need
-        // to flush.
-
-        // initialize VGA gain
-        // on, controlled by vagc pin
-        self.state.registers.set_pwd_vga(true);
-        self.state.registers.set_vga_mode(true);
-        self.state.registers.set_vga_code(0);
-
-        // VCO band
-        // rc = r82xx_write_reg_mask(priv, 0x13, VER_NUM, 0x3f);
-        self.state.registers.set_unk_vco_band(VERSION_VALUE);
-
-        // for LT (loop-through) gain test?
-        // only if not analog tv
-        self.state.registers.set_pdet1_gain(0);
-
-        // todo: calibration
-        // here during calibration librtlsdr will call r82xx_set_pll, which will set
-        // sel_div.
-
-        // this also done in r82xx_set_pll, which we'll hardcode here for testing
-        //
-        // /* set VCO current = 100 */
-        // /* rc = r82xx_write_reg_mask(priv, 0x12, 0x80, 0xe0); */
-        // /* RTL-SDR Blog Modification: Set VCO current to MAX */
-        // rc = r82xx_write_reg_mask(priv, 0x12, 0x06, 0xff);
-        //
-        self.state.registers.set_unk_vco_current(0b000);
-        self.state.registers.set_unk_cp_offset(0b11);
-        self.state.registers.set_s_i2c(0b10);
-        self.state.registers.set_n_i2c(0b000100);
-        self.state.registers.set_sdm_in(0x1c72); // 72 1c
-        self.state.registers.set_pll_auto_clk(0b10);
-
-        // todo: hard-coded for testing
-        self.state.registers.set_sel_div(0b100);
-
-        // filter bandwidth manual fine tune: widest
-        //
-        // librtlsdr falls back to 0b0000.
-        //
-        // we'll use 0b0101, since that's what rtl_tcp dumped when instrumented.
-        let filt_code = 0b0101;
-        self.state.registers.set_filt_code(filt_code);
-
-        // unknown
-        self.state.registers.set_unk_filt_q(true);
-
-        // filter bandwidth: narrowest
-        self.state.registers.set_filt_bw(0b11);
-
-        // HPF corner control
-        self.state.registers.set_hpf(0b1011);
-
-        // set img_r?
-        self.state.registers.set_unk_img_r(false);
-
-        // set filter gain to 3 dB
-        self.state.registers.set_filt_3db(true);
-
-        // unknown
-        self.state.registers.set_unk_v6mhz(true);
-
-        // channel filter extension on
-        self.state.registers.set_filter_ext(true);
-
-        // librtlsdr comments this as "r30[5]:1 ext at lna max-1", but only sets the msb
-        // of pdet_clk to 1, while the rest is still `0b_1010` from initialization.
-        // this is now split from pdet_clk
-        self.state.registers.set_ext_enable(true);
-
-        // pwd loop-through off
-        self.state.registers.set_pwd_lt(true);
-
-        // loop-through attenuation on
-        self.state.registers.set_unk_lt_att(false);
-
-        // filter extension widest: off
-        self.state.registers.set_unk_filt_ext_widest(false);
-
-        // RF poly filter current
-        // unknown, this might be minimum
-        self.state.registers.set_unk_rf_poly_filter_current(0b11);
-
-        // Enable RF filter power
-        // librtlsdr doesn't do this explicitely here, but it's in the initialized
-        // register bytes.
-        self.state.registers.set_pwd_rffilt(true);
-
-        // the following is from `r82xx_sysfreq_sel`
-
-        // lna_top = 0xe5;		/* detect bw 3, lna top:4, predet top:2 */
-        // rc = r82xx_write_reg_mask(priv, 0x1d, lna_top, 0xc7);
-        // mask    = 0b1100_0111
-        // lna_top = 0b1110_0101
-        // ugh, what the hell are they doing here?
-        self.state.registers.set_unk_detect_bw(3);
-        self.state.registers.set_pdet1_gain(4);
-        self.state.registers.set_pdet2_gain(5);
-
-        // mixer_top = 0x14;	/* mixer top:14 , top-1, low-discharge */
-        // mixer_top = 0x24;	/* mixer top:13 , top-1, low-discharge */
-        // rc = r82xx_write_reg_mask(priv, 0x1c, mixer_top, 0xf8);
-        // mask      = 0b1111_1000
-        // mixer_top(0x14) = 0b0001_0100
-        // mixer_top(0x24) = 0b0010_0100
-        //                     GGGG TDso
-        // g=pdet1_gain, t=lna_top_p1, d=discharge_mode, s=mixer_src, o=vco_out
-        //
-        // note the write mask, so discharge_mode, mixer_src and vco_out are not
-        // changed.
-        //
-        // mixer_top is always 0x24, except DVBT freqiencies 506000000, 666000000,
-        // 818000000
-        self.state.registers.set_pdet3_gain(2);
-        self.state.registers.set_unk_lna_top_p1(false);
-
-        // lna_vth_l = 0x53;		/* lna vth 0.84	,  vtl 0.64 */ for ISDBT they use another
-        // value rc = r82xx_write_reg(priv, 0x0d, lna_vth_l);
-        //
-        // => LNA_VTH_H = 0x05, 0b0101 => 0.873V - you'll get 0.84V with rounded step
-        // => LNA_VTH_L = 0x03, 0b0011 => 0.660V - you'll get 0.64V with rounded step
-        //
-        // asserts are here to check if their rounding makes a difference.
-
-        let lna_vth_h = voltage_to_lna_vth(0.84);
-        //let lna_vth_h = voltage_to_lna_vth(0.873);
-        assert_eq!(lna_vth_h, 0x05);
-        self.state.registers.set_lnavth_h(lna_vth_h);
-
-        let lna_vth_l = voltage_to_lna_vth(0.64);
-        //let lna_vth_l = voltage_to_lna_vth(0.660);
-        assert_eq!(lna_vth_l, 0x03);
-        self.state.registers.set_lnavth_l(lna_vth_l);
-
-        // mixer_vth_l = 0x75;		/* mixer vth 1.04, vtl 0.84 */
-        // rc = r82xx_write_reg(priv, 0x0e, mixer_vth_l);
-        //
-        // => MIX_VTH_H = 0x07, 0b0111 => 1.086 - you'll get 1.04 with rounded step
-        // => MIX_VTH_L = 0x05, 0b0101 => 0.873V - you'll get 0.84V with rounded step
-        //
-        let mixer_vth_h = voltage_to_lna_vth(1.04);
-        assert_eq!(mixer_vth_h, 0x07);
-        self.state.registers.set_mixvth_h(mixer_vth_h);
-
-        let mixer_vth_l = voltage_to_lna_vth(0.84);
-        assert_eq!(mixer_vth_l, 0x05);
-        self.state.registers.set_mixvth_l(mixer_vth_l);
-
-        // air_cable1_in = 0
-        // /* Air-IN only for Astrometa */
-        // rc = r82xx_write_reg_mask(priv, 0x05, air_cable1_in, 0x60);
-        // mask = 0b0110_0000
-        //
-        // so set PWD_LNA1 = 0(on). this is also labelled `air_in` in librtlsdr.
-        // but we think it's just that they only turn the LNA on for the air_in, and
-        // `cable_1_in`, or `cable_2_in` switch to the other inputs on the R828D.
-        //
-        // and bit 6 to 0, but it is initialized as that and is fixed to that in the
-        // datasheet. this seems to be another input `cable_1_in`
-        //
-        // note that the R820T only has one RF_in. The R828D has 3 inputs: air_in
-        // (RF_in), cable_1_in, cable_2_in
-        //
-        // todo: merge this into a `select_input` method on `R82xxState`.
-        //self.state.registers.set_pwd_lna1(false); // LNA power on
-        //self.state.registers.set_unk_cable_1_in(false); // Cable 1 input off
-        //
-        // cable2_in = 0x00;
-        // rc = r82xx_write_reg_mask(priv, 0x06, cable2_in, 0x08);
-        //self.state.registers.set_unk_cable_2_in(false); // Cable 2 input off
-
-        // instead of the above nonsense, we'll do this.
-        // but we'll keep the above for a while for reference.
-
-        // power on LNA
-        // todo: ideally expose this via method on state too.
-        self.state.registers.set_pwd_lna1(false);
-        self.state.select_rf_input(RfInput::Air);
-
-        // what is this? librtlsdr only says that 0b111 means auto
-        //
-        // there's a CP pin - PLL charge pump
-        self.state.registers.set_unk_cp_cur(0b111);
-
-        // set div_buf_cur
-        //
-        // RTL-SDR Blog Hack. Improve L-band performance by setting PLL drop out to 2.0v
-        // div_buf_cur = 0xa0;
-        // rc = r82xx_write_reg_mask(priv, 0x17, div_buf_cur, 0x30);
-        //
-        // this write is masked with 0x30, so it just sets 0b10.
-        self.state.registers.set_unk_div_buf_cur(0b10);
-
-        // setup LNA
-
-        // this actually sets it to the highest setting
-        // /* LNA TOP: lowest */
-        // rc = r82xx_write_reg_mask(priv, 0x1d, 0, 0x38);
-        // mask = 0b0011_1000
-        //
-        // this was previously set to 4. so what should it be?
-        self.state.registers.set_pdet1_gain(0);
-
-        // /* 0: normal mode */
-        // rc = r82xx_write_reg_mask(priv, 0x1c, 0, 0x04);
-        self.state.registers.set_unk_discharge_mode(false);
-
-        // todo: we really need to figure out what each power detector is for
-        //
-        // /* 0: PRE_DECT off */
-        // rc = r82xx_write_reg_mask(priv, 0x06, 0, 0x40);
-        self.state.registers.set_pwd_pdet3(false);
-
-        // set AGC clock.
-        // this is also set to 0b11 from the INIT array
-        //
-        // /* agc clk 250hz */
-        // rc = r82xx_write_reg_mask(priv, 0x1a, 0x30, 0x30);
-        self.state.registers.set_unk_agc_clk(0b11);
-
-        // in librtlsdr there's a commented-out sleep here.
-        // is this why they now set everything to different values?
-
-        // set LNA TOP (again???)
-        // /* write LNA TOP = 3 */
-        // rc = r82xx_write_reg_mask(priv, 0x1d, 0x18, 0x38);
-        // mask = 0b0011_1000
-        self.state.registers.set_pdet1_gain(3);
-
-        // set discharge mode
-        //
-        // mixer_top = 0x14;	/* mixer top:14 , top-1, low-discharge */
-        // /*
-        //  * write discharge mode
-        //  * FIXME: IMHO, the mask here is wrong, but it matches
-        //  * what's there at the original driver
-        //  */
-        // rc = r82xx_write_reg_mask(priv, 0x1c, mixer_top, 0x04);
-        //
-        // the mask looks fine
-        self.state.registers.set_unk_discharge_mode(true);
-
-        // set LNA discharge current??
-        //
-        // /* LNA discharge current */
-        // lna_discharge = 14; // 0x0e = 0b0000_1110
-        // rc = r82xx_write_reg_mask(priv, 0x1e, lna_discharge, 0x1f);
-        // mask = 0b0001_1111
-        self.state.registers.set_pdet_clk(14);
-
-        // set AGC clock (again???)
-        // /* agc clk 60hz */
-        // rc = r82xx_write_reg_mask(priv, 0x1a, 0x20, 0x30);
-        self.state.registers.set_unk_agc_clk(0b10);
-
-        // flush
-        self.flush().await?;
-
-        Ok(())
-    }
-
-    pub async fn select_rf_input(&mut self, rf_input: RfInput) -> Result<(), Error> {
-        self.state.select_rf_input(rf_input);
-        self.flush().await
-    }
-
-    pub fn selected_rf_input(&self) -> Result<RfInput, InvalidRfInputState> {
-        self.state.selected_rf_input()
-    }
-
-    /// Reads the first `n` registers from the device into the local cache.
-    ///
-    /// Always starts reading from register 0x00.
-    ///
-    /// The max message length of 0x08 is used by librtlsdr for R82xx. While
-    /// testing we were able to read upto 0x10 bytes. We'll only ever need the
-    /// first 5 bytes though.
-    ///
-    /// This doesn't overwrite any dirty registers in the cache.
-    ///
-    /// The R82xx sends bits in reversed order. This accounts for this and
-    /// reverses the received bits.
-    pub async fn read(&mut self, n: u8) -> Result<(), Error> {
-        let data = self.i2c_device.read(n.into()).await?;
-
-        for i in 0..n {
-            if !self.state.registers.is_dirty(i) {
-                // Don't deref_mut into registers directly to avoid setting the dirty bit.
-                //
-                // R82xx sends bytes with bits reversed.
-                self.state.registers.cache[usize::from(i)] = data[usize::from(i)].reverse_bits();
-            }
-        }
-
-        tracing::debug!(registers = ?self.state.registers, "read registers");
-
-        Ok(())
-    }
-
-    /// Write out any dirty registers
-    ///
-    /// This will ever only write registers that are marked as dirty, but it'll
-    /// try to do so in as few write commands as possible.
-    pub async fn flush(&mut self) -> Result<(), Error> {
-        tracing::debug!(
-            "flushing registers\n{:?}",
-            self.state.registers.cache.hex_dump()
-        );
-
-        let mut run = None;
-        let mut buf = [0u8; 0x20];
-
-        let mut flush_run = async |run: Range<u8>| {
-            buf[0] = run.start;
-            buf[1..usize::from(run.end) - usize::from(run.start) + 1]
-                .copy_from_slice(&self.state.registers[run.clone()]);
-
-            let buf_len = 1 + run.end - run.start;
-            let command = &buf[..buf_len.into()];
-
-            tracing::debug!(?run, ?command, "write registers");
-
-            self.i2c_device.write(&command).await
-        };
-
-        for i in 0..NUM_REGISTERS {
-            if run
-                .as_ref()
-                .is_some_and(|run: &Range<u8>| run.end - run.start + 1 == MAX_I2C_MESSAGE_LENGTH)
-            {
-                flush_run(run.take().unwrap()).await?;
-            }
-
-            if self.state.registers.is_dirty(i) {
-                run.get_or_insert_with(|| i..i).end += 1;
-            }
-            else if let Some(run) = run.take() {
-                flush_run(run).await?;
-            }
-        }
-
-        if let Some(run) = run.take() {
-            flush_run(run).await?;
-        }
-
-        self.state.registers.clear_dirty();
-
-        Ok(())
-    }
-}
-
-impl Tuner for R82xx {
-    type Error = Error;
-
-    fn name(&self) -> &str {
-        self.state.model.name()
-    }
-
-    async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
-        self.state.set_bandwidth(bandwidth);
-        self.flush().await
-    }
-
-    async fn set_center_frequency<'a>(
-        &'a mut self,
-        center_frequency: f32,
-    ) -> Result<(), Self::Error> {
-        self.state.set_center_frequency(center_frequency);
-        self.flush().await
-    }
-
-    async fn shutdown(&mut self) -> Result<(), Self::Error> {
-        self.state.shutdown();
-        self.flush().await
-    }
-}
-
 pub fn voltage_to_lna_vth(voltage: f32) -> u8 {
     ((voltage - VTH_MIN) / VTH_STEP).round().clamp(0.0, 15.0) as u8
 }
@@ -903,11 +963,11 @@ pub fn lna_vth_to_voltage(vth: u8) -> f32 {
     VTH_MIN + vth as f32 * VTH_STEP
 }
 
-/// Register state of the R82xxx
+/// Buffered register state of the R82xxx
 ///
 /// This doesn't perform any actual reads or writes, but caches data locally. To
 /// actually fetch registers from the tuner use [`R82xx::read`]. To write all
-/// changed registers to the tuner use [`R82xx::flush`].
+/// changed registers to the tuner use [`Transaction::flush`].
 ///
 /// # Initialization
 ///
@@ -937,62 +997,57 @@ pub fn lna_vth_to_voltage(vth: u8) -> f32 {
 /// │00000000│ 69 01 01 ff ab 05 8d 5c ┊ 02 03 6c d6 ac ca ae 16 │i••××•×\┊••l××××•│
 /// ```
 #[derive(Clone, Copy, Default)]
-pub struct Registers {
-    cache: [u8; NUM_REGISTERS as usize],
-    dirty: u32,
+pub struct RegisterBuffer {
+    state: [u8; NUM_REGISTERS as usize],
+    modified: u32,
 }
 
-impl Registers {
+impl RegisterBuffer {
     #[inline(always)]
-    pub fn is_dirty(&self, address: u8) -> bool {
-        self.dirty & (1 << address) != 0
-    }
-
-    #[inline(always)]
-    pub fn clear_dirty(&mut self) {
-        self.dirty = 0;
+    pub fn is_modified(&self, register: u8) -> bool {
+        self.modified & (1 << register) != 0
     }
 }
 
-impl Index<u8> for Registers {
+impl Index<u8> for RegisterBuffer {
     type Output = u8;
 
     #[inline(always)]
     fn index(&self, index: u8) -> &Self::Output {
-        &self.cache[usize::from(index)]
+        &self.state[usize::from(index)]
     }
 }
 
-impl Index<Range<u8>> for Registers {
+impl Index<Range<u8>> for RegisterBuffer {
     type Output = [u8];
 
     #[inline(always)]
     fn index(&self, index: Range<u8>) -> &Self::Output {
-        &self.cache[usize::from(index.start)..usize::from(index.end)]
+        &self.state[usize::from(index.start)..usize::from(index.end)]
     }
 }
 
-impl IndexMut<u8> for Registers {
+impl IndexMut<u8> for RegisterBuffer {
     #[inline(always)]
     fn index_mut(&mut self, index: u8) -> &mut Self::Output {
-        self.dirty |= 1 << index;
-        &mut self.cache[usize::from(index)]
+        self.modified |= 1 << index;
+        &mut self.state[usize::from(index)]
     }
 }
 
-impl IndexMut<Range<u8>> for Registers {
+impl IndexMut<Range<u8>> for RegisterBuffer {
     #[inline(always)]
     fn index_mut(&mut self, index: Range<u8>) -> &mut Self::Output {
-        self.dirty |= range_mask(index.start, index.end);
-        &mut self.cache[usize::from(index.start)..usize::from(index.end)]
+        self.modified |= range_mask(index.start, index.end);
+        &mut self.state[usize::from(index.start)..usize::from(index.end)]
     }
 }
 
 /// Register 0x15 and 0x16
-impl Registers {
+impl RegisterBuffer {
     #[inline(always)]
     pub fn sdm_in(&self) -> u16 {
-        u16::from_le_bytes(self.cache[0x15..=0x16].try_into().unwrap())
+        u16::from_le_bytes(self[0x15..0x17].try_into().unwrap())
     }
 
     /// PLL fractional divider number input `SDM[16:1]`
@@ -1012,7 +1067,7 @@ impl Registers {
     /// ```
     #[inline(always)]
     pub fn set_sdm_in(&mut self, value: u16) {
-        self.cache[0x15..=0x16].copy_from_slice(&value.to_le_bytes());
+        self[0x15..0x17].copy_from_slice(&value.to_le_bytes());
     }
 }
 
@@ -1022,6 +1077,31 @@ fn range_mask(start: u8, end: u8) -> u32 {
     let start_mask = (1 << start) - 1;
 
     end_mask ^ start_mask
+}
+
+/// Debug formatter for register bitmap
+struct FormatRegisterBitMap(pub u32);
+
+impl Debug for FormatRegisterBitMap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut list = f.debug_list();
+
+        for i in 0..NUM_REGISTERS {
+            if self.0 & (1 << i) != 0 {
+                list.entry(&FormatRegisterAddress(i));
+            }
+        }
+
+        list.finish()
+    }
+}
+
+struct FormatRegisterAddress(pub u8);
+
+impl Debug for FormatRegisterAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:02x}", self.0)
+    }
 }
 
 macro_rules! registers {
@@ -1035,7 +1115,7 @@ macro_rules! registers {
         $(
             $(#[$register_meta])*
             #[doc = concat!("\n\nRegister ", stringify!($address))]
-            impl Registers {
+            impl RegisterBuffer {
                 $(
                     registers!(@generate_impl($name, $address, [$msb, $($lsb)?], [$($field_meta),*]));
                 )*
@@ -1043,10 +1123,10 @@ macro_rules! registers {
         )*
 
 
-        impl Debug for Registers {
+        impl Debug for RegisterBuffer {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                let mut s = f.debug_struct("Registers");
-                s.field(".0", &self.cache);
+                let mut s = f.debug_struct("RegisterBuffer");
+                s.field("_state", &self.state);
                 $($(
                     s.field(stringify!($name), &self.$name());
                 )*)*

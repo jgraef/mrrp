@@ -190,6 +190,8 @@ impl Tuner for BlogTuner {
         // todo: transactions for the r82xx, so we only flush once we're done here. this
         // would also make it easy to check which registers actually changed
 
+        let mut transaction = self.r82xx.begin_transaction();
+
         // which band (HF, VHF, UHF) are we tuning to?
         let band = Band::from_frequency(center_frequency);
 
@@ -226,13 +228,7 @@ impl Tuner for BlogTuner {
             tracing::debug!(from = ?self.selected_band, to = ?band, ?rf_input, "switching band");
 
             // select the RF input with the R82xx
-            self.r82xx.select_rf_input(rf_input).await?;
-
-            // store current band
-            //
-            // todo: once we have this all in a transaction, this should actually only be
-            // done if the transaction doesn't fail. so it should be done at the very end.
-            self.selected_band = Some(band);
+            transaction.select_rf_input(rf_input);
         }
 
         // if we're using the upconverter we need to adjust the center frequency that we
@@ -242,7 +238,15 @@ impl Tuner for BlogTuner {
         }
 
         // set frequency in R82xx
-        self.r82xx.set_center_frequency(center_frequency).await?;
+        transaction.set_center_frequency(center_frequency);
+
+        transaction.commit().await?;
+
+        // store current band
+        //
+        // note: we can only do this now, after we know that the transaction didn't
+        // fail.
+        self.selected_band = Some(band);
 
         Ok(())
     }
