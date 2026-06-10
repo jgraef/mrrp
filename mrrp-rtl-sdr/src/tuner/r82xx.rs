@@ -298,8 +298,9 @@ impl R82xx {
     /// Begin a transaction that can read and write registers.
     ///
     /// This is mostly used to batch writes. You can flush writes with
-    /// [`flush`](Self::flush), or call [`commit`](Self::commit) when you're
-    /// done. The latter consumes the transaction, but also flushes all writes.
+    /// [`Transaction::flush`], or call [`Transaction::commit`] when
+    /// you're done. The latter consumes the transaction, but also flushes
+    /// all writes.
     pub fn begin_transaction<'a>(&'a mut self) -> Transaction<'a> {
         let registers = RegisterBuffer {
             state: self.register_state,
@@ -966,8 +967,8 @@ pub fn lna_vth_to_voltage(vth: u8) -> f32 {
 /// Buffered register state of the R82xxx
 ///
 /// This doesn't perform any actual reads or writes, but caches data locally. To
-/// actually fetch registers from the tuner use [`R82xx::read`]. To write all
-/// changed registers to the tuner use [`Transaction::flush`].
+/// actually fetch registers from the tuner use [`Transaction::read`]. To write
+/// all changed registers to the tuner use [`Transaction::flush`].
 ///
 /// # Initialization
 ///

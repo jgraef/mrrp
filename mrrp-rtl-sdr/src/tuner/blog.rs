@@ -124,6 +124,7 @@ impl TunerProbe for BlogTunerProbe {
         if let Some(r82xx) = R82xxProbe.try_open(rtl2832u).await?
             && r82xx.model() == r82xx::Model::R828D
         {
+            // fixme: we have a transaction open
             let upconverter_pin = rtl2832u
                 .try_gpio(UPCONVERTER_GPIO_PIN)?
                 .into_output_init(false)

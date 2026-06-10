@@ -1,6 +1,6 @@
 //! GPIO pins
 //!
-//! You can obtain a [`GpioPin`] via [`gpio`](Rtl2832u::gpio).
+//! You can obtain a [`GpioPin`] via [`gpio`](Rtl2832u::try_gpio).
 
 use std::{
     ops::{

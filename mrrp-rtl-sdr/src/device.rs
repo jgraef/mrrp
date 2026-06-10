@@ -1,4 +1,5 @@
 use std::{
+    borrow::Cow,
     pin::Pin,
     task::{
         Context,
@@ -25,6 +26,7 @@ use crate::{
     tuner::{
         AnyTuner,
         AnyTunerProbe,
+        FallbackTunerProbe,
         Tuner,
         TunerProbe,
         r82xx,
@@ -34,7 +36,7 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct Options {
     pub reset_on_drop: bool,
-    pub tuner_probe: AnyTunerProbe,
+    pub override_tuner_probe: Option<AnyTunerProbe>,
     pub fir_filter: FirFilter,
 }
 
@@ -42,7 +44,7 @@ impl Default for Options {
     fn default() -> Self {
         Self {
             reset_on_drop: true,
-            tuner_probe: AnyTunerProbe::default(),
+            override_tuner_probe: None,
             fir_filter: FirFilter::DEFAULT,
         }
     }
@@ -87,11 +89,18 @@ impl Device {
         let rtl_crystal_frequency = rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32;
 
         // probe tuners
-
         let i2c_repeater_guard = transaction.enable_i2c_repeater().await?;
 
-        let tuner = options
-            .tuner_probe
+        // either use the override from options, or the one provided by the device
+        // config, or the fallback - in that order.
+        let tuner_probe = options
+            .override_tuner_probe
+            .as_ref()
+            .or(device_info.device_config.tuner_probe.as_ref())
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| Cow::Owned(AnyTunerProbe::new(FallbackTunerProbe)));
+
+        let tuner = tuner_probe
             .try_open(&rtl2832u)
             .await?
             .ok_or(Error::NoTunerFound)?;
@@ -326,8 +335,8 @@ impl Drop for Device {
 /// by spawning a tokio task, since it requires async context. This sometimes
 /// fails if the tokio runtime is shutdown immediately after. Try to avoid this
 /// by explicitely closing the reader via the [`close`](Self::close) method.
-/// Otherwise you can also disable this behavior via the [`disam_stop_on_drop`]
-/// method.
+/// Otherwise you can also disable this behavior via the
+/// [`disam_stop_on_drop`](Self::disarm_stop_on_drop) method.
 #[derive(Debug)]
 pub struct Reader {
     inner: EpaReader,

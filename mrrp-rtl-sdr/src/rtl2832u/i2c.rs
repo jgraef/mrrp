@@ -1,21 +1,17 @@
 //! I2C functions
 //!
-//! You can read and write to the I2C bus via [`read_i2c`](Rtl2832u::read_i2c),
-//! [`read_i2c_register`](Rtl2832u::write_i2c),
-//! [`write_i2c`](Rtl2832u::write_i2c), and
-//! [`write_i2c_register`](Rtl2832u::write_i2c_register).
+//! You can acquire a [`I2cDevice`] via [`Rtl2832u::try_open_i2c`]. This will
+//! reserve the device at the specified address for exclusive use, or fail if it
+//! is already in use.
+//!
+//! Then you can read and write the I2C device via [`I2cDevice::read`]
+//! and [`I2cDevice::write`].
 //!
 //! The tuner chip is usually disconnected from the rest of the bus. It can be
-//! enabled via the [`IIC_repeat`](SOFT_RST_IIC_REPEAT) flag.
-//!
-//! # Features
-//!
-//! If the `embedded-hal` feature is enabled,
-//! [`embedded_hal_async::i2c::I2c`][1] is implemented for [`Rtl2832u`]. At the
-//! time of writing the transaction functionality is not implemented. Note that
-//! `embedded-hal` uses right-aligned addresses.
-//!
-//! [1]: https://docs.rs/embedded-hal-async/latest/embedded_hal_async/i2c/trait.I2c.html
+//! enabled via [`Transaction::enable_i2c_repeater`]. This returns a guard that
+//! will warn if the repeater is still on when dropped. It dereferences to the
+//! original [`Transaction`]. To disable the repeater, use
+//! [`I2cRepeaterGuard::disable`].
 
 use std::{
     collections::HashSet,
@@ -183,17 +179,6 @@ impl Rtl2832u {
     ///
     /// The device will be made available again when the [`I2cDevice`] handle is
     /// dropped.
-    ///
-    /// # I2C repeater
-    ///
-    /// The `needs_repeater` bool controls whether this device needs the I2C
-    /// repeater enabled. [`I2cTransaction`]s will be synchronized such that
-    /// only devices are accessed in parallel that need it, or don't. This
-    /// basically separates all device accesses in two groups, which can share
-    /// the bus between the own group, but not with the other group.
-    ///
-    /// This will also ensure the repeater is actually enabled or disabled when
-    /// the transaction begins.
     pub fn try_open_i2c(&self, i2c_address: I2cAddress) -> Result<I2cDevice, I2cDeviceBusy> {
         if self.shared.i2c_state.try_lock_device(i2c_address) {
             Ok(I2cDevice {

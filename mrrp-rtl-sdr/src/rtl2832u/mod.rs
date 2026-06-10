@@ -250,7 +250,7 @@ impl Rtl2832u {
     ///
     /// This is a low-level function that takes a dynamic register address (and
     /// length) and returns the raw bytes from these registers. See
-    /// [`read_register`](Self::read_register) for a statically typed variant.
+    /// [`Transaction::read_register`] for a statically typed variant.
     ///
     /// This variant specifically doesn't access the shadow map and is not
     /// synchronized with other reads and writes.
@@ -261,9 +261,9 @@ impl Rtl2832u {
     /// Write raw registers
     ///
     /// This is a low-level function that takes a dynamic register address and
-    /// writes raw bytes to it. See [`write_register`](Self::write_register),
-    /// [`write_register_with`](Self::write_register_with),
-    /// and [`write_register_update`](Self::write_register_update) for
+    /// writes raw bytes to it. See [`Transaction::write_register`],
+    /// [`Transaction::write_register_with`],
+    /// and [`Transaction::write_register_update`] for
     /// statically typed variants.
     ///
     /// This variant specifically doesn't access the shadow map and is not
@@ -272,7 +272,7 @@ impl Rtl2832u {
         self.shared.write(address, data).await
     }
 
-    /// Gets a [`Reader`] for the data endpoint (EPA).
+    /// Gets a [`EpaReader`] for reading the data endpoint (EPA).
     ///
     /// This does not clear the `fifo_reset` or `stall_endpoint` flags. You can
     /// do this with [`Transaction::start_epa`].

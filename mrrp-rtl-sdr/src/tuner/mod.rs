@@ -121,12 +121,6 @@ where
 
 pub struct AnyTunerProbe(Box<dyn AnyTunerProbeTrait>);
 
-impl Default for AnyTunerProbe {
-    fn default() -> Self {
-        Self::new(FallbackTunerProbe)
-    }
-}
-
 impl AnyTunerProbe {
     pub fn new(probe: impl TunerProbe) -> Self {
         Self(Box::new(probe))
