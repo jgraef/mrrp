@@ -269,7 +269,7 @@ impl Device {
 
         //transaction.set_if_frequency(if_frequency).await?;
 
-        todo!();
+        Ok(())
     }
 }
 

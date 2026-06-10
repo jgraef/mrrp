@@ -216,7 +216,8 @@ impl GpioPin {
                     .write_register_update::<reg::GPO>(|gpo| {
                         gpo.0.set_bit(pin.into(), initial_state);
                     })
-                    .await
+                    .await?;
+                Ok(())
             })
             .await?;
 
@@ -336,12 +337,12 @@ impl OutputPin {
 
     /// Set the output logic level for this pin.
     pub async fn write(&mut self, rtl2832u: &mut Rtl2832u, state: bool) -> Result<(), Error> {
-        tracing::debug!(pin = ?self.pin.pin, cached_state = ?self.cached_state, ?state, "writing GPIO pin");
-
         if self
             .cached_state
             .is_none_or(|cached_state| cached_state != state)
         {
+            tracing::debug!(pin = ?self.pin.pin, cached_state = ?self.cached_state, ?state, "writing GPIO pin");
+
             rtl2832u
                 .write_register_update::<reg::GPO>(|gpo| {
                     gpo.0.set_bit(self.pin.pin.into(), state);

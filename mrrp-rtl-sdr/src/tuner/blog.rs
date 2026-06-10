@@ -196,20 +196,33 @@ impl Tuner for BlogTuner {
         // todo: transactions for the r82xx, so we only flush once we're done here. this
         // would also make it easy to check which registers actually changed
 
-        let mut transaction = self.r82xx.begin_transaction(rtl2832u);
-
         // which band (HF, VHF, UHF) are we tuning to?
         let band = Band::from_frequency(center_frequency);
 
         // does this band use the upconverter?
         let use_upconverter = band == Band::Hf;
 
+        // which RF input should we be using?
+        let rf_input = match (band, self.model) {
+            (Band::Hf, Model::V4) => RfInput::Cable2,
+            (Band::Hf, Model::V4l) => RfInput::Cable1,
+            (Band::Vhf, Model::V4) => RfInput::Cable1,
+            _ => RfInput::Air,
+        };
+
         tracing::debug!(
             ?center_frequency,
+            current_band = ?self.selected_band,
             ?band,
             ?use_upconverter,
+            ?rf_input,
             "setting center frequency"
         );
+
+        // toggle upconverter on or off
+        self.upconverter_pin
+            .write(rtl2832u, use_upconverter ^ !UPCONVERTER_GPIO_ENABLE)
+            .await?;
 
         // check if we are switching to a different band
         if self
@@ -217,24 +230,7 @@ impl Tuner for BlogTuner {
             .is_none_or(|selected_band| selected_band != band)
         {
             // switch band
-
-            // toggle upconverter on or off
-            //self.upconverter_pin
-            //.write(use_upconverter ^ UPCONVERTER_GPIO_ENABLE)
-            //.await?;
-
-            // which RF input should we be using?
-            let rf_input = match (band, self.model) {
-                (Band::Hf, Model::V4) => RfInput::Cable2,
-                (Band::Hf, Model::V4l) => RfInput::Cable1,
-                (Band::Vhf, Model::V4) => RfInput::Cable1,
-                _ => RfInput::Air,
-            };
-
-            tracing::debug!(from = ?self.selected_band, to = ?band, ?rf_input, "switching band");
-
-            // select the RF input with the R82xx
-            transaction.select_rf_input(rf_input);
+            tracing::debug!(from = ?self.selected_band, to = ?band, "switching band");
         }
 
         // if we're using the upconverter we need to adjust the center frequency that we
@@ -242,6 +238,11 @@ impl Tuner for BlogTuner {
         if use_upconverter {
             center_frequency += 28800000.0;
         }
+
+        let mut transaction = self.r82xx.begin_transaction(rtl2832u);
+
+        // select the RF input with the R82xx
+        transaction.select_rf_input(rf_input);
 
         // set frequency in R82xx
         transaction.set_center_frequency(center_frequency);
@@ -272,10 +273,10 @@ pub enum Band {
 
 impl Band {
     pub fn from_frequency(frequency: f32) -> Self {
-        if frequency <= 28800000.0 {
+        if frequency <= 28_800_000.0 {
             Self::Hf
         }
-        else if frequency <= 250000000.0 {
+        else if frequency <= 250_000_000.0 {
             Self::Vhf
         }
         else {

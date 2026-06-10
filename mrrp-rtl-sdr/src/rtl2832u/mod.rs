@@ -330,7 +330,9 @@ impl Rtl2832u {
     /// The write to the device will be omitted, if the value didn't change.
     /// After the value was written to the device, the value in the shadow map
     /// is updated as well.
-    pub async fn write_register_update<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<(), Error>
+    ///
+    /// Returns `true` if the register actually changed.
+    pub async fn write_register_update<R>(&mut self, f: impl FnOnce(&mut R)) -> Result<bool, Error>
     where
         R: RegisterValue + shadow::ShadowRegister,
     {
@@ -341,9 +343,11 @@ impl Rtl2832u {
 
         if new_value != current_value {
             self.write_register(new_value).await?;
+            Ok(true)
         }
-
-        Ok(())
+        else {
+            Ok(false)
+        }
     }
 
     pub async fn initialize(&mut self, fir_filter: &FirFilter) -> Result<(), Error> {
@@ -653,20 +657,25 @@ impl Rtl2832u {
         let rsamp_ratio = rsamp_ratio_from_hz(sample_rate, crystal_frequency);
         let actual_sample_rate = rsamp_ratio_to_hz(rsamp_ratio, crystal_frequency);
 
-        self.write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|register| {
-            register.set_rsamp_ratio(rsamp_ratio);
-        })
-        .await?;
+        let changed = self
+            .write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|register| {
+                register.set_rsamp_ratio(rsamp_ratio);
+            })
+            .await?;
 
-        // reset demod (soft reset)
-        self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
-            soft_rst.set_soft_rst(true);
-        })
-        .await?;
-        self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
-            soft_rst.set_soft_rst(false);
-        })
-        .await?;
+        if changed {
+            // is this necessary?
+
+            // reset demod (soft reset)
+            self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
+                soft_rst.set_soft_rst(true);
+            })
+            .await?;
+            self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
+                soft_rst.set_soft_rst(false);
+            })
+            .await?;
+        }
 
         Ok(actual_sample_rate)
     }

@@ -39,6 +39,10 @@ use crate::{
         Tuner,
         TunerError,
         TunerProbe,
+        r82xx::preset::{
+            bandwidth_setting,
+            frequency_setting,
+        },
     },
 };
 
@@ -64,9 +68,7 @@ pub const MAX_I2C_MESSAGE_LENGTH: u8 = 0x08;
 pub const VERSION_VALUE: u8 = 0x31;
 
 #[derive(Clone, Copy, Debug)]
-pub struct FilterSetting {
-    pub min_bandwidth: f32,
-    pub max_bandwidth: f32,
+pub struct IfFilterSetting {
     pub low_q: bool,
     pub bw_1_7mhz: bool,
     pub filt_bw: u8,
@@ -74,131 +76,188 @@ pub struct FilterSetting {
     pub center_frequency: f32,
 }
 
-pub const FILTER_SETTINGS: &[FilterSetting] = &[
-    FilterSetting {
-        min_bandwidth: 7000000.0,
-        max_bandwidth: 8000000.0,
-        low_q: true,
-        bw_1_7mhz: false,
-        filt_bw: 0,
-        hpf: 11,
-        center_frequency: 4570000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 6000000.0,
-        max_bandwidth: 7000000.0,
-        low_q: true,
-        bw_1_7mhz: false,
-        filt_bw: 1,
-        hpf: 10,
-        center_frequency: 4570000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 2430000.0,
-        max_bandwidth: 6000000.0,
-        low_q: true,
-        bw_1_7mhz: false,
-        filt_bw: 3,
-        hpf: 11,
-        center_frequency: 3570000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 2050000.0,
-        max_bandwidth: 2430000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 2,
-        hpf: 15,
-        center_frequency: 1640000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 1700000.0,
-        max_bandwidth: 2050000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 1,
-        hpf: 12,
-        center_frequency: 1750000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 1600000.0,
-        max_bandwidth: 1700000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 3,
-        hpf: 15,
-        center_frequency: 1450000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 1550000.0,
-        max_bandwidth: 1600000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 3,
-        hpf: 14,
-        center_frequency: 1500000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 1450000.0,
-        max_bandwidth: 1550000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 3,
-        hpf: 13,
-        center_frequency: 1525000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 1200000.0,
-        max_bandwidth: 1450000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 3,
-        hpf: 12,
-        center_frequency: 1575000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 700000.0,
-        max_bandwidth: 1200000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 3,
-        hpf: 10,
-        center_frequency: 1850000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 550000.0,
-        max_bandwidth: 700000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 3,
-        hpf: 9,
-        center_frequency: 1950000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 450000.0,
-        max_bandwidth: 550000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 3,
-        hpf: 8,
-        center_frequency: 2025000.0,
-    },
-    FilterSetting {
-        min_bandwidth: 350000.0,
-        max_bandwidth: 450000.0,
-        low_q: false,
-        bw_1_7mhz: true,
-        filt_bw: 3,
-        hpf: 7,
-        center_frequency: 2075000.0,
-    },
-];
+/// Settings for the tracking filter.
+#[derive(Clone, Copy, Debug)]
+pub struct TrackingFilterSetting {
+    /// Open drain
+    ///
+    /// This is related to the tracking filter, but we're not sure how. The
+    /// spreadsheet mentions:
+    ///
+    /// > Open-D exsists on R828D, useable for switched filters
+    pub open_d: OpenD,
 
-pub fn filter_setting_for_bandwidth(bandwidth: f32) -> &'static FilterSetting {
-    FILTER_SETTINGS
-        .iter()
-        .find(|filter_setting| filter_setting.min_bandwidth < bandwidth)
-        .unwrap_or_else(|| FILTER_SETTINGS.last().unwrap())
+    /// RF mux
+    ///
+    /// As far as it's documented, this only either bypasses the tracking
+    /// filter, or not. Though it does have 2 bits, so maybe there's secret
+    /// settings 😼
+    pub rf_mux: RfMux,
+
+    /// RF filter band selection
+    pub rf_filt: RfFilt,
+
+    /// Tracking low-pass filter
+    ///
+    /// See [`RegisterBuffer::tf_lp`].
+    pub tf_lp: u8,
+
+    /// Tracking notch filter
+    ///
+    /// See [`RegisterBuffer::tf_nch`].
+    pub tf_nch: u8,
+}
+
+impl TrackingFilterSetting {
+    pub fn bypass() -> Self {
+        Self {
+            open_d: OpenD::HighZ,
+            rf_mux: RfMux::Bypass,
+            rf_filt: RfFilt::Highest,
+            tf_lp: 0,
+            tf_nch: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum CrystalCapacitor {
+    /// 0 F
+    P0 = 0b00,
+    /// 10 pF
+    P10 = 0b01,
+    /// 20 pF
+    P20 = 0b10,
+    /// 30 pF
+    P30 = 0b11,
+}
+
+impl From<CrystalCapacitor> for u8 {
+    #[inline(always)]
+    fn from(value: CrystalCapacitor) -> Self {
+        value as u8
+    }
+}
+
+impl TryFrom<u8> for CrystalCapacitor {
+    type Error = u8;
+
+    #[inline(always)]
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0b00 => Ok(Self::P0),
+            0b01 => Ok(Self::P10),
+            0b10 => Ok(Self::P20),
+            0b11 => Ok(Self::P30),
+            _ => Err(value),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CrystalDrive {
+    Low,
+    High,
+}
+
+impl From<CrystalDrive> for bool {
+    #[inline(always)]
+    fn from(value: CrystalDrive) -> Self {
+        match value {
+            CrystalDrive::Low => false,
+            CrystalDrive::High => true,
+        }
+    }
+}
+
+/// Crystal configuration
+///
+/// This contains settings for selecting the capacitors to use and the
+/// `xtal_drive` setting.
+///
+/// We're pretty sure librtlsdr never sets this to anything but 0pF, high.
+/// Though there is code to handle other configurations, but it would require
+/// pre-selecting crystal settings in init, which they have commented out.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CrystalConfig {
+    pub capacitor: CrystalCapacitor,
+    pub drive: CrystalDrive,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum OpenD {
+    HighZ,
+    LowZ,
+}
+
+impl From<OpenD> for bool {
+    #[inline(always)]
+    fn from(value: OpenD) -> Self {
+        match value {
+            OpenD::HighZ => false,
+            OpenD::LowZ => true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum RfMux {
+    TrackingFilter = 0b00,
+    Bypass = 0b01,
+}
+
+impl From<RfMux> for u8 {
+    #[inline(always)]
+    fn from(value: RfMux) -> Self {
+        value as u8
+    }
+}
+
+impl TryFrom<u8> for RfMux {
+    type Error = u8;
+
+    #[inline(always)]
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0b00 => Ok(Self::TrackingFilter),
+            0b01 => Ok(Self::Bypass),
+            _ => Err(value),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(u8)]
+pub enum RfFilt {
+    /// Highest band
+    Highest = 0b00,
+    /// RfFilt::Medium band
+    Medium = 0b01,
+    /// Low band
+    Low = 0b10,
+}
+
+impl From<RfFilt> for u8 {
+    #[inline(always)]
+    fn from(value: RfFilt) -> Self {
+        value as u8
+    }
+}
+
+impl TryFrom<u8> for RfFilt {
+    type Error = u8;
+
+    #[inline(always)]
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0b00 => Ok(Self::Highest),
+            0b01 => Ok(Self::Medium),
+            0b10 => Ok(Self::Low),
+            _ => Err(value),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -210,6 +269,7 @@ pub enum Model {
 impl Model {
     pub const ALL: &[Self] = &[Self::R820T, Self::R828D];
 
+    #[inline(always)]
     pub const fn name(&self) -> &'static str {
         match self {
             Model::R820T => "R820T",
@@ -217,6 +277,7 @@ impl Model {
         }
     }
 
+    #[inline(always)]
     pub const fn i2c_address(&self) -> I2cAddress {
         match self {
             Model::R820T => I2cAddress::from_left_aligned(0x34),
@@ -278,15 +339,25 @@ pub struct R82xx {
     i2c_device: I2cDevice,
     register_state: [u8; NUM_REGISTERS as usize],
     if_frequency: f32,
+    crystal_config: CrystalConfig,
 }
 
 impl R82xx {
     pub fn new(i2c_device: I2cDevice, model: Model) -> Self {
+        // librtlsdr has a commented-out `r82xx_xtal_check` in `r82xx_init`. I think it
+        // selects the appropriate capacitor and drive for the crystal.
+
+        let crystal_config = CrystalConfig {
+            capacitor: CrystalCapacitor::P0,
+            drive: CrystalDrive::High,
+        };
+
         Self {
             model,
             i2c_device,
             register_state: Default::default(),
             if_frequency: DEFAULT_IF_FREQUENCY as f32,
+            crystal_config,
         }
     }
 
@@ -728,6 +799,14 @@ impl<'a> Transaction<'a> {
             "R820T only has one input RfInput::Air"
         );
 
+        if let Ok(selected) = self.selected_rf_input()
+            && selected == input
+        {
+            // early exit if we wouldn't change anything. this would not cause a register
+            // write anyway, but we don't want to spam the logs
+            return;
+        }
+
         tracing::debug!(?input, "selecting RF input");
 
         let [cable_1, cable_2] = match input {
@@ -763,22 +842,55 @@ impl<'a> Transaction<'a> {
     pub fn set_bandwidth(&mut self, bandwidth: f32) {
         tracing::debug!(?bandwidth, "setting bandwidth");
 
-        self.set_filter_setting(filter_setting_for_bandwidth(bandwidth));
+        self.set_if_filter_setting(&bandwidth_setting(bandwidth).if_filter);
     }
 
-    pub fn set_center_frequency(&mut self, center_frequency: f32) {
-        tracing::debug!(?center_frequency, "setting center freqiency");
-
-        todo!();
-    }
-
-    pub fn set_filter_setting(&mut self, filter_setting: &FilterSetting) {
-        tracing::debug!(?filter_setting, "setting filter setting");
+    pub fn set_if_filter_setting(&mut self, filter_setting: &IfFilterSetting) {
+        tracing::debug!(?filter_setting, "setting IF filter setting");
 
         self.registers.set_unk_filt_q(filter_setting.low_q);
         self.registers.set_unk_bw_1_7mhz(filter_setting.bw_1_7mhz);
         self.registers.set_filt_bw(filter_setting.filt_bw);
         self.if_frequency = filter_setting.center_frequency;
+    }
+
+    pub fn set_center_frequency(&mut self, center_frequency: f32) {
+        tracing::debug!(?center_frequency, "setting center freqiency");
+
+        let setting = frequency_setting(center_frequency);
+
+        // set crystal capacitor
+        //
+        // we don't think librtlsdr ever sets anything but 0pF/high here
+        //
+        // also pretty sure that switch in `r82xx_set_mux` just selects the minimum of
+        // both, considering the values they have in `freq_ranges`.
+        let effective_cystal_config = CrystalConfig {
+            capacitor: setting
+                .crystal_capacitor
+                .min(self.r82xx.crystal_config.capacitor),
+            drive: self.r82xx.crystal_config.drive,
+        };
+
+        tracing::debug!(?setting, crystal_config = ?self.r82xx.crystal_config, ?effective_cystal_config);
+
+        self.registers
+            .set_capx(effective_cystal_config.capacitor.into());
+        self.registers
+            .set_unk_drive(effective_cystal_config.drive.into());
+
+        // configure tracking filter
+        self.set_tracking_filter_setting(&setting.tracking_filter);
+    }
+
+    pub fn set_tracking_filter_setting(&mut self, setting: &TrackingFilterSetting) {
+        tracing::debug!(?setting, "configuring tracking filter");
+
+        self.registers.set_open_d(setting.open_d.into());
+        self.registers.set_rfmux(setting.rf_mux.into());
+        self.registers.set_rffilt(setting.rf_filt.into());
+        self.registers.set_tf_nch(setting.tf_nch);
+        self.registers.set_tf_lp(setting.tf_lp);
     }
 
     pub fn shutdown(&mut self) {
@@ -1639,6 +1751,15 @@ registers! {
     };
     0x1a: {
         /// Tracking filter switch - 00=TF on, 01=bypass
+        ///
+        /// In librtlsdr:
+        ///
+        /// ```c
+        /// /* .rf_mux_ploy = */	0x02,	/* R26[7:6]=0 (LPF)  R26[1:0]=2 (low) */
+        /// /* .rf_mux_ploy = */	0x41,	/* R26[7:6]=1 (bypass)  R26[1:0]=1 (middle) */
+        /// ```
+        ///
+        /// So 0b01 is a LPF.
         rfmux: [7:6],
         /// AGC clock (not in datasheet)
         ///
@@ -1743,4 +1864,461 @@ registers! {
         unk_lt_att: [7],
     };
 
+}
+
+pub mod preset {
+    use crate::tuner::r82xx::{
+        CrystalCapacitor,
+        IfFilterSetting,
+        OpenD,
+        RfFilt,
+        RfMux,
+        TrackingFilterSetting,
+    };
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct BandwidthSetting {
+        pub min_bandwidth: f32,
+        pub max_bandwidth: f32,
+        pub if_filter: IfFilterSetting,
+    }
+
+    pub const PRESET_BANDWIDTH_SETTINGS: &[BandwidthSetting] = &[
+        BandwidthSetting {
+            min_bandwidth: 7000000.0,
+            max_bandwidth: 8000000.0,
+            if_filter: IfFilterSetting {
+                low_q: true,
+                bw_1_7mhz: false,
+                filt_bw: 0,
+                hpf: 11,
+                center_frequency: 4570000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 6000000.0,
+            max_bandwidth: 7000000.0,
+            if_filter: IfFilterSetting {
+                low_q: true,
+                bw_1_7mhz: false,
+                filt_bw: 1,
+                hpf: 10,
+                center_frequency: 4570000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 2430000.0,
+            max_bandwidth: 6000000.0,
+            if_filter: IfFilterSetting {
+                low_q: true,
+                bw_1_7mhz: false,
+                filt_bw: 3,
+                hpf: 11,
+                center_frequency: 3570000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 2050000.0,
+            max_bandwidth: 2430000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 2,
+                hpf: 15,
+                center_frequency: 1640000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 1700000.0,
+            max_bandwidth: 2050000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 1,
+                hpf: 12,
+                center_frequency: 1750000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 1600000.0,
+            max_bandwidth: 1700000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 3,
+                hpf: 15,
+                center_frequency: 1450000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 1550000.0,
+            max_bandwidth: 1600000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 3,
+                hpf: 14,
+                center_frequency: 1500000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 1450000.0,
+            max_bandwidth: 1550000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 3,
+                hpf: 13,
+                center_frequency: 1525000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 1200000.0,
+            max_bandwidth: 1450000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 3,
+                hpf: 12,
+                center_frequency: 1575000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 700000.0,
+            max_bandwidth: 1200000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 3,
+                hpf: 10,
+                center_frequency: 1850000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 550000.0,
+            max_bandwidth: 700000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 3,
+                hpf: 9,
+                center_frequency: 1950000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 450000.0,
+            max_bandwidth: 550000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 3,
+                hpf: 8,
+                center_frequency: 2025000.0,
+            },
+        },
+        BandwidthSetting {
+            min_bandwidth: 350000.0,
+            max_bandwidth: 450000.0,
+            if_filter: IfFilterSetting {
+                low_q: false,
+                bw_1_7mhz: true,
+                filt_bw: 3,
+                hpf: 7,
+                center_frequency: 2075000.0,
+            },
+        },
+    ];
+
+    pub fn bandwidth_setting(bandwidth: f32) -> &'static BandwidthSetting {
+        PRESET_BANDWIDTH_SETTINGS
+            .iter()
+            .find(|setting| setting.min_bandwidth < bandwidth)
+            .unwrap_or_else(|| PRESET_BANDWIDTH_SETTINGS.last().unwrap())
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    pub struct FrequencySetting {
+        pub start_frequency: f32,
+        pub end_frequency: f32,
+
+        /// Settings for the tracking filter
+        ///
+        /// If you don't want to use the tracking filter, set
+        /// [`TrackingFilterSetting::rf_mux`] to [`RfMux::Bypass`]. The other
+        /// values can be ignored then, but we left them here so they
+        /// can still be set for experimentation.
+        pub tracking_filter: TrackingFilterSetting,
+
+        /// Max crystal capacitor value to use with this setting.
+        ///
+        /// # Note
+        ///
+        /// We think `r82xx_set_mux` basically just selects the minimum of the
+        /// selected crystal capacitor value and this setting. Though we're not
+        /// 100% sure. librtsldr selects 0pF, high for the crystal
+        /// settings, so the effective settings will be always that.
+        pub crystal_capacitor: CrystalCapacitor,
+    }
+
+    pub const PRESET_FREQUENCY_SETTINGS: &[FrequencySetting] = &[
+        FrequencySetting {
+            start_frequency: 0.0,
+            end_frequency: 0.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::HighZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 15,
+                tf_nch: 13,
+            },
+            crystal_capacitor: CrystalCapacitor::P20,
+        },
+        FrequencySetting {
+            start_frequency: 50_000_000.0,
+            end_frequency: 55_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::HighZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 14,
+                tf_nch: 11,
+            },
+            crystal_capacitor: CrystalCapacitor::P20,
+        },
+        FrequencySetting {
+            start_frequency: 55_000_000.0,
+            end_frequency: 60_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::HighZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 11,
+                tf_nch: 8,
+            },
+            crystal_capacitor: CrystalCapacitor::P20,
+        },
+        FrequencySetting {
+            start_frequency: 60_000_000.0,
+            end_frequency: 65_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::HighZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 11,
+                tf_nch: 7,
+            },
+            crystal_capacitor: CrystalCapacitor::P20,
+        },
+        FrequencySetting {
+            start_frequency: 65_000_000.0,
+            end_frequency: 70_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::HighZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 9,
+                tf_nch: 6,
+            },
+            crystal_capacitor: CrystalCapacitor::P20,
+        },
+        FrequencySetting {
+            start_frequency: 70_000_000.0,
+            end_frequency: 75_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::HighZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 8,
+                tf_nch: 5,
+            },
+            crystal_capacitor: CrystalCapacitor::P20,
+        },
+        FrequencySetting {
+            start_frequency: 75_000_000.0,
+            end_frequency: 80_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 4,
+                tf_nch: 4,
+            },
+            crystal_capacitor: CrystalCapacitor::P20,
+        },
+        FrequencySetting {
+            start_frequency: 80_000_000.0,
+            end_frequency: 90_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 4,
+                tf_nch: 4,
+            },
+            crystal_capacitor: CrystalCapacitor::P20,
+        },
+        FrequencySetting {
+            start_frequency: 90_000_000.0,
+            end_frequency: 100_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 4,
+                tf_nch: 3,
+            },
+            crystal_capacitor: CrystalCapacitor::P10,
+        },
+        FrequencySetting {
+            start_frequency: 100_000_000.0,
+            end_frequency: 110_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 4,
+                tf_nch: 3,
+            },
+            crystal_capacitor: CrystalCapacitor::P10,
+        },
+        FrequencySetting {
+            start_frequency: 110_000_000.0,
+            end_frequency: 120_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 4,
+                tf_nch: 2,
+            },
+            crystal_capacitor: CrystalCapacitor::P10,
+        },
+        FrequencySetting {
+            start_frequency: 120_000_000.0,
+            end_frequency: 140_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 4,
+                tf_nch: 2,
+            },
+            crystal_capacitor: CrystalCapacitor::P10,
+        },
+        FrequencySetting {
+            start_frequency: 140_000_000.0,
+            end_frequency: 180_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 4,
+                tf_nch: 1,
+            },
+            crystal_capacitor: CrystalCapacitor::P10,
+        },
+        FrequencySetting {
+            start_frequency: 180_000_000.0,
+            end_frequency: 220_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 3,
+                tf_nch: 1,
+            },
+            crystal_capacitor: CrystalCapacitor::P0,
+        },
+        FrequencySetting {
+            start_frequency: 220_000_000.0,
+            end_frequency: 250_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 3,
+                tf_nch: 1,
+            },
+            crystal_capacitor: CrystalCapacitor::P0,
+        },
+        FrequencySetting {
+            start_frequency: 250_000_000.0,
+            end_frequency: 280_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 1,
+                tf_nch: 1,
+            },
+            crystal_capacitor: CrystalCapacitor::P0,
+        },
+        FrequencySetting {
+            start_frequency: 280_000_000.0,
+            end_frequency: 310_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::TrackingFilter,
+                rf_filt: RfFilt::Low,
+                tf_lp: 0,
+                tf_nch: 0,
+            },
+            crystal_capacitor: CrystalCapacitor::P0,
+        },
+        FrequencySetting {
+            start_frequency: 310_000_000.0,
+            end_frequency: 450_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::Bypass,
+                rf_filt: RfFilt::Medium,
+                tf_lp: 0,
+                tf_nch: 0,
+            },
+            crystal_capacitor: CrystalCapacitor::P0,
+        },
+        FrequencySetting {
+            start_frequency: 450_000_000.0,
+            end_frequency: 588_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::Bypass,
+                rf_filt: RfFilt::Medium,
+                tf_lp: 0,
+                tf_nch: 0,
+            },
+            crystal_capacitor: CrystalCapacitor::P0,
+        },
+        FrequencySetting {
+            start_frequency: 588_000_000.0,
+            end_frequency: 650_000_000.0,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::Bypass,
+                rf_filt: RfFilt::Highest,
+                tf_lp: 0,
+                tf_nch: 0,
+            },
+            crystal_capacitor: CrystalCapacitor::P0,
+        },
+        FrequencySetting {
+            start_frequency: 650_000_000.0,
+            end_frequency: f32::INFINITY,
+            tracking_filter: TrackingFilterSetting {
+                open_d: OpenD::LowZ,
+                rf_mux: RfMux::Bypass,
+                rf_filt: RfFilt::Highest,
+                tf_lp: 0,
+                tf_nch: 0,
+            },
+            crystal_capacitor: CrystalCapacitor::P0,
+        },
+    ];
+
+    pub fn frequency_setting(frequency: f32) -> &'static FrequencySetting {
+        PRESET_FREQUENCY_SETTINGS
+            .iter()
+            .find(|setting| frequency < setting.end_frequency)
+            .unwrap_or_else(|| PRESET_FREQUENCY_SETTINGS.last().unwrap())
+    }
 }

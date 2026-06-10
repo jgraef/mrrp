@@ -166,6 +166,7 @@ async fn main() -> Result<(), Error> {
             let mut device = open_device(serial.as_deref()).await?;
 
             device.set_sample_rate(sample_rate).await?;
+            device.set_center_frequency(center_frequency).await?;
 
             if stream {
                 let mut reader = device.reader(0x100000).await?;
