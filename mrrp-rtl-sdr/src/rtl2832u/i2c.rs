@@ -8,9 +8,9 @@
 //! and [`I2cDevice::write`].
 //!
 //! The tuner chip is usually disconnected from the rest of the bus. It can be
-//! enabled via [`Transaction::enable_i2c_repeater`]. This returns a guard that
+//! enabled via [`Rtl2832u::enable_i2c_repeater`]. This returns a guard that
 //! will warn if the repeater is still on when dropped. It dereferences to the
-//! original [`Transaction`]. To disable the repeater, use
+//! original [`Rtl2832u`]. To disable the repeater, use
 //! [`I2cRepeaterGuard::disable`].
 
 use std::{
@@ -28,8 +28,6 @@ use parking_lot::Mutex;
 use crate::rtl2832u::{
     Error,
     Rtl2832u,
-    Shared,
-    Transaction,
     register::{
         Register,
         demod::SOFT_RST_IIC_REPEAT,
@@ -113,7 +111,7 @@ impl I2cState {
 
 #[derive(Debug)]
 pub struct I2cDevice {
-    shared: Arc<Shared>,
+    i2c_state: Arc<I2cState>,
     i2c_address: I2cAddress,
     needs_repeater: bool,
 }
@@ -133,10 +131,10 @@ impl I2cDevice {
     }
 
     /// Reads data from the I2C device.
-    pub async fn read(&mut self, length: u16) -> Result<Vec<u8>, Error> {
+    pub async fn read(&mut self, rtl2832u: &mut Rtl2832u, length: u16) -> Result<Vec<u8>, Error> {
         tracing::debug!(i2c_address = ?self.i2c_address, ?length, "reading I2C");
 
-        self.shared
+        rtl2832u
             .read(
                 Register::I2c {
                     i2c_address: self.i2c_address,
@@ -147,10 +145,10 @@ impl I2cDevice {
     }
 
     /// Writes data to the I2C device.
-    pub async fn write(&mut self, data: &[u8]) -> Result<(), Error> {
+    pub async fn write(&mut self, rtl2832u: &mut Rtl2832u, data: &[u8]) -> Result<(), Error> {
         tracing::debug!(i2c_address = ?self.i2c_address, ?data, "writing I2C");
 
-        self.shared
+        rtl2832u
             .write(
                 Register::I2c {
                     i2c_address: self.i2c_address,
@@ -163,7 +161,7 @@ impl I2cDevice {
 
 impl Drop for I2cDevice {
     fn drop(&mut self) {
-        self.shared.i2c_state.unlock_device(self.i2c_address);
+        self.i2c_state.unlock_device(self.i2c_address);
     }
 }
 
@@ -180,9 +178,9 @@ impl Rtl2832u {
     /// The device will be made available again when the [`I2cDevice`] handle is
     /// dropped.
     pub fn try_open_i2c(&self, i2c_address: I2cAddress) -> Result<I2cDevice, I2cDeviceBusy> {
-        if self.shared.i2c_state.try_lock_device(i2c_address) {
+        if self.i2c_state.try_lock_device(i2c_address) {
             Ok(I2cDevice {
-                shared: self.shared.clone(),
+                i2c_state: self.i2c_state.clone(),
                 i2c_address,
                 needs_repeater: false,
             })
@@ -191,9 +189,7 @@ impl Rtl2832u {
             Err(I2cDeviceBusy { i2c_address })
         }
     }
-}
 
-impl<'a> Transaction<'a> {
     /// Enable the I2C repeater
     ///
     /// Connects the tuner to the I2C bus.
@@ -219,7 +215,7 @@ impl<'a> Transaction<'a> {
     /// In the rare case that the `SOFT_RST_IIC_REPEAT` register value is
     /// unknown, `false` is returned.
     pub fn i2c_repeater_enabled(&self) -> bool {
-        self.shadow_map_guard
+        self.shadow_map
             .demod
             .SOFT_RST_IIC_REPEAT
             .map_or(false, |iic_repeat| iic_repeat.iic_repeat())
@@ -227,42 +223,41 @@ impl<'a> Transaction<'a> {
 
     /// Enables the I2C repeater and returns a guard that allows you to disable
     /// it again.
-    pub async fn enable_i2c_repeater(&mut self) -> Result<I2cRepeaterGuard<'a, '_>, Error> {
+    pub async fn enable_i2c_repeater(&mut self) -> Result<I2cRepeaterGuard<'_>, Error> {
         self.set_i2c_repeater(true).await?;
-
-        Ok(I2cRepeaterGuard { transaction: self })
+        Ok(I2cRepeaterGuard { rtl2832u: self })
     }
 }
 
 #[derive(Debug)]
-pub struct I2cRepeaterGuard<'rtl, 'tx> {
-    transaction: &'tx mut Transaction<'rtl>,
+pub struct I2cRepeaterGuard<'rtl> {
+    rtl2832u: &'rtl mut Rtl2832u,
 }
 
-impl<'rtl, 'tx> I2cRepeaterGuard<'rtl, 'tx> {
+impl<'rtl> I2cRepeaterGuard<'rtl> {
     pub async fn disable(self) -> Result<(), Error> {
-        self.transaction.set_i2c_repeater(false).await?;
+        self.rtl2832u.set_i2c_repeater(false).await?;
         Ok(())
     }
 }
 
-impl<'rtl, 'tx> Deref for I2cRepeaterGuard<'rtl, 'tx> {
-    type Target = Transaction<'rtl>;
+impl<'rtl> Deref for I2cRepeaterGuard<'rtl> {
+    type Target = Rtl2832u;
 
     fn deref(&self) -> &Self::Target {
-        self.transaction
+        self.rtl2832u
     }
 }
 
-impl<'rtl, 'tx> DerefMut for I2cRepeaterGuard<'rtl, 'tx> {
+impl<'rtl> DerefMut for I2cRepeaterGuard<'rtl> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.transaction
+        self.rtl2832u
     }
 }
 
-impl<'rtl, 'tx> Drop for I2cRepeaterGuard<'rtl, 'tx> {
+impl<'rtl> Drop for I2cRepeaterGuard<'rtl> {
     fn drop(&mut self) {
-        if self.transaction.i2c_repeater_enabled() {
+        if self.rtl2832u.i2c_repeater_enabled() {
             tracing::warn!("Dropped I2cRepeaterGuard without disabling I2C repeater");
         }
     }

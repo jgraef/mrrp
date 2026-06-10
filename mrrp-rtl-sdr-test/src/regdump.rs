@@ -60,12 +60,11 @@ pub async fn dump_regs(
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    let (rtl2832u, _) = open_rtl2832u(serial).await?;
-    let mut transaction = rtl2832u.begin_transaction().await;
+    let (mut rtl2832u, _) = open_rtl2832u(serial).await?;
 
     if !demod.is_empty() || tuner_i2c {
         tracing::info!("We have to poweron the DEMOD chip.");
-        transaction.poweron_demod().await?;
+        rtl2832u.poweron_demod().await?;
     }
 
     let dump_block = async |block: reg::Block| {
@@ -118,9 +117,9 @@ pub async fn dump_regs(
     }
 
     if tuner_i2c {
-        let i2c_repeater_guard = transaction.enable_i2c_repeater().await?;
+        let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
 
-        if let Some(tuner) = r82xx::R82xxProbe.try_open(&rtl2832u).await? {
+        if let Some(tuner) = r82xx::R82xxProbe.try_open(&mut *i2c_repeater_guard).await? {
             let name = tuner.name().to_owned();
             tracing::info!("Found tuner: {name}");
 

@@ -243,7 +243,7 @@ impl TunerProbe for R82xxProbe {
     type Error = Error;
     type Tuner = R82xx;
 
-    async fn try_open(&self, rtl2832u: &Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
+    async fn try_open(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
         for model in Model::ALL {
             tracing::debug!("probing for {}", model.name());
 
@@ -252,14 +252,14 @@ impl TunerProbe for R82xxProbe {
             // According to datasheet this is 0x96, but the chip sends data from LSB
             // to MSB, while the RTL2832U decodes it the other way.
 
-            if let Ok(data) = i2c_device.read(1).await
+            if let Ok(data) = i2c_device.read(rtl2832u, 1).await
                 && data[0] == 0x69
             {
                 tracing::debug!("{} found", model.name());
 
                 let mut r82xx = R82xx::new(i2c_device, *model);
 
-                let mut transaction = r82xx.begin_transaction();
+                let mut transaction = r82xx.begin_transaction(rtl2832u);
                 transaction.initialize().await?;
                 transaction.commit().await?;
 
@@ -301,7 +301,7 @@ impl R82xx {
     /// [`Transaction::flush`], or call [`Transaction::commit`] when
     /// you're done. The latter consumes the transaction, but also flushes
     /// all writes.
-    pub fn begin_transaction<'a>(&'a mut self) -> Transaction<'a> {
+    pub fn begin_transaction<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> Transaction<'a> {
         let registers = RegisterBuffer {
             state: self.register_state,
             modified: 0,
@@ -311,6 +311,7 @@ impl R82xx {
 
         Transaction {
             r82xx: self,
+            rtl2832u,
             registers,
             if_frequency,
             warn_on_uncomitted_drop: true,
@@ -321,6 +322,7 @@ impl R82xx {
 #[derive(Debug)]
 pub struct Transaction<'a> {
     r82xx: &'a mut R82xx,
+    rtl2832u: &'a mut Rtl2832u,
     pub registers: RegisterBuffer,
     if_frequency: f32,
     pub warn_on_uncomitted_drop: bool,
@@ -351,7 +353,7 @@ impl<'a> Transaction<'a> {
     /// The R82xx sends bits in reversed order. This accounts for this and
     /// reverses the received bits.
     pub async fn read(&mut self, n: u8) -> Result<(), Error> {
-        let data = self.r82xx.i2c_device.read(n.into()).await?;
+        let data = self.r82xx.i2c_device.read(self.rtl2832u, n.into()).await?;
 
         for i in 0..n {
             if !self.registers.is_modified(i) {
@@ -399,7 +401,7 @@ impl<'a> Transaction<'a> {
 
             tracing::debug!(?run, ?command, "write registers");
 
-            self.r82xx.i2c_device.write(&command).await?;
+            self.r82xx.i2c_device.write(self.rtl2832u, &command).await?;
 
             Ok(())
         };
@@ -912,23 +914,28 @@ impl Tuner for R82xx {
         self.model.name()
     }
 
-    async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
-        let mut transaction = self.begin_transaction();
+    async fn set_bandwidth<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        bandwidth: f32,
+    ) -> Result<(), Self::Error> {
+        let mut transaction = self.begin_transaction(rtl2832u);
         transaction.set_bandwidth(bandwidth);
         transaction.commit().await
     }
 
     async fn set_center_frequency<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         center_frequency: f32,
     ) -> Result<(), Self::Error> {
-        let mut transaction = self.begin_transaction();
+        let mut transaction = self.begin_transaction(rtl2832u);
         transaction.set_center_frequency(center_frequency);
         transaction.commit().await
     }
 
-    async fn shutdown(&mut self) -> Result<(), Self::Error> {
-        let mut transaction = self.begin_transaction();
+    async fn shutdown<'a>(&mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
+        let mut transaction = self.begin_transaction(rtl2832u);
         transaction.shutdown();
         transaction.commit().await
     }

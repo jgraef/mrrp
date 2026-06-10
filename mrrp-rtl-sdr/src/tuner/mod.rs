@@ -26,7 +26,7 @@ pub trait TunerProbe: Clone + Debug + Sized + Send + Sync + 'static {
     /// The I2C repeater must be enabled by the caller.
     fn try_open<'a>(
         &'a self,
-        rtl2832u: &'a Rtl2832u,
+        rtl2832u: &'a mut Rtl2832u,
     ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a;
 }
 
@@ -37,15 +37,20 @@ pub trait Tuner: Debug + Sized + Send + Sync + 'static {
 
     fn set_bandwidth<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         bandwidth: f32,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 
     fn set_center_frequency<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         center_frequency: f32,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 
-    fn shutdown<'a>(&'a mut self) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
+    fn shutdown<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -67,7 +72,7 @@ impl TunerProbe for FallbackTunerProbe {
     type Error = AnyTunerError;
     type Tuner = AnyTuner;
 
-    async fn try_open(&self, rtl2832u: &Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
+    async fn try_open(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
         macro_rules! probe {
                 {$($probe:expr,)*} => {
                     $(
@@ -95,7 +100,7 @@ trait AnyTunerProbeTrait: Debug + Send + Sync + 'static {
 
     fn any_try_open<'a>(
         &'a self,
-        rtl2832u: &'a Rtl2832u,
+        rtl2832u: &'a mut Rtl2832u,
     ) -> Pin<Box<dyn Future<Output = Result<Option<AnyTuner>, AnyTunerError>> + Send + 'a>>;
 }
 
@@ -109,7 +114,7 @@ where
 
     fn any_try_open<'a>(
         &'a self,
-        rtl2832u: &'a Rtl2832u,
+        rtl2832u: &'a mut Rtl2832u,
     ) -> Pin<Box<dyn Future<Output = Result<Option<AnyTuner>, AnyTunerError>> + Send + 'a>> {
         Box::pin(
             self.try_open(rtl2832u)
@@ -145,7 +150,7 @@ impl TunerProbe for AnyTunerProbe {
 
     fn try_open<'a>(
         &'a self,
-        rtl2832u: &'a Rtl2832u,
+        rtl2832u: &'a mut Rtl2832u,
     ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a {
         self.0.any_try_open(rtl2832u)
     }
@@ -156,16 +161,19 @@ trait AnyTunerTrait: Debug + Send + Sync + 'static {
 
     fn set_bandwidth<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         bandwidth: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
 
     fn set_center_frequency<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         center_frequency: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
 
     fn shutdown<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
 }
 
@@ -179,22 +187,28 @@ where
 
     fn set_bandwidth<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         bandwidth: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>> {
-        Box::pin(Tuner::set_bandwidth(self, bandwidth).map_err(AnyTunerError::new))
+        Box::pin(Tuner::set_bandwidth(self, rtl2832u, bandwidth).map_err(AnyTunerError::new))
     }
 
     fn set_center_frequency<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         center_frequency: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>> {
-        Box::pin(Tuner::set_center_frequency(self, center_frequency).map_err(AnyTunerError::new))
+        Box::pin(
+            Tuner::set_center_frequency(self, rtl2832u, center_frequency)
+                .map_err(AnyTunerError::new),
+        )
     }
 
     fn shutdown<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>> {
-        Box::pin(Tuner::shutdown(self).map_err(AnyTunerError::new))
+        Box::pin(Tuner::shutdown(self, rtl2832u).map_err(AnyTunerError::new))
     }
 }
 
@@ -219,19 +233,27 @@ impl Tuner for AnyTuner {
         self.0.name()
     }
 
-    fn set_bandwidth(&mut self, bandwidth: f32) -> impl Future<Output = Result<(), Self::Error>> {
-        self.0.set_bandwidth(bandwidth)
+    fn set_bandwidth<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        bandwidth: f32,
+    ) -> impl Future<Output = Result<(), Self::Error>> + 'a {
+        self.0.set_bandwidth(rtl2832u, bandwidth)
     }
 
     fn set_center_frequency<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         center_frequency: f32,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
-        self.0.set_center_frequency(center_frequency)
+        self.0.set_center_frequency(rtl2832u, center_frequency)
     }
 
-    fn shutdown(&mut self) -> impl Future<Output = Result<(), Self::Error>> + Send {
-        self.0.shutdown()
+    fn shutdown<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
+        self.0.shutdown(rtl2832u)
     }
 }
 
@@ -245,20 +267,26 @@ impl Tuner for NullTuner {
         "null"
     }
 
-    async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
-        let _ = bandwidth;
+    async fn set_bandwidth<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        bandwidth: f32,
+    ) -> Result<(), Self::Error> {
+        let _ = (rtl2832u, bandwidth);
         Ok(())
     }
 
     async fn set_center_frequency<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         center_frequency: f32,
     ) -> Result<(), Self::Error> {
-        let _ = center_frequency;
+        let _ = (rtl2832u, center_frequency);
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), Self::Error> {
+    async fn shutdown<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
+        let _ = rtl2832u;
         Ok(())
     }
 }
@@ -269,7 +297,7 @@ impl TunerProbe for NullTuner {
 
     fn try_open<'a>(
         &'a self,
-        rtl2832u: &'a Rtl2832u,
+        rtl2832u: &'a mut Rtl2832u,
     ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a {
         let _ = rtl2832u;
         std::future::ready(Ok(Some(Self)))

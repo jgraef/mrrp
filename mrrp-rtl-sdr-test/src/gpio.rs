@@ -24,30 +24,30 @@ pub async fn gpio_command(
     pin: u8,
     command: GpioCommand,
 ) -> Result<(), Error> {
-    let (rtl2832u, _) = open_rtl2832u(serial).await?;
+    let (mut rtl2832u, _) = open_rtl2832u(serial).await?;
 
     match command {
         GpioCommand::Mode => {
             let mut pin = rtl2832u.try_gpio(pin)?;
-            let direction = pin.direction().await?;
-            let pad_config = pin.pad_config().await?;
+            let direction = pin.direction(&mut rtl2832u).await?;
+            let pad_config = pin.pad_config(&mut rtl2832u).await?;
             println!("Direction:  {direction:?}");
             println!("PAD config: {pad_config:?}");
         }
         GpioCommand::Read { output_state } => {
             let state = if output_state {
-                let mut pin = rtl2832u.try_gpio(pin)?.into_output().await?;
-                pin.get_state().await?
+                let mut pin = rtl2832u.try_gpio(pin)?.into_output(&mut rtl2832u).await?;
+                pin.get_state(&mut rtl2832u).await?
             }
             else {
-                let mut pin = rtl2832u.try_gpio(pin)?.into_input().await?;
-                pin.read().await?
+                let mut pin = rtl2832u.try_gpio(pin)?.into_input(&mut rtl2832u).await?;
+                pin.read(&mut rtl2832u).await?
             };
             println!("{state:?}");
         }
         GpioCommand::Write { value } => {
-            let mut pin = rtl2832u.try_gpio(pin)?.into_output().await?;
-            pin.write(value).await?;
+            let mut pin = rtl2832u.try_gpio(pin)?.into_output(&mut rtl2832u).await?;
+            pin.write(&mut rtl2832u, value).await?;
         }
     }
 

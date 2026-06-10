@@ -1,16 +1,27 @@
 use std::{
     borrow::Cow,
+    ops::{
+        Deref,
+        DerefMut,
+    },
     pin::Pin,
+    sync::Arc,
     task::{
         Context,
         Poll,
     },
 };
 
-use tokio::io::{
-    AsyncBufRead,
-    AsyncRead,
-    ReadBuf,
+use tokio::{
+    io::{
+        AsyncBufRead,
+        AsyncRead,
+        ReadBuf,
+    },
+    sync::{
+        Mutex,
+        MutexGuard,
+    },
 };
 
 use crate::{
@@ -55,9 +66,9 @@ pub struct Device {
     device_info: DeviceInfo,
     reset_on_drop: bool,
 
-    /// The RTL2832U and tuner are in an `Option` so we can take them out and
-    /// spawn a task to run the reset code if this struct is dropped.
-    inner: MaybeInner,
+    /// The RTL2832U and tuner are in an `Arc<Mutex<_>>` so we can access them
+    /// in drop code for [`Device`] and [`Reader`].
+    inner: SharedInner,
 
     /// The frequency correction factor (in ppm) that was set on the
     /// RTL2832U.
@@ -75,21 +86,19 @@ pub struct Device {
 
 impl Device {
     pub async fn from_rtl2832u(
-        rtl2832u: Rtl2832u,
+        mut rtl2832u: Rtl2832u,
         device_info: DeviceInfo,
         options: Options,
     ) -> Result<Self, Error> {
         // todo: should we try to reset the device if initialization fails?
 
-        let mut transaction = rtl2832u.begin_transaction().await;
-
         // initialize baseband
-        transaction.initialize(&options.fir_filter).await?;
+        rtl2832u.initialize(&options.fir_filter).await?;
 
         let rtl_crystal_frequency = rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32;
 
         // probe tuners
-        let i2c_repeater_guard = transaction.enable_i2c_repeater().await?;
+        let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
 
         // either use the override from options, or the one provided by the device
         // config, or the fallback - in that order.
@@ -101,7 +110,7 @@ impl Device {
             .unwrap_or_else(|| Cow::Owned(AnyTunerProbe::new(FallbackTunerProbe)));
 
         let tuner = tuner_probe
-            .try_open(&rtl2832u)
+            .try_open(&mut i2c_repeater_guard)
             .await?
             .ok_or(Error::NoTunerFound)?;
 
@@ -114,24 +123,24 @@ impl Device {
         // if **not** blog v4, set tuner_xtal = R828D_XTAL_FREQ, otherwise use rtl_xtal.
         // librtlsdr uses the corrected crystal frequency here
         let tuner_crystal_frequency = rtl_crystal_frequency;
-        transaction.set_if_mode(IfMode::If).await?;
-        transaction
+        rtl2832u.set_if_mode(IfMode::If).await?;
+        rtl2832u
             .set_if_frequency(
                 r82xx::DEFAULT_IF_FREQUENCY as f32,
                 rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32,
             )
             .await?;
-        transaction.enable_spectrum_inversion(true).await?;
+        rtl2832u.enable_spectrum_inversion(true).await?;
 
-        let sample_rate = transaction.get_sample_rate(tuner_crystal_frequency).await?;
+        let sample_rate = rtl2832u.get_sample_rate(tuner_crystal_frequency).await?;
         tracing::debug!(?sample_rate, "initial sample rate");
-
-        drop(transaction);
 
         Ok(Self {
             device_info,
             reset_on_drop: options.reset_on_drop,
-            inner: MaybeInner(Some(Inner { rtl2832u, tuner })),
+            inner: SharedInner {
+                inner: Arc::new(Mutex::new(Inner { rtl2832u, tuner })),
+            },
             frequency_correction: 0,
             rtl_crystal_frequency,
             tuner_crystal_frequency,
@@ -149,7 +158,8 @@ impl Device {
     /// Not resetting the device leaves it running, which consumes more power.
     pub async fn close(mut self) -> Result<(), Error> {
         tracing::debug!("closing device");
-        let mut inner = self.inner.expect_take();
+        self.reset_on_drop = false;
+        let mut inner = self.inner_mut().await;
         inner.reset().await?;
         Ok(())
     }
@@ -160,26 +170,18 @@ impl Device {
     }
 
     /// todo: pub for testing only
-    pub fn tuner(&mut self) -> &mut AnyTuner {
-        &mut self.inner.expect_mut().tuner
+    pub async fn inner_mut(&mut self) -> InnerGuard<'_> {
+        self.inner.lock().await
     }
 
-    /// todo: pub for testing only
-    pub fn rtl2832u(&mut self) -> &Rtl2832u {
-        &self.inner.expect_ref().rtl2832u
-    }
-
-    pub async fn reader(&self, buffer_size: usize) -> Result<Reader, Error> {
-        let rtl2832u = &self.inner.expect_ref().rtl2832u;
-        let mut transaction = rtl2832u.begin_transaction().await;
-
-        transaction.start_epa().await?;
-
-        let inner = rtl2832u.epa_reader(buffer_size)?;
+    pub async fn reader(&mut self, buffer_size: usize) -> Result<Reader, Error> {
+        let mut inner = self.inner.lock().await;
+        inner.rtl2832u.start_epa().await?;
+        let epa_reader = inner.rtl2832u.epa_reader(buffer_size)?;
 
         Ok(Reader {
-            inner,
-            rtl2832u: Some(rtl2832u.clone()),
+            epa_reader,
+            inner: self.inner.clone(),
             stop_on_drop: true,
         })
     }
@@ -198,10 +200,9 @@ impl Device {
                 "frequency_correction must be between -8192 and 8191 inclusive: {frequency_correction}"
             );
 
-            let rtl2832u = &self.inner.expect_ref().rtl2832u;
-            let mut transaction = rtl2832u.begin_transaction().await;
+            let Inner { rtl2832u, tuner: _ } = &mut *self.inner.lock().await;
 
-            transaction
+            rtl2832u
                 .set_sample_frequency_correction(frequency_correction)
                 .await?;
 
@@ -214,15 +215,15 @@ impl Device {
     pub async fn set_sample_rate(&mut self, sample_rate: f32) -> Result<(), Error> {
         tracing::debug!(?sample_rate, "setting sample rate");
 
-        let inner = self.inner.expect_mut();
-
-        let mut transaction = inner.rtl2832u.begin_transaction().await;
+        let Inner { rtl2832u, tuner } = &mut *self.inner.lock().await;
 
         // librtlsdr sets the "exact" sample rate here. We think they basically convert
         // from the encoded value back to Hz. But they also do some bit-manipulation.
         {
-            let i2c_repeater_guard = transaction.enable_i2c_repeater().await?;
-            inner.tuner.set_bandwidth(sample_rate).await?;
+            let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
+            tuner
+                .set_bandwidth(&mut *i2c_repeater_guard, sample_rate)
+                .await?;
             i2c_repeater_guard.disable().await?;
         }
 
@@ -230,7 +231,7 @@ impl Device {
         // it also calls `rtlsdr_set_center_freq`, which basically just calls
         // `rtlsdr_set_if_freq` (direct sampling) or `tuner->set_if_freq`
 
-        let actual_sample_rate = transaction
+        let actual_sample_rate = rtl2832u
             .set_sample_rate(sample_rate as f32, self.rtl_crystal_frequency)
             .await?;
 
@@ -248,17 +249,21 @@ impl Device {
     pub async fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
         tracing::debug!(?center_frequency, "setting center frequency");
 
-        let inner = self.inner.expect_mut();
-
-        let mut transaction = inner.rtl2832u.begin_transaction().await;
+        let Inner { rtl2832u, tuner } = &mut *self.inner.lock().await;
 
         // librtlsdr sets the "exact" sample rate here. We think they basically convert
         // from the encoded value back to Hz. But they also do some bit-manipulation.
         {
-            let i2c_repeater_guard = transaction.enable_i2c_repeater().await?;
-            //inner.tuner.set_
+            let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
+
+            tuner
+                .set_center_frequency(&mut *i2c_repeater_guard, center_frequency)
+                .await?;
+
             i2c_repeater_guard.disable().await?;
         }
+
+        // todo: set IF frequency/mode
 
         //transaction.set_if_mode(if_mode).await?;
 
@@ -268,54 +273,16 @@ impl Device {
     }
 }
 
-#[derive(derive_more::Debug)]
-struct MaybeInner(Option<Inner>);
-
-impl MaybeInner {
-    #[inline(always)]
-    fn expect_ref(&self) -> &Inner {
-        self.0.as_ref().expect("device lost")
-    }
-
-    #[inline(always)]
-    fn expect_mut(&mut self) -> &mut Inner {
-        self.0.as_mut().expect("device lost")
-    }
-
-    #[inline(always)]
-    fn expect_take(&mut self) -> Inner {
-        self.0.take().expect("device lost")
-    }
-}
-
-#[derive(Debug)]
-struct Inner {
-    rtl2832u: Rtl2832u,
-    tuner: AnyTuner,
-}
-
-impl Inner {
-    async fn reset(&mut self) -> Result<(), Error> {
-        let mut transaction = self.rtl2832u.begin_transaction().await;
-
-        let i2c_repeater_guard = transaction.enable_i2c_repeater().await?;
-        self.tuner.shutdown().await?;
-        i2c_repeater_guard.disable().await?;
-
-        transaction.reset(Default::default()).await?;
-
-        Ok(())
-    }
-}
-
 impl Drop for Device {
     fn drop(&mut self) {
-        tracing::debug!(reset_on_drop = ?self.reset_on_drop, inner_present = self.inner.0.is_some(), "device dropped");
+        if self.reset_on_drop {
+            tracing::warn!("Device dropped without closing. Attempting to reset the device.");
 
-        if self.reset_on_drop
-            && let Some(mut inner) = self.inner.0.take()
-        {
+            let inner = self.inner.clone();
+
             tokio::spawn(async move {
+                let mut inner = inner.lock().await;
+
                 if let Err(error) = inner.reset().await {
                     tracing::error!(%error, "Error resetting RTL2832U while dropping");
                 }
@@ -339,8 +306,8 @@ impl Drop for Device {
 /// [`disam_stop_on_drop`](Self::disarm_stop_on_drop) method.
 #[derive(Debug)]
 pub struct Reader {
-    inner: EpaReader,
-    rtl2832u: Option<Rtl2832u>,
+    epa_reader: EpaReader,
+    inner: SharedInner,
     stop_on_drop: bool,
 }
 
@@ -350,7 +317,7 @@ impl Reader {
     /// Refer to the documentation of [`nusb::io::EndpointRead`] for more
     /// information.
     pub fn set_num_transfers(&mut self, num_transfers: usize) {
-        self.inner.set_num_transfers(num_transfers);
+        self.epa_reader.set_num_transfers(num_transfers);
     }
 
     /// Disable the default drop behavior.
@@ -362,14 +329,9 @@ impl Reader {
     }
 
     pub async fn close(mut self) -> Result<(), Error> {
-        let rtl2832u = self
-            .rtl2832u
-            .take()
-            .expect("rtl2832u is missing. was this Reader dropped before?");
-
-        let mut transaction = rtl2832u.begin_transaction().await;
-
-        transaction.stop_epa().await?;
+        self.stop_on_drop = false;
+        let mut inner = self.inner.lock().await;
+        inner.rtl2832u.stop_epa().await?;
         Ok(())
     }
 }
@@ -381,34 +343,89 @@ impl AsyncRead for Reader {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        Pin::new(&mut self.get_mut().inner).poll_read(cx, buf)
+        Pin::new(&mut self.get_mut().epa_reader).poll_read(cx, buf)
     }
 }
 
 impl AsyncBufRead for Reader {
     #[inline(always)]
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
-        Pin::new(&mut self.get_mut().inner).poll_fill_buf(cx)
+        Pin::new(&mut self.get_mut().epa_reader).poll_fill_buf(cx)
     }
 
     #[inline(always)]
     fn consume(self: Pin<&mut Self>, amt: usize) {
-        Pin::new(&mut self.get_mut().inner).consume(amt);
+        Pin::new(&mut self.get_mut().epa_reader).consume(amt);
     }
 }
 
 impl Drop for Reader {
     fn drop(&mut self) {
-        if self.stop_on_drop
-            && let Some(rtl2832u) = self.rtl2832u.take()
-        {
+        if self.stop_on_drop {
+            let inner = self.inner.clone();
             tokio::spawn(async move {
-                let mut transaction = rtl2832u.begin_transaction().await;
-                if let Err(error) = transaction.stop_epa().await {
+                let mut inner = inner.lock().await;
+
+                if let Err(error) = inner.rtl2832u.stop_epa().await {
                     tracing::error!(%error, "Error stopping EPA while dropping");
                 }
             });
         }
+    }
+}
+
+/// todo: pub only for testing
+#[derive(Debug)]
+pub struct Inner {
+    rtl2832u: Rtl2832u,
+    tuner: AnyTuner,
+}
+
+impl Inner {
+    async fn reset(&mut self) -> Result<(), Error> {
+        // reset tuner
+        let mut i2c_repeater_guard = self.rtl2832u.enable_i2c_repeater().await?;
+        self.tuner.shutdown(&mut *i2c_repeater_guard).await?;
+        i2c_repeater_guard.disable().await?;
+
+        // reset rtl2832u
+        self.rtl2832u.reset(Default::default()).await?;
+
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+struct SharedInner {
+    inner: Arc<Mutex<Inner>>,
+}
+
+impl SharedInner {
+    pub async fn lock(&self) -> InnerGuard<'_> {
+        let guard = self.inner.lock().await;
+
+        InnerGuard { guard }
+    }
+}
+
+/// todo: pub only for testing
+pub struct InnerGuard<'a> {
+    guard: MutexGuard<'a, Inner>,
+}
+
+impl<'a> Deref for InnerGuard<'a> {
+    type Target = Inner;
+
+    #[inline(always)]
+    fn deref(&self) -> &Self::Target {
+        &*self.guard
+    }
+}
+
+impl<'a> DerefMut for InnerGuard<'a> {
+    #[inline(always)]
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut *self.guard
     }
 }
 

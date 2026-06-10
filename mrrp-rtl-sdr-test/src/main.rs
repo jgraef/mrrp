@@ -68,14 +68,12 @@ async fn main() -> Result<(), Error> {
             }
         }
         Command::PoweronDemod { serial } => {
-            let (rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
-            let mut transaction = rtl2832u.begin_transaction().await;
-            transaction.poweron_demod().await?;
+            let (mut rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
+            rtl2832u.poweron_demod().await?;
         }
         Command::Reset { serial } => {
-            let (rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
-            let mut transaction = rtl2832u.begin_transaction().await;
-            transaction.reset(Default::default()).await?;
+            let (mut rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
+            rtl2832u.reset(Default::default()).await?;
         }
         Command::DumpRegs {
             serial,

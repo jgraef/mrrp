@@ -24,10 +24,7 @@ pub mod register;
 use std::{
     fmt::Debug,
     pin::Pin,
-    sync::{
-        Arc,
-        atomic::AtomicU8,
-    },
+    sync::Arc,
     task::{
         Context,
         Poll,
@@ -36,20 +33,15 @@ use std::{
 };
 
 use bitfield::BitRangeMut;
-use tokio::{
-    io::{
-        AsyncBufRead,
-        AsyncRead,
-        ReadBuf,
-    },
-    sync::{
-        Mutex as AsyncMutex,
-        MutexGuard as AsyncMutexGuard,
-    },
+use tokio::io::{
+    AsyncBufRead,
+    AsyncRead,
+    ReadBuf,
 };
 
 use crate::rtl2832u::{
     filter::FirFilter,
+    gpio::GpioState,
     i2c::I2cState,
     register::{
         self as reg,
@@ -124,14 +116,8 @@ impl Default for ResetOptions {
 }
 
 /// Low-level interface to the `RTL2832U` chip via USB.
-#[derive(Clone, Debug)]
-pub struct Rtl2832u {
-    /// Other shared state
-    shared: Arc<Shared>,
-}
-
 #[derive(Debug)]
-struct Shared {
+pub struct Rtl2832u {
     /// The underlying USB interface.
     ///
     /// Note that [`nusb::Interface`] internally uses an [`Arc`] and operations
@@ -147,17 +133,43 @@ struct Shared {
     ///
     /// This is a `[`tokio::sync::RwLock`] because we need to hold it across
     /// await points (the USB reads and writes).
-    shadow_map: AsyncMutex<ShadowMap>,
+    shadow_map: ShadowMap,
 
-    i2c_state: I2cState,
+    /// Shared I2C state
+    i2c_state: Arc<I2cState>,
 
+    /// Shared GPIO state
+    ///
     /// Keeps track which GPIO pin is currently in use, meaning a [`GpioPin`] or
     /// derived [`InputPin`], or [`OutputPin`], exist for it.
-    gpio_pin_locks: AtomicU8,
+    gpio_state: Arc<GpioState>,
 }
 
-impl Shared {
-    async fn read(&self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
+impl Rtl2832u {
+    /// Creates a RTK2832U interface from a USB interface.
+    ///
+    /// This method doesn't initialize anything. It actually doesn't interact
+    /// with the device at all.
+    pub fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
+        Self {
+            usb_interface,
+            control_timeout,
+            shadow_map: ShadowMap::default(),
+            i2c_state: Arc::new(I2cState::default()),
+            gpio_state: Arc::new(GpioState::default()),
+        }
+    }
+
+    /// Read raw registers
+    ///
+    /// This is a low-level function that takes a dynamic register address (and
+    /// length) and returns the raw bytes from these registers. See
+    /// [`Rtl2832u::read_register`] for a statically typed variant.
+    ///
+    /// This variant specifically doesn't access the shadow map and is not
+    /// synchronized with other reads and writes.
+
+    pub async fn read(&self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
         let request = address.control_in(length);
 
         tracing::trace!(?request, "sending control request");
@@ -180,7 +192,17 @@ impl Shared {
         Ok(response_data)
     }
 
-    async fn write(&self, address: Register, data: &[u8]) -> Result<(), Error> {
+    /// Write raw registers
+    ///
+    /// This is a low-level function that takes a dynamic register address and
+    /// writes raw bytes to it. See [`Rtl2832u::write_register`],
+    /// [`Rtl2832u::write_register_with`],
+    /// and [`Rtl2832u::write_register_update`] for
+    /// statically typed variants.
+    ///
+    /// This variant specifically doesn't access the shadow map and is not
+    /// synchronized with other reads and writes.
+    pub async fn write(&self, address: Register, data: &[u8]) -> Result<(), Error> {
         let request = address.control_out(data);
 
         tracing::trace!(?request, "sending control request");
@@ -194,6 +216,10 @@ impl Shared {
         Ok(())
     }
 
+    /// Gets a [`EpaReader`] for reading the data endpoint (EPA).
+    ///
+    /// This does not clear the `fifo_reset` or `stall_endpoint` flags. You can
+    /// do this with [`Rtl2832u::start_epa`].
     pub fn epa_reader(&self, buffer_size: usize) -> Result<EpaReader, Error> {
         let endpoint = self.usb_interface.endpoint(USB_DATA_ENDPOINT)?;
 
@@ -205,89 +231,6 @@ impl Shared {
         Ok(EpaReader { endpoint_reader })
     }
 
-    async fn begin_transaction(&self) -> Transaction<'_> {
-        let shadow_map_guard = self.shadow_map.lock().await;
-        Transaction {
-            shared: self,
-            shadow_map_guard,
-        }
-    }
-}
-
-impl Rtl2832u {
-    /// Creates a RTK2832U interface from a USB interface.
-    ///
-    /// This method doesn't initialize anything. It actually doesn't interact
-    /// with the device at all.
-    pub fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
-        Self {
-            shared: Arc::new(Shared {
-                usb_interface,
-                control_timeout,
-                shadow_map: AsyncMutex::new(ShadowMap::default()),
-                i2c_state: Default::default(),
-                gpio_pin_locks: AtomicU8::new(0),
-            }),
-        }
-    }
-
-    /// Begin a transaction
-    ///
-    /// The transaction actually allows to write to registers, i.e. configuring
-    /// the device. But only one transaction can take place at a time, to ensure
-    /// the device is in a predictable state at the end of the transaction.
-    /// Furthermore this synchronizes access to the internal register shadow
-    /// map.
-    ///
-    /// All commands send with a transaction will take place immediately and no
-    /// final commit or discard is needed. The [`Transaction`] can just be
-    /// dropped when done.
-    pub async fn begin_transaction(&self) -> Transaction<'_> {
-        self.shared.begin_transaction().await
-    }
-
-    /// Read raw registers
-    ///
-    /// This is a low-level function that takes a dynamic register address (and
-    /// length) and returns the raw bytes from these registers. See
-    /// [`Transaction::read_register`] for a statically typed variant.
-    ///
-    /// This variant specifically doesn't access the shadow map and is not
-    /// synchronized with other reads and writes.
-    pub async fn read(&self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
-        self.shared.read(address, length).await
-    }
-
-    /// Write raw registers
-    ///
-    /// This is a low-level function that takes a dynamic register address and
-    /// writes raw bytes to it. See [`Transaction::write_register`],
-    /// [`Transaction::write_register_with`],
-    /// and [`Transaction::write_register_update`] for
-    /// statically typed variants.
-    ///
-    /// This variant specifically doesn't access the shadow map and is not
-    /// synchronized with other reads and writes.
-    pub async fn write(&self, address: Register, data: &[u8]) -> Result<(), Error> {
-        self.shared.write(address, data).await
-    }
-
-    /// Gets a [`EpaReader`] for reading the data endpoint (EPA).
-    ///
-    /// This does not clear the `fifo_reset` or `stall_endpoint` flags. You can
-    /// do this with [`Transaction::start_epa`].
-    pub fn epa_reader(&self, buffer_size: usize) -> Result<EpaReader, Error> {
-        self.shared.epa_reader(buffer_size)
-    }
-}
-
-#[derive(Debug)]
-pub struct Transaction<'a> {
-    shared: &'a Shared,
-    shadow_map_guard: AsyncMutexGuard<'a, ShadowMap>,
-}
-
-impl<'a> Transaction<'a> {
     /// Read a statically typed [`Register`]
     ///
     /// This will not read from the device if the value is already in the shadow
@@ -297,7 +240,7 @@ impl<'a> Transaction<'a> {
     where
         R: RegisterValue + shadow::ShadowRegister,
     {
-        if let Some(value) = R::shadow_read(&self.shadow_map_guard) {
+        if let Some(value) = R::shadow_read(&self.shadow_map) {
             Ok(*value)
         }
         else {
@@ -315,7 +258,6 @@ impl<'a> Transaction<'a> {
         R: RegisterValue + shadow::ShadowRegister,
     {
         let data = self
-            .shared
             .read(R::ADDRESS, <R::Bits as register::Bits>::LENGTH)
             .await?;
 
@@ -324,7 +266,7 @@ impl<'a> Transaction<'a> {
 
         tracing::debug!(address = ?R::ADDRESS, ?value, "read register");
 
-        value.shadow_write(&mut self.shadow_map_guard);
+        value.shadow_write(&mut self.shadow_map);
 
         Ok(value)
     }
@@ -339,9 +281,9 @@ impl<'a> Transaction<'a> {
         let bits = value.as_bits();
         let data = bits.into_bytes();
 
-        self.shared.write(R::ADDRESS, data.as_ref()).await?;
+        self.write(R::ADDRESS, data.as_ref()).await?;
 
-        value.shadow_write(&mut self.shadow_map_guard);
+        value.shadow_write(&mut self.shadow_map);
 
         Ok(())
     }

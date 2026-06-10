@@ -9,7 +9,10 @@ use std::{
     },
     sync::{
         Arc,
-        atomic::Ordering,
+        atomic::{
+            AtomicU8,
+            Ordering,
+        },
     },
 };
 
@@ -23,8 +26,6 @@ use bitfield::{
 use crate::rtl2832u::{
     Error,
     Rtl2832u,
-    Shared,
-    Transaction,
     register::sys as reg,
 };
 
@@ -83,20 +84,35 @@ impl Rtl2832u {
     pub fn try_gpio(&self, pin: u8) -> Result<GpioPin, GpioPinBusy> {
         assert!(pin < 8, "Invalid GPIO pin: {pin}");
 
-        let pin_mask = 1 << pin;
-        let gpio_pin_locks = self
-            .shared
-            .gpio_pin_locks
-            .fetch_or(pin_mask, Ordering::Relaxed);
-        if gpio_pin_locks & pin_mask == 0 {
+        if self.gpio_state.try_lock_pin(pin) {
             Ok(GpioPin {
-                shared: self.shared.clone(),
+                gpio_state: self.gpio_state.clone(),
                 pin,
             })
         }
         else {
             Err(GpioPinBusy { pin })
         }
+    }
+}
+
+#[derive(Debug, Default)]
+pub(super) struct GpioState {
+    pin_locks: AtomicU8,
+}
+
+impl GpioState {
+    pub fn try_lock_pin(&self, pin: u8) -> bool {
+        let pin_mask = 1 << pin;
+
+        let pin_locks = self.pin_locks.fetch_or(pin_mask, Ordering::Relaxed);
+
+        pin_locks & pin_mask == 0
+    }
+
+    pub fn unlock_pin(&self, pin: u8) {
+        let pin_mask = !(1 << pin);
+        let _was_locked = self.pin_locks.fetch_and(pin_mask, Ordering::Relaxed);
     }
 }
 
@@ -109,19 +125,14 @@ pub struct GpioPinBusy {
 /// A unconfigured GPIO pin.
 #[derive(Debug)]
 pub struct GpioPin {
-    shared: Arc<Shared>,
+    gpio_state: Arc<GpioState>,
     pin: u8,
 }
 
 impl GpioPin {
     /// Returns the currently configured direction of the pin.
-    pub async fn direction(&mut self) -> Result<Direction, Error> {
-        let gpd = self
-            .shared
-            .begin_transaction()
-            .await
-            .read_register::<reg::GPD>()
-            .await?;
+    pub async fn direction(&mut self, rtl2832u: &mut Rtl2832u) -> Result<Direction, Error> {
+        let gpd = rtl2832u.read_register::<reg::GPD>().await?;
 
         let direction = if gpd.0.bit(self.pin.into()) {
             Direction::Input
@@ -133,13 +144,8 @@ impl GpioPin {
     }
 
     /// Returns the PAD configuration
-    pub async fn pad_config(&mut self) -> Result<PadConfig, Error> {
-        let gp_cfg = self
-            .shared
-            .begin_transaction()
-            .await
-            .read_register::<reg::GP_CFG>()
-            .await?;
+    pub async fn pad_config(&mut self, rtl2832u: &mut Rtl2832u) -> Result<PadConfig, Error> {
+        let gp_cfg = rtl2832u.read_register::<reg::GP_CFG>().await?;
 
         let bits: u8 = gp_cfg
             .0
@@ -149,16 +155,20 @@ impl GpioPin {
     }
 
     /// Returns the PAD configuration
-    pub async fn set_pad_config(&mut self, pad_config: PadConfig) -> Result<(), Error> {
+    pub async fn set_pad_config(
+        &mut self,
+        rtl2832u: &mut Rtl2832u,
+        pad_config: PadConfig,
+    ) -> Result<(), Error> {
         assert_ne!(
             pad_config,
             PadConfig::Invalid,
             "Invalid PAD config: {pad_config:?}"
         );
 
-        self.shared
-            .begin_transaction()
-            .await
+        tracing::debug!(pin = self.pin, ?pad_config, "set GPIO PAD config");
+
+        rtl2832u
             .write_register_update::<reg::GP_CFG>(|gp_cfg| {
                 gp_cfg.0.set_bit_range(
                     (self.pin * 2 + 1).into(),
@@ -173,11 +183,11 @@ impl GpioPin {
     /// Returns an input pin.
     ///
     /// This ensures the pin is configured for input.
-    pub async fn into_input(self) -> Result<InputPin, Error> {
+    pub async fn into_input(self, rtl2832u: &mut Rtl2832u) -> Result<InputPin, Error> {
+        tracing::debug!(pin = self.pin, "configuring GPIO pin for input");
+
         // configure pin as input
-        self.shared
-            .begin_transaction()
-            .await
+        rtl2832u
             .write_register_update::<reg::GPD>(|gpd| {
                 gpd.0.set_bit(self.pin.into(), true);
             })
@@ -190,13 +200,19 @@ impl GpioPin {
     ///
     /// This ensures the pin is configured for output, and the pin state is
     /// initialized before it's enabled.
-    pub async fn into_output_init(self, initial_state: bool) -> Result<OutputPin, Error> {
+    pub async fn into_output_init(
+        self,
+        rtl2832u: &mut Rtl2832u,
+        initial_state: bool,
+    ) -> Result<OutputPin, Error> {
         let pin = self.pin;
 
+        tracing::debug!(?pin, ?initial_state, "configuring GPIO pin for output");
+
         let mut pin = self
-            .into_output_inner(async |transaction| {
+            .into_output_inner(rtl2832u, async |rtl2832u: &mut Rtl2832u| {
                 // set initial state
-                transaction
+                rtl2832u
                     .write_register_update::<reg::GPO>(|gpo| {
                         gpo.0.set_bit(pin.into(), initial_state);
                     })
@@ -212,42 +228,47 @@ impl GpioPin {
     /// Returns an output pin with an initial state.
     ///
     /// This ensures the pin is configured for output.
-    pub async fn into_output(self) -> Result<OutputPin, Error> {
-        self.into_output_inner(async |_| Ok(())).await
+    pub async fn into_output(self, rtl2832u: &mut Rtl2832u) -> Result<OutputPin, Error> {
+        tracing::debug!(pin = ?self.pin, "configuring GPIO pin for output");
+
+        self.into_output_inner(rtl2832u, async |_| Ok(())).await
     }
 
     async fn into_output_inner(
         self,
-        pre_enable_hook: impl AsyncFnOnce(&mut Transaction) -> Result<(), Error>,
+        rtl2832u: &mut Rtl2832u,
+        pre_enable_hook: impl AsyncFnOnce(&mut Rtl2832u) -> Result<(), Error>,
     ) -> Result<OutputPin, Error> {
         // todo: do we have to disable the output first, so that it isn't in an invalid
         // state once we configure it as output?
 
-        let mut transaction = self.shared.begin_transaction().await;
-
         // configure pin as output
 
-        transaction
+        rtl2832u
             .write_register_update::<reg::GPD>(|gpd| {
                 gpd.0.set_bit(self.pin.into(), false);
             })
             .await?;
 
-        pre_enable_hook(&mut transaction).await?;
+        pre_enable_hook(&mut *rtl2832u).await?;
 
         // enable output
-        transaction
+        rtl2832u
             .write_register_update::<reg::GPOE>(|gpoe| {
                 gpoe.0.set_bit(self.pin.into(), true);
             })
             .await?;
 
-        drop(transaction);
-
         Ok(OutputPin {
             pin: self,
             cached_state: None,
         })
+    }
+}
+
+impl Drop for GpioPin {
+    fn drop(&mut self) {
+        self.gpio_state.unlock_pin(self.pin)
     }
 }
 
@@ -259,15 +280,13 @@ pub struct InputPin {
 
 impl<'a> InputPin {
     /// Read the logic level at the pin.
-    pub async fn read(&mut self) -> Result<bool, Error> {
-        let gpi = self
-            .pin
-            .shared
-            .begin_transaction()
-            .await
-            .read_register::<reg::GPI>()
-            .await?;
-        Ok(gpi.0.bit(self.pin.pin.into()))
+    pub async fn read(&mut self, rtl2832u: &mut Rtl2832u) -> Result<bool, Error> {
+        let gpi = rtl2832u.read_register::<reg::GPI>().await?;
+        let state = gpi.0.bit(self.pin.pin.into());
+
+        tracing::debug!(pin = ?self.pin.pin, ?state, "read GPIO pin");
+
+        Ok(state)
     }
 }
 
@@ -300,18 +319,12 @@ pub struct OutputPin {
 
 impl OutputPin {
     /// Read the current output logic level of this pin.
-    pub async fn get_state(&mut self) -> Result<bool, Error> {
+    pub async fn get_state(&mut self, rtl2832u: &mut Rtl2832u) -> Result<bool, Error> {
         if let Some(cached_state) = self.cached_state {
             Ok(cached_state)
         }
         else {
-            let gpo = self
-                .pin
-                .shared
-                .begin_transaction()
-                .await
-                .read_register::<reg::GPO>()
-                .await?;
+            let gpo = rtl2832u.read_register::<reg::GPO>().await?;
 
             let state = gpo.0.bit(self.pin.pin.into());
 
@@ -322,15 +335,14 @@ impl OutputPin {
     }
 
     /// Set the output logic level for this pin.
-    pub async fn write(&mut self, state: bool) -> Result<(), Error> {
+    pub async fn write(&mut self, rtl2832u: &mut Rtl2832u, state: bool) -> Result<(), Error> {
+        tracing::debug!(pin = ?self.pin.pin, cached_state = ?self.cached_state, ?state, "writing GPIO pin");
+
         if self
             .cached_state
             .is_none_or(|cached_state| cached_state != state)
         {
-            self.pin
-                .shared
-                .begin_transaction()
-                .await
+            rtl2832u
                 .write_register_update::<reg::GPO>(|gpo| {
                     gpo.0.set_bit(self.pin.pin.into(), state);
                 })

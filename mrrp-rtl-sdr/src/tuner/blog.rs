@@ -119,7 +119,7 @@ impl TunerProbe for BlogTunerProbe {
 
     async fn try_open<'a>(
         &'a self,
-        rtl2832u: &'a Rtl2832u,
+        rtl2832u: &'a mut Rtl2832u,
     ) -> Result<Option<Self::Tuner>, Self::Error> {
         if let Some(r82xx) = R82xxProbe.try_open(rtl2832u).await?
             && r82xx.model() == r82xx::Model::R828D
@@ -127,7 +127,7 @@ impl TunerProbe for BlogTunerProbe {
             // fixme: we have a transaction open
             let upconverter_pin = rtl2832u
                 .try_gpio(UPCONVERTER_GPIO_PIN)?
-                .into_output_init(false)
+                .into_output_init(rtl2832u, false)
                 .await?;
 
             Ok(Some(BlogTuner::new(r82xx, self.model, upconverter_pin)))
@@ -179,19 +179,24 @@ impl Tuner for BlogTuner {
         &self.name
     }
 
-    async fn set_bandwidth(&mut self, bandwidth: f32) -> Result<(), Self::Error> {
-        self.r82xx.set_bandwidth(bandwidth).await?;
+    async fn set_bandwidth<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        bandwidth: f32,
+    ) -> Result<(), Self::Error> {
+        self.r82xx.set_bandwidth(rtl2832u, bandwidth).await?;
         Ok(())
     }
 
     async fn set_center_frequency<'a>(
         &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
         mut center_frequency: f32,
     ) -> Result<(), Self::Error> {
         // todo: transactions for the r82xx, so we only flush once we're done here. this
         // would also make it easy to check which registers actually changed
 
-        let mut transaction = self.r82xx.begin_transaction();
+        let mut transaction = self.r82xx.begin_transaction(rtl2832u);
 
         // which band (HF, VHF, UHF) are we tuning to?
         let band = Band::from_frequency(center_frequency);
@@ -252,8 +257,8 @@ impl Tuner for BlogTuner {
         Ok(())
     }
 
-    async fn shutdown(&mut self) -> Result<(), Self::Error> {
-        self.r82xx.shutdown().await?;
+    async fn shutdown<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
+        self.r82xx.shutdown(rtl2832u).await?;
         Ok(())
     }
 }
