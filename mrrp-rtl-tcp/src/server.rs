@@ -73,12 +73,8 @@ impl<H> From<DecoderError<InvalidCommand>> for Error<H> {
 
 /// A `rtl_tcp` server.
 ///
-/// Different from the original `rtl_tcp` this accepts multiple connections at
-/// once.
-///
-/// It is usually created from a [`RtlSdr`], but be created from
-/// anything that implements the [`AsyncReadSamples`] and [`Configure`] traits,
-/// e.g. a [`RtlTcpClient`][crate::rtl_tcp::client::RtlTcpClient]
+/// Different from the original `rtl_tcp` this can accept multiple connections
+/// at once.
 pub struct RtlTcpServer<H> {
     handler: H,
     tcp_listener: TcpListener,
@@ -86,6 +82,14 @@ pub struct RtlTcpServer<H> {
 }
 
 impl<H> RtlTcpServer<H> {
+    /// Create a `rtl_tcp` server.
+    ///
+    /// The provided handler accepts clients by returning:
+    ///
+    /// - [`CommandHandler`]: Handles commands (e.g. set sample rate)
+    /// - [`SampleStream`]: Streams the IQ data as bytes
+    /// - [`DongleInfo`]: The initial information about the RTL-SDR that is sent
+    ///   to the client.
     pub fn new(handler: impl IntoHandler<Handler = H>, tcp_listener: TcpListener) -> Self {
         Self {
             handler: handler.into_handler(),

@@ -12,7 +12,7 @@ pub mod server;
 
 use std::fmt::Debug;
 
-/// The type of tuner in a [`RtlSdr`].
+/// The type of tuner in a RTL-SDR.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TunerType(pub u32);
 

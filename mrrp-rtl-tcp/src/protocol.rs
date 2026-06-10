@@ -36,9 +36,6 @@ pub enum TunerGainMode {
 }
 
 /// Direct sampling mode
-///
-/// Direct sampling is not yet supported by [`RtlSdr`], but it can be used with
-/// [`rtl_tcp`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum DirectSamplingMode {
     /// Direct sampling of I branch
