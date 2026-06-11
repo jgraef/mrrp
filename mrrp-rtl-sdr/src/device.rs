@@ -78,9 +78,6 @@ pub struct Device {
     /// RTL2832U.
     rtl_crystal_frequency: f32,
 
-    /// The crystal frequency (in Hz) used for the tuner.
-    tuner_crystal_frequency: f32,
-
     sample_rate: f32,
 }
 
@@ -120,9 +117,6 @@ impl Device {
 
         // todo: this is specifically for R828D and Blog v4 for testing
 
-        // if **not** blog v4, set tuner_xtal = R828D_XTAL_FREQ, otherwise use rtl_xtal.
-        // librtlsdr uses the corrected crystal frequency here
-        let tuner_crystal_frequency = rtl_crystal_frequency;
         rtl2832u.set_if_mode(IfMode::If).await?;
         rtl2832u
             .set_if_frequency(
@@ -132,7 +126,7 @@ impl Device {
             .await?;
         rtl2832u.enable_spectrum_inversion(true).await?;
 
-        let sample_rate = rtl2832u.get_sample_rate(tuner_crystal_frequency).await?;
+        let sample_rate = rtl2832u.get_sample_rate(rtl_crystal_frequency).await?;
         tracing::debug!(?sample_rate, "initial sample rate");
 
         Ok(Self {
@@ -143,7 +137,6 @@ impl Device {
             },
             frequency_correction: 0,
             rtl_crystal_frequency,
-            tuner_crystal_frequency,
             sample_rate,
         })
     }

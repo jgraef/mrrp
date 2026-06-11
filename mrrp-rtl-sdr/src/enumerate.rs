@@ -17,7 +17,7 @@ use crate::{
     },
     tuner::{
         AnyTunerProbe,
-        blog::BlogTunerProbe,
+        r82xx::blog::BlogTunerProbe,
     },
 };
 

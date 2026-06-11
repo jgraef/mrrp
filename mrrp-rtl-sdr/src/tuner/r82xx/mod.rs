@@ -1,5 +1,7 @@
 //! Rafael R820T and R828D tuners
 //!
+//! ![R820T block diagram](http://superkuh.com/LB6MI-r820t-blocks.jpg)
+//!
 //! ![R828D chip on a Blog V4](https://cdn.eenewseurope.com/wp-content/uploads/2023/08/Screen-Shot-2023-08-23-at-09.25.22.png)
 //!
 //! [![R828D chip on a PCB](https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEg7TxRzyPFL3pJA8EXOVpqcvuo0f1Bl7ZU1waPUvN32uWn94AepDHJUNQXrNwTZdw1bNTzf6U4y4nIqCZsn4pmtIVGmk4prXKTqdZVb_SE85JV_jlJE8APbDoLEUSop289DHHZU69JP2mQ/s1600/1024-22.jpg)]((http://blog.palosaari.fi/2013/10/naked-hardware-14-dvb-t2-usb-tv-stick.html))
@@ -14,6 +16,7 @@
 //!
 //! ![R828D pinout](https://www.erlendervik.no/r828d.png)
 
+pub mod blog;
 pub mod preset;
 mod register;
 mod types;
@@ -48,7 +51,8 @@ use crate::{
 
 // todo: remove this. the IF frequency depends on the bandwidth
 pub const DEFAULT_IF_FREQUENCY: u32 = 3570000;
-pub const CRYSTAL_FREQ: u32 = 16000000;
+
+pub const DEFAULT_CRYSTAL_FREQ: u32 = 16000000;
 
 /// Initial values, starting from 0x05
 #[rustfmt::skip]
@@ -79,12 +83,20 @@ impl TunerError for Error {}
 #[derive(Clone, Debug)]
 pub struct R82xxProbe;
 
+impl R82xxProbe {
+    /// The models we probe for.
+    ///
+    /// We can't reliably probe for all of them, since they share I2C addresses.
+    /// We should prefer device enumeration to select the appropriate probe.
+    pub const DEFAULT_MODELS: &[Model] = &[Model::R820T, Model::R828D];
+}
+
 impl TunerProbe for R82xxProbe {
     type Error = Error;
     type Tuner = R82xx;
 
     async fn try_open(&self, rtl2832u: &mut Rtl2832u) -> Result<Option<Self::Tuner>, Self::Error> {
-        for model in Model::ALL {
+        for model in Self::DEFAULT_MODELS {
             tracing::debug!("probing for {}", model.name());
 
             let mut i2c_device = rtl2832u.try_open_i2c(model.i2c_address())?.with_repeater();
@@ -118,6 +130,7 @@ pub struct R82xx {
     i2c_device: I2cDevice,
     register_state: [u8; NUM_REGISTERS as usize],
     if_frequency: f32,
+    crystal_frequency: f32,
     crystal_config: CrystalConfig,
 }
 
@@ -136,6 +149,7 @@ impl R82xx {
             i2c_device,
             register_state: Default::default(),
             if_frequency: DEFAULT_IF_FREQUENCY as f32,
+            crystal_frequency: DEFAULT_CRYSTAL_FREQ as f32,
             crystal_config,
         }
     }
@@ -169,9 +183,9 @@ impl R82xx {
 pub struct Transaction<'a> {
     r82xx: &'a mut R82xx,
     rtl2832u: &'a mut Rtl2832u,
-    pub registers: RegisterBuffer,
+    registers: RegisterBuffer,
     if_frequency: f32,
-    pub warn_on_uncomitted_drop: bool,
+    warn_on_uncomitted_drop: bool,
 }
 
 impl<'a> Transaction<'a> {
@@ -221,6 +235,10 @@ impl<'a> Transaction<'a> {
 
     pub async fn commit(mut self) -> Result<(), Error> {
         self.flush().await
+    }
+
+    pub fn discard(mut self) {
+        self.warn_on_uncomitted_drop = false;
     }
 
     /// Write out any dirty registers
@@ -279,6 +297,9 @@ impl<'a> Transaction<'a> {
 
         // clear all modified flags
         self.registers.clear_modified();
+
+        // commit IF frequency
+        self.r82xx.if_frequency = self.if_frequency;
 
         Ok(())
     }
@@ -631,13 +652,21 @@ impl<'a> Transaction<'a> {
         self.registers.set_unk_filt_q(filter_setting.low_q);
         self.registers.set_unk_bw_1_7mhz(filter_setting.bw_1_7mhz);
         self.registers.set_filt_bw(filter_setting.filt_bw);
-        self.if_frequency = filter_setting.center_frequency;
+        self.if_frequency = filter_setting.if_frequency;
     }
 
     pub fn set_center_frequency(&mut self, center_frequency: f32) {
-        let setting = frequency_setting(center_frequency);
+        let lo_frequency = center_frequency + self.if_frequency;
 
-        tracing::debug!(?center_frequency, ?setting, "setting center frequency");
+        let setting = frequency_setting(lo_frequency);
+
+        tracing::debug!(
+            ?center_frequency,
+            if_frequency = ?self.if_frequency,
+            ?lo_frequency,
+            ?setting,
+            "setting center frequency"
+        );
 
         self.set_crystal_config(setting.crystal_capacitor);
 
@@ -656,6 +685,8 @@ impl<'a> Transaction<'a> {
         //
         // should be already on
         //self.registers.set_unk_adc_enable(false); // on,
+
+        self.set_pll(lo_frequency);
     }
 
     pub fn set_vga_gain(&mut self, gain: VgaGain) {
@@ -722,6 +753,71 @@ impl<'a> Transaction<'a> {
         self.registers.set_rffilt(setting.rf_filt.into());
         self.registers.set_tf_nch(setting.tf_nch);
         self.registers.set_tf_lp(setting.tf_lp);
+    }
+
+    pub fn set_pll(&mut self, frequency: f32) {
+        self.registers.set_ref_div2(false);
+
+        // 0x12 at init = 0x80
+        //
+        // /* set VCO current = 100 */
+        // /* rc = r82xx_write_reg_mask(priv, 0x12, 0x80, 0xe0); */
+        //
+        // /* RTL-SDR Blog Modification: Set VCO current to MAX */
+        // rc = r82xx_write_reg_mask(priv, 0x12, 0x06, 0xff);
+        //
+        // so the original code didn't touch the other bits and set vco_current to 0b100
+        //
+        // vco_current = 0b000 (set to 0b000 in initialize)
+        // dis_dither = false (false in reg init array)
+        // pw_sdm = false (true in reg init array), on=false
+        // cp_offset = 0b11 (set to 0b11 in initialize)
+        // cp_0406 = false (false in reg init)
+
+        // Set VCO current to max
+        self.registers.set_unk_vco_current(0b000);
+
+        // SDM power on
+        self.registers.set_pw_sdm(false);
+
+        // check that we get the same register value as librtlsdr
+        //
+        // todo: remove
+        assert_eq!(self.registers[0x12], 0x06);
+
+        let sel_div = SelDiv::from_frequency(frequency);
+
+        // todo: librtlsdr adjusts the sel_div value using vco_fine_tune, though we
+        // haven't actually observed this taking effect (we tuned a bit while logging
+        // some values in r82xx_set_pll).
+
+        self.registers.set_sel_div(sel_div.into());
+
+        // the VCO frequency we want
+        let vco_frequency = frequency * sel_div.effective_divider();
+
+        tracing::debug!(?sel_div, ?vco_frequency, crystal_frequency = ?self.r82xx.crystal_frequency);
+
+        // caculate PLL divider settings
+        if let Some(pll_divider) = PllDivider::from_vco_frequency(
+            vco_frequency,
+            self.r82xx.crystal_frequency,
+            self.r82xx.model.vco_power_ref(),
+        ) {
+            tracing::debug!(?pll_divider);
+            self.registers.set_n_i2c(pll_divider.n_i2c);
+            self.registers.set_s_i2c(pll_divider.s_i2c);
+            self.registers.set_sdm_in(pll_divider.sdm);
+        }
+        else {
+            // todo: this should return an error
+            tracing::warn!(
+                ?vco_frequency,
+                crystal_frequency = ?self.r82xx.crystal_frequency,
+                vco_power_ref = ?self.r82xx.model.vco_power_ref(),
+                "No PLL divider config found"
+            );
+        }
     }
 
     pub fn shutdown(&mut self) {
@@ -874,7 +970,10 @@ impl Tuner for R82xx {
     ) -> Result<(), Self::Error> {
         let mut transaction = self.begin_transaction(rtl2832u);
         transaction.set_center_frequency(center_frequency);
-        transaction.commit().await
+
+        // todo
+        //transaction.commit().await
+        Ok(())
     }
 
     async fn shutdown<'a>(&mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
@@ -883,3 +982,107 @@ impl Tuner for R82xx {
         transaction.commit().await
     }
 }
+
+/*
+#[test]
+fn sel_div() {
+    // slightly modified code from librtlsdr for sel_div selection.
+
+    // is their code for selecting sel_div wrong? the sel_div bits are assigned a
+    // bit out of order, so 0b11 would mean no divider, according to datasheet. but
+    // this doesn't seem to take this into account.
+
+    let mut mix_div = 2;
+
+    let vco_min: f32 = 1770000000.0;
+    let vco_max = vco_min * 2.0;
+
+    while mix_div <= 64 {
+        let mut div_buf = mix_div;
+        let mut div_num = 0;
+        while div_buf > 2 {
+            div_buf = div_buf >> 1;
+            div_num += 1;
+        }
+
+        let f_min = vco_min / mix_div as f32;
+        let f_max = vco_max / mix_div as f32;
+
+        println!(
+            "f={}..{} (MHz), mix_div={mix_div}, div_num={div_num:03b}",
+            f_min / 1000000.0,
+            f_max / 1000000.0
+        );
+
+        let our = find_sel_div(0.5 * (f_min + f_max));
+        println!("our: sel_div={:03b}, f_div={}", our.0, our.1);
+
+        mix_div = mix_div << 1;
+    }
+
+    fn find_sel_div(frequency: f32) -> (u8, f32) {
+        let vco_min: f32 = 1770000000.0;
+
+        let div = (vco_min / frequency).log2().floor().clamp(0.0, 5.0);
+        let sel_div = div as u8;
+        let f_div = 2.0f32.powi(i32::from(sel_div) + 1);
+        (sel_div, f_div)
+    }
+}
+
+#[test]
+fn test_set_pll() {
+    fn set_pll(frequency: f32) {
+        let crystal_frequency = BLOG_CRYSTAL_FREQ as f32;
+        let vco_power_ref = 1;
+
+        let sel_div = SelDiv::from_frequency(frequency);
+
+        // todo: librtlsdr adjusts the sel_div value using vco_fine_tune, though we
+        // haven't actually observed this taking effect (we tuned a bit while logging
+        // some values in r82xx_set_pll).
+
+        //self.registers.set_sel_div(sel_div.register_value());
+
+        // the VCO frequency we want
+        // vco_freq = (uint64_t)freq * (uint64_t)mix_div;
+        let vco_frequency = frequency * sel_div.effective_divider();
+
+        dbg!(vco_frequency, crystal_frequency);
+
+        // librtlsdr:
+        //
+        // uint32_t vco_fra;	/* VCO contribution by SDM (kHz) */
+        // pll_ref = priv->cfg->xtal;
+        // nint = vco_freq / (2 * pll_ref);
+        // vco_fra = (vco_freq - 2 * pll_ref * nint) / 1000;
+        // ni = (nint - 13) / 4;
+        // si = nint - 4 * ni - 13;
+        //
+        // datasheet:
+        //
+        // SI2C: 2 bits
+        // Ni2C: 6 bits
+        //
+        // Nint = 4*Ni2c+Si2c+13
+        // Ndiv = (Nint + Nfra)*2
+        // Nfra = SDM_IN[16] * 2^-1 + SDM_IN[15] * 2^-2 + ... + SDM_IN[2]* 2 ^-15 +
+        // SDM_IN[1] * 2^-16
+
+        let n_div = 0.5 * vco_frequency / crystal_frequency;
+        dbg!(n_div);
+
+        let n_int = n_div.floor() as u8;
+        let n_fra = (n_div.fract() * 65536.0) as u16;
+
+        if n_int > (128 / vco_power_ref) - 1 {
+            todo!("return error: no valid PLL values for frequency: {frequency}");
+        }
+
+        let n_i2c = (n_int - 13) / 4;
+        let s_i2c = n_int - 4 * n_i2c - 13;
+    }
+
+    set_pll(101625000.0);
+}
+ */

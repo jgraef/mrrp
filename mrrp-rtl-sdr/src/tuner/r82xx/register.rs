@@ -617,8 +617,18 @@ registers! {
         /// ```
         unk_vco_current: [7:5],
         /// Not in datasheet
+        ///
+        /// In the datasheet this bit is fixed to 0
+        ///
+        /// In the spreadsheet this is called `DIS_DITHER`, grouped with PLL, but now on-state info.
+        ///
+        /// In librtlsdr this is set to `false` in `r82xx_set_pll`.
         unk_dis_dither: [4],
         /// In datasheet, but no description
+        ///
+        /// Likely power for SDM.
+        ///
+        /// In spreadsheet: 0=on, 1=off
         pw_sdm: [3],
         /// Not in datasheet
         ///

@@ -65,6 +65,8 @@ pub const UPCONVERTER_GPIO_PIN: u8 = 5;
 /// The logic state of the GPIO pin at which the upconverter is enabled.
 pub const UPCONVERTER_GPIO_ENABLE: bool = false;
 
+pub const BLOG_CRYSTAL_FREQ: u32 = rtl2832u::DEFAULT_CRYSTAL_FREQUENCY;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -121,10 +123,11 @@ impl TunerProbe for BlogTunerProbe {
         &'a self,
         rtl2832u: &'a mut Rtl2832u,
     ) -> Result<Option<Self::Tuner>, Self::Error> {
-        if let Some(r82xx) = R82xxProbe.try_open(rtl2832u).await?
+        if let Some(mut r82xx) = R82xxProbe.try_open(rtl2832u).await?
             && r82xx.model() == r82xx::Model::R828D
         {
-            // fixme: we have a transaction open
+            r82xx.crystal_frequency = BLOG_CRYSTAL_FREQ as f32;
+
             let upconverter_pin = rtl2832u
                 .try_gpio(UPCONVERTER_GPIO_PIN)?
                 .into_output_init(rtl2832u, false)
@@ -145,8 +148,6 @@ pub struct BlogTuner {
     model: Model,
     name: String,
     upconverter_pin: OutputPin,
-
-    selected_band: Option<Band>,
 }
 
 impl BlogTuner {
@@ -158,7 +159,6 @@ impl BlogTuner {
             model,
             name,
             upconverter_pin,
-            selected_band: None,
         }
     }
 }
@@ -193,9 +193,6 @@ impl Tuner for BlogTuner {
         rtl2832u: &'a mut Rtl2832u,
         mut center_frequency: f32,
     ) -> Result<(), Self::Error> {
-        // todo: transactions for the r82xx, so we only flush once we're done here. this
-        // would also make it easy to check which registers actually changed
-
         // which band (HF, VHF, UHF) are we tuning to?
         let band = Band::from_frequency(center_frequency);
 
@@ -212,7 +209,6 @@ impl Tuner for BlogTuner {
 
         tracing::debug!(
             ?center_frequency,
-            current_band = ?self.selected_band,
             ?band,
             ?use_upconverter,
             ?rf_input,
@@ -223,15 +219,6 @@ impl Tuner for BlogTuner {
         self.upconverter_pin
             .write(rtl2832u, use_upconverter ^ !UPCONVERTER_GPIO_ENABLE)
             .await?;
-
-        // check if we are switching to a different band
-        if self
-            .selected_band
-            .is_none_or(|selected_band| selected_band != band)
-        {
-            // switch band
-            tracing::debug!(from = ?self.selected_band, to = ?band, "switching band");
-        }
 
         // if we're using the upconverter we need to adjust the center frequency that we
         // tune the R82xx to
@@ -245,15 +232,13 @@ impl Tuner for BlogTuner {
         transaction.select_rf_input(rf_input);
 
         // set frequency in R82xx
+        //
+        // todo: do this manually, so we can control the tracking filter (for when we
+        // use the upconverter)
         transaction.set_center_frequency(center_frequency);
 
-        transaction.commit().await?;
-
-        // store current band
-        //
-        // note: we can only do this now, after we know that the transaction didn't
-        // fail.
-        self.selected_band = Some(band);
+        // todo
+        //transaction.commit().await?;
 
         Ok(())
     }

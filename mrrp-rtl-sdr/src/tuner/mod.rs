@@ -1,4 +1,3 @@
-pub mod blog;
 pub mod r82xx;
 
 use std::{
