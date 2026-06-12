@@ -28,6 +28,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
     time::Duration,
 };
@@ -710,14 +711,26 @@ impl AsyncRead for EpaReader {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        Pin::new(&mut self.get_mut().endpoint_reader).poll_read(cx, buf)
+        let coop = ready!(tokio::task::coop::poll_proceed(cx));
+        Pin::new(&mut self.get_mut().endpoint_reader)
+            .poll_read(cx, buf)
+            .map(|result| {
+                coop.made_progress();
+                result
+            })
     }
 }
 
 impl AsyncBufRead for EpaReader {
     #[inline(always)]
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
-        Pin::new(&mut self.get_mut().endpoint_reader).poll_fill_buf(cx)
+        let coop = ready!(tokio::task::coop::poll_proceed(cx));
+        Pin::new(&mut self.get_mut().endpoint_reader)
+            .poll_fill_buf(cx)
+            .map(|result| {
+                coop.made_progress();
+                result
+            })
     }
 
     #[inline(always)]

@@ -76,6 +76,19 @@ pub enum Error {
 
     #[error(transparent)]
     I2cDeviceBusy(#[from] rtl2832u::i2c::I2cDeviceBusy),
+
+    #[error(transparent)]
+    NoPllConfig(#[from] NoPllConfig),
+}
+
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("No suitable PLL configuration found for LO frequency: {lo_frequency}")]
+pub struct NoPllConfig {
+    pub lo_frequency: f32,
+    pub sel_div: SelDiv,
+    pub vco_frequency: f32,
+    pub crystal_frequency: f32,
+    pub vco_power_ref: u8,
 }
 
 impl TunerError for Error {}
@@ -340,6 +353,13 @@ impl<'a> Transaction<'a> {
         // but they *always* set the vga to a fixed 16 dB in r82xx_freq
         self.set_vga_gain(VgaGain::from_code(0x08).unwrap());
 
+        // when they set the vga gain in r82xx_freq they also always enable the ADC
+        //
+        // todo: this this ADC even needed when we set the VGA gain via code? our
+        // understanding is that this ADC reads the VAGC pin. if that is the case, move
+        // this into `set_vga_gain`.
+        self.registers.set_unk_adc_enable(false);
+
         // VCO band
         // rc = r82xx_write_reg_mask(priv, 0x13, VER_NUM, 0x3f);
         self.registers.set_unk_vco_band(VERSION_VALUE);
@@ -508,8 +528,8 @@ impl<'a> Transaction<'a> {
         // but we'll keep the above for a while for reference.
 
         // power on LNA
-        // todo: ideally expose this via method on state too.
-        self.registers.set_pwd_lna1(false);
+        // cable1_in=false, cable2_in=false, pwd_lna1=false
+        // pwd_lna1=false means on, it's also known as air_in
         self.select_rf_input(RfInput::Air);
 
         // what is this? librtlsdr only says that 0b111 means auto
@@ -610,14 +630,15 @@ impl<'a> Transaction<'a> {
 
         tracing::debug!(?input, "selecting RF input");
 
-        let [cable_1, cable_2] = match input {
-            RfInput::Air => [false, false],
-            RfInput::Cable1 => [true, false],
-            RfInput::Cable2 => [false, true],
+        let [cable_1, cable_2, pwd_lna1] = match input {
+            RfInput::Air => [false, false, false],
+            RfInput::Cable1 => [true, false, true],
+            RfInput::Cable2 => [false, true, true],
         };
 
         self.registers.set_unk_cable_1_in(cable_1);
         self.registers.set_unk_cable_2_in(cable_2);
+        self.registers.set_pwd_lna1(pwd_lna1);
     }
 
     /// Determines selected RF input from register state.
@@ -652,12 +673,18 @@ impl<'a> Transaction<'a> {
         self.registers.set_unk_filt_q(filter_setting.low_q);
         self.registers.set_unk_bw_1_7mhz(filter_setting.bw_1_7mhz);
         self.registers.set_filt_bw(filter_setting.filt_bw);
+        self.registers.set_hpf(filter_setting.hpf);
         self.if_frequency = filter_setting.if_frequency;
     }
 
-    pub fn set_center_frequency(&mut self, center_frequency: f32) {
+    pub fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
         let lo_frequency = center_frequency + self.if_frequency;
 
+        // todo: this configures the tracking filter, so why would this use the LO
+        // frequency?
+        //
+        // we think the crystal config might depend on the LO frequency, but the
+        // tracking filter should depend on the RF frequency.
         let setting = frequency_setting(lo_frequency);
 
         tracing::debug!(
@@ -683,10 +710,14 @@ impl<'a> Transaction<'a> {
         //
         // also code 0x8 is 16 dB, not 16.3 dB
         //
-        // should be already on
+        // this also turns on the ADC (unk_adc_enable=false). the reg init array has
+        // this true, so we set this to false in initialize
+        //
         //self.registers.set_unk_adc_enable(false); // on,
 
-        self.set_pll(lo_frequency);
+        self.set_pll(lo_frequency)?;
+
+        Ok(())
     }
 
     pub fn set_vga_gain(&mut self, gain: VgaGain) {
@@ -755,7 +786,7 @@ impl<'a> Transaction<'a> {
         self.registers.set_tf_lp(setting.tf_lp);
     }
 
-    pub fn set_pll(&mut self, frequency: f32) {
+    pub fn set_pll(&mut self, lo_frequency: f32) -> Result<(), NoPllConfig> {
         self.registers.set_ref_div2(false);
 
         // 0x12 at init = 0x80
@@ -785,7 +816,7 @@ impl<'a> Transaction<'a> {
         // todo: remove
         assert_eq!(self.registers[0x12], 0x06);
 
-        let sel_div = SelDiv::from_frequency(frequency);
+        let sel_div = SelDiv::from_frequency(lo_frequency);
 
         // todo: librtlsdr adjusts the sel_div value using vco_fine_tune, though we
         // haven't actually observed this taking effect (we tuned a bit while logging
@@ -794,56 +825,67 @@ impl<'a> Transaction<'a> {
         self.registers.set_sel_div(sel_div.into());
 
         // the VCO frequency we want
-        let vco_frequency = frequency * sel_div.effective_divider();
+        let vco_frequency = lo_frequency * sel_div.effective_divider();
 
         tracing::debug!(?sel_div, ?vco_frequency, crystal_frequency = ?self.r82xx.crystal_frequency);
 
         // caculate PLL divider settings
-        if let Some(pll_divider) = PllDivider::from_vco_frequency(
+        let pll_divider = PllDivider::from_vco_frequency(
             vco_frequency,
             self.r82xx.crystal_frequency,
             self.r82xx.model.vco_power_ref(),
-        ) {
-            tracing::debug!(?pll_divider);
-            self.registers.set_n_i2c(pll_divider.n_i2c);
-            self.registers.set_s_i2c(pll_divider.s_i2c);
-            self.registers.set_sdm_in(pll_divider.sdm);
-        }
-        else {
-            // todo: this should return an error
+        )
+        .ok_or_else(|| {
             tracing::warn!(
                 ?vco_frequency,
                 crystal_frequency = ?self.r82xx.crystal_frequency,
                 vco_power_ref = ?self.r82xx.model.vco_power_ref(),
                 "No PLL divider config found"
             );
-        }
+
+            NoPllConfig {
+                lo_frequency,
+                sel_div,
+                vco_frequency,
+                crystal_frequency: self.r82xx.crystal_frequency,
+                vco_power_ref: self.r82xx.model.vco_power_ref(),
+            }
+        })?;
+
+        tracing::debug!(?pll_divider);
+        self.registers.set_n_i2c(pll_divider.n_i2c);
+        self.registers.set_s_i2c(pll_divider.s_i2c);
+        self.registers.set_sdm_in(pll_divider.sdm);
+
+        Ok(())
     }
 
     pub fn shutdown(&mut self) {
         tracing::debug!("setting {:?} to standby", self.model());
 
         self.shutdown_ours();
+
+        let mut any_difference = false;
+        for (i, expected) in SHUTDOWN_REGITSERS.iter().copied() {
+            if self.registers[i] != expected {
+                println!(
+                    "Register 0x{i:02x} differs:\n  expected: 0x{:02x}\n  provided: 0x{:02x}",
+                    expected, self.registers[i]
+                );
+                any_difference = true;
+            }
+        }
+
+        if any_difference {
+            todo!("shutdown incomplete");
+        }
+
         //self.shutdown_librtlsdr();
     }
 
     #[allow(dead_code)]
     fn shutdown_librtlsdr(&mut self) {
-        let writes = [
-            (0x06, 0xb1),
-            (0x05, 0xa0),
-            (0x07, 0x3a),
-            (0x08, 0x40),
-            (0x09, 0xc0),
-            (0x0a, 0x36),
-            (0x0c, 0x35),
-            (0x0f, 0x68),
-            (0x11, 0x03),
-            (0x17, 0xf4),
-            (0x19, 0x0c),
-        ];
-
-        for (address, value) in writes {
+        for (address, value) in SHUTDOWN_REGITSERS.iter().copied() {
             self.registers[address] = value;
         }
     }
@@ -852,6 +894,7 @@ impl<'a> Transaction<'a> {
     fn shutdown_ours(&mut self) {
         // 0x05
         self.registers.set_pwd_lt(true); // turn off loop-through
+        self.registers.set_unk_cable_1_in(false); // disable cable_1 input
         self.registers.set_pwd_lna1(true); // turn off lna 1
         self.registers.set_lna_gain_mode(false); // why does librtlsdr set this to auto?
         self.registers.set_lna_gain(0); // set lna gain to min
@@ -859,6 +902,7 @@ impl<'a> Transaction<'a> {
         // 0x06
         self.registers.set_pwd_pdet1(true); // turn off pdet1
         self.registers.set_pwd_pdet3(false); // turn off pdet3
+        self.registers.set_unk_cable_2_in(false); // disable cable_2 input
         self.registers.set_pw_lna(0b001); // don't know why librtlsdr sets this to 0b001, instead of 0b111(min)
 
         // 0x07
@@ -878,12 +922,14 @@ impl<'a> Transaction<'a> {
         // 0x0a
         self.registers.set_pwd_filt(false); // filter power off
         self.registers.set_pw_filt(0b01); // don't know why librtlsdr sets this to 0b01 instead of 0b11(min)
+        self.registers.set_unk_filt_q(true); // librtlsdr sets this on standby
         self.registers.set_filt_code(0b0110); // librtlsdr sets this on standby
 
         // 0x0c
         self.registers.set_pwd_vga(false); // turn off vga
         self.registers.set_unk_pw0_vga(true); // low power setting
         self.registers.set_unk_adc_enable(false); // enable ADC, why enable?
+        self.registers.set_vga_mode(true); // librtlsdr sets this on standby - sets VGA to be controlled by VAGC pin, so the VGA code shouldn't matter.
         self.registers.set_vga_code(0b0101); // librtlsdr sets this on standby
 
         // 0x11
@@ -902,6 +948,7 @@ impl<'a> Transaction<'a> {
         self.registers.set_pw_ldo_d(0b11);
         self.registers.set_unk_div_buf_cur(0b11);
         self.registers.set_unk_pw_iq(0b10);
+        self.registers.set_open_d(false);
 
         // 0x19
         // librtlsdr sets ring_pw (0x19 [3:2]) to 0b11, but it's initialized as that.
@@ -934,6 +981,20 @@ impl<'a> Transaction<'a> {
          */
     }
 }
+
+const SHUTDOWN_REGITSERS: &[(u8, u8)] = &[
+    (0x06, 0xb1),
+    (0x05, 0xa0),
+    (0x07, 0x3a),
+    (0x08, 0x40),
+    (0x09, 0xc0),
+    (0x0a, 0x36),
+    (0x0c, 0x35),
+    (0x0f, 0x68),
+    (0x11, 0x03),
+    (0x17, 0xf4),
+    (0x19, 0x0c),
+];
 
 impl<'a> Drop for Transaction<'a> {
     fn drop(&mut self) {
@@ -969,7 +1030,7 @@ impl Tuner for R82xx {
         center_frequency: f32,
     ) -> Result<(), Self::Error> {
         let mut transaction = self.begin_transaction(rtl2832u);
-        transaction.set_center_frequency(center_frequency);
+        transaction.set_center_frequency(center_frequency)?;
 
         // todo
         //transaction.commit().await

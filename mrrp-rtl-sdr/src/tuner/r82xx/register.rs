@@ -558,6 +558,8 @@ registers! {
         ref_div2: [4],
         /// Unknown related to capx
         ///
+        /// high=0, low=1
+        ///
         /// This is set by librtlsdr together with capx via `r82xx_xtal_cap_value` enum.
         ///
         /// ```plain

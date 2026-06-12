@@ -376,6 +376,23 @@ pub struct Inner {
 
 impl Inner {
     async fn reset(&mut self) -> Result<(), Error> {
+        /*
+        todo: does this help? we always get an error when shutting down the r828d, when we're actually streaming data.
+
+        2026-06-12T14:48:46.711135Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: setting R828D to standby
+        2026-06-12T14:48:46.711154Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: flushing registers
+        modified: [0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0c, 0x11, 0x17, 0x19]
+        Length: 32 (0x20) bytes
+        0000:   00 00 00 00  00 a0 b1 3a  40 c0 36 8f  35 53 75 68   .......:@.6.5Suh
+        0010:   8c 03 06 31  84 72 1c f4  48 0c 68 00  24 dd 6e 40   ...1.r..H.h.$.n@
+        2026-06-12T14:48:46.711180Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: write registers run=5..11 command=[5, 160, 177, 58, 64, 192, 54]
+        2026-06-12T14:48:46.711193Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u::i2c: writing I2C i2c_address=I2cAddress(0x74) data=[5, 160, 177, 58, 64, 192, 54]
+        2026-06-12T14:48:46.713900Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: write registers run=12..13 command=[12, 53]
+        2026-06-12T14:48:46.713932Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u::i2c: writing I2C i2c_address=I2cAddress(0x74) data=[12, 53]
+        2026-06-12T14:48:46.715615Z ERROR handle_commands: mrrp_rtl_sdr::rtl2832u: USB error during write error=endpoint stalled address=I2c { i2c_address: I2cAddress(0x74) } data=[12, 53]
+        */
+        self.rtl2832u.stop_epa().await?;
+
         // reset tuner
         let mut i2c_repeater_guard = self.rtl2832u.enable_i2c_repeater().await?;
         self.tuner.shutdown(&mut *i2c_repeater_guard).await?;

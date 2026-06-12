@@ -100,8 +100,8 @@ impl From<CrystalDrive> for bool {
     #[inline(always)]
     fn from(value: CrystalDrive) -> Self {
         match value {
-            CrystalDrive::Low => false,
-            CrystalDrive::High => true,
+            CrystalDrive::Low => true,
+            CrystalDrive::High => false,
         }
     }
 }
@@ -569,7 +569,6 @@ impl PllDivider {
         // and we use that for our test.
 
         let n_div = 0.5 * vco_frequency / crystal_frequency;
-        dbg!(n_div);
 
         let n_int = n_div.floor() as u8;
         let sdm = (n_div.fract() * 65536.0) as u16;
@@ -578,6 +577,7 @@ impl PllDivider {
             return None;
         }
 
+        // todo: clarify what's going on here
         let n_i2c = (n_int - 13) / 4;
         let s_i2c = n_int - 4 * n_i2c - 13;
 

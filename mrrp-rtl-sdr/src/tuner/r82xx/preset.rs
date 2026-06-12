@@ -260,6 +260,8 @@ pub const PRESET_BANDWIDTH_SETTINGS: &[BandwidthSetting] = &[
 ];
 
 pub fn bandwidth_setting(bandwidth: f32) -> &'static BandwidthSetting {
+    // todo: do binary search instead
+
     PRESET_BANDWIDTH_SETTINGS
         .iter()
         .find(|setting| bandwidth < setting.max_bandwidth)
@@ -546,6 +548,8 @@ pub const PRESET_FREQUENCY_SETTINGS: &[FrequencySetting] = &[
 ];
 
 pub fn frequency_setting(frequency: f32) -> &'static FrequencySetting {
+    // todo: do binary search instead
+
     PRESET_FREQUENCY_SETTINGS
         .iter()
         .find(|setting| frequency < setting.end_frequency)
@@ -676,6 +680,33 @@ fn filter_config(mut bw: u32) -> (u8, u8, u32) {
 }
  */
 
+#[derive(Clone, Copy, Debug)]
+pub struct NotchBand {
+    pub start_frequency: f32,
+    pub end_frequency: f32,
+}
+
+pub const NOTCH_BANDS: &[NotchBand] = &[
+    NotchBand {
+        start_frequency: 0.0,
+        end_frequency: 2200000.0,
+    },
+    NotchBand {
+        start_frequency: 85000000.0,
+        end_frequency: 112000000.0,
+    },
+    NotchBand {
+        start_frequency: 172000000.0,
+        end_frequency: 242000000.0,
+    },
+];
+
+pub fn is_in_notch_band(frequency: f32) -> bool {
+    NOTCH_BANDS.iter().any(|notch_band| {
+        notch_band.start_frequency <= frequency && frequency <= notch_band.end_frequency
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::tuner::r82xx::{
@@ -685,6 +716,8 @@ mod tests {
         RfMux,
         TrackingFilterSetting,
         preset::{
+            PRESET_BANDWIDTH_SETTINGS,
+            PRESET_FREQUENCY_SETTINGS,
             bandwidth_setting,
             frequency_setting,
         },
@@ -744,5 +777,43 @@ mod tests {
             setting.crystal_capacitor.min(selected_cap),
             CrystalCapacitor::P0
         );
+    }
+
+    #[test]
+    fn presets_are_sorted() {
+        assert!(PRESET_FREQUENCY_SETTINGS.len() > 0);
+
+        assert!(
+            PRESET_FREQUENCY_SETTINGS[0].start_frequency
+                < PRESET_FREQUENCY_SETTINGS[0].end_frequency
+        );
+
+        for i in 1..PRESET_FREQUENCY_SETTINGS.len() {
+            assert!(
+                PRESET_FREQUENCY_SETTINGS[i].start_frequency
+                    < PRESET_FREQUENCY_SETTINGS[i].end_frequency
+            );
+            assert!(
+                PRESET_FREQUENCY_SETTINGS[i - 1].end_frequency
+                    <= PRESET_FREQUENCY_SETTINGS[i].start_frequency
+            );
+        }
+
+        assert!(PRESET_BANDWIDTH_SETTINGS.len() > 0);
+
+        assert!(
+            PRESET_BANDWIDTH_SETTINGS[0].min_bandwidth < PRESET_BANDWIDTH_SETTINGS[0].max_bandwidth
+        );
+
+        for i in 1..PRESET_BANDWIDTH_SETTINGS.len() {
+            assert!(
+                PRESET_BANDWIDTH_SETTINGS[i].min_bandwidth
+                    < PRESET_BANDWIDTH_SETTINGS[i].max_bandwidth
+            );
+            assert!(
+                PRESET_BANDWIDTH_SETTINGS[i - 1].max_bandwidth
+                    <= PRESET_BANDWIDTH_SETTINGS[i].min_bandwidth
+            );
+        }
     }
 }

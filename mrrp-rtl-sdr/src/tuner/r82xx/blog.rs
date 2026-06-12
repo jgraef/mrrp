@@ -55,6 +55,8 @@ use crate::{
             R82xx,
             R82xxProbe,
             RfInput,
+            TrackingFilterSetting,
+            preset::is_in_notch_band,
         },
     },
 };
@@ -128,10 +130,12 @@ impl TunerProbe for BlogTunerProbe {
         {
             r82xx.crystal_frequency = BLOG_CRYSTAL_FREQ as f32;
 
-            let upconverter_pin = rtl2832u
+            let mut upconverter_pin = rtl2832u
                 .try_gpio(UPCONVERTER_GPIO_PIN)?
-                .into_output_init(rtl2832u, false)
+                .into_output_init(rtl2832u, !UPCONVERTER_GPIO_ENABLE)
                 .await?;
+            let pad_config = upconverter_pin.pad_config(rtl2832u).await?;
+            tracing::debug!(?pad_config, "upconverter PAD config");
 
             Ok(Some(BlogTuner::new(r82xx, self.model, upconverter_pin)))
         }
@@ -207,15 +211,21 @@ impl Tuner for BlogTuner {
             _ => RfInput::Air,
         };
 
+        let is_in_notch_band = is_in_notch_band(center_frequency);
+
         tracing::debug!(
             ?center_frequency,
             ?band,
             ?use_upconverter,
             ?rf_input,
+            ?is_in_notch_band,
             "setting center frequency"
         );
 
         // toggle upconverter on or off
+        //
+        // note: since `UPCONVERTER_GPIO_ENABLE` is `false`, the boolean expression can
+        // be shortened to `!use_upconverter`.
         self.upconverter_pin
             .write(rtl2832u, use_upconverter ^ !UPCONVERTER_GPIO_ENABLE)
             .await?;
@@ -229,22 +239,54 @@ impl Tuner for BlogTuner {
         let mut transaction = self.r82xx.begin_transaction(rtl2832u);
 
         // select the RF input with the R82xx
+        // this sets cable1_in, cable2_in and pwd_lna1/air_in
         transaction.select_rf_input(rf_input);
 
         // set frequency in R82xx
         //
-        // todo: do this manually, so we can control the tracking filter (for when we
-        // use the upconverter)
-        transaction.set_center_frequency(center_frequency);
+        // todo: we should discard the transaction explicitely, if this fails.
+        transaction.set_center_frequency(center_frequency)?;
 
-        // todo
-        //transaction.commit().await?;
+        // if upconverter is used, disable tracking filter
+        if use_upconverter {
+            transaction.set_tracking_filter_setting(&TrackingFilterSetting::bypass());
+        }
+
+        // disable notch filters when in notch band
+        transaction.registers.set_open_d(!is_in_notch_band);
+
+        /*
+        // r82xx-reg-dump /home/emma/code/mrrp/tmp/rtl-sdr-blog/src/tuner_r82xx.c 1346
+        // e3 30 75 c0 40 c5 8f 68 53 75 68 64 bb 06 31 c6 10 81 28 48 ec 2a 14 24 dd 6e
+        // 40
+        let expected = [
+            0xe3, 0x30, 0x75, 0xc0, 0x40, 0xc5, 0x8f, 0x68, 0x53, 0x75, 0x68, 0x64, 0xbb, 0x06,
+            0x31, 0xc6, 0x10, 0x81, 0x28, 0x48, 0xec, 0x2a, 0x14, 0x24, 0xdd, 0x6e, 0x40,
+        ];
+
+        for i in 0x05..0x20 {
+            if transaction.registers[i] != expected[usize::from(i - 0x05)] {
+                println!(
+                    "Register 0x{i:02x} differs:\n  expected: 0x{:02x}\n  provided: 0x{:02x}",
+                    expected[usize::from(i - 0x05)],
+                    transaction.registers[i]
+                );
+            }
+        }
+         */
+
+        transaction.commit().await?;
 
         Ok(())
     }
 
     async fn shutdown<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
+        self.upconverter_pin
+            .write(rtl2832u, !UPCONVERTER_GPIO_ENABLE)
+            .await?;
+
         self.r82xx.shutdown(rtl2832u).await?;
+
         Ok(())
     }
 }

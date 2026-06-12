@@ -15,6 +15,10 @@ use std::{
         Path,
         PathBuf,
     },
+    time::{
+        Duration,
+        Instant,
+    },
 };
 
 use anyhow::{
@@ -171,26 +175,72 @@ async fn main() -> Result<(), Error> {
             if stream {
                 let mut reader = device.reader(0x100000).await?;
 
+                struct SamplesPerSecond {
+                    start_time: Instant,
+                    sample_count: usize,
+                }
+
+                let mut samples_per_second: Option<SamplesPerSecond> = None;
+                const MEASUREMENT_INVERVAL: Duration = Duration::from_secs(1);
+
                 run_til_shutdown(async {
                     loop {
                         match reader.fill_buf().await {
                             Ok(buffer) => {
-                                let n = buffer.len() / 2;
-                                for k in 0..n {
+                                let buffer_len = buffer.len();
+                                if buffer_len % 2 != 0 {
+                                    tracing::warn!(
+                                        buffer_len,
+                                        "Returned sample buffer's length is not a multiple of 2"
+                                    );
+                                }
+
+                                let now = Instant::now();
+                                let sample_count = buffer.len() / 2;
+
+                                if let Some(samples_per_second) = &mut samples_per_second {
+                                    samples_per_second.sample_count += sample_count;
+                                    let interval = now - samples_per_second.start_time;
+
+                                    if interval > MEASUREMENT_INVERVAL {
+                                        let sps = samples_per_second.sample_count as f32
+                                            / interval.as_secs_f32();
+                                        tracing::debug!(
+                                            "Samples per second: {:.3} MSa/s",
+                                            sps / 1000000.0
+                                        );
+
+                                        // reset measurement
+                                        samples_per_second.start_time = now;
+                                        samples_per_second.sample_count = 0;
+                                    }
+                                }
+                                else {
+                                    samples_per_second = Some(SamplesPerSecond {
+                                        start_time: now,
+                                        sample_count,
+                                    });
+                                }
+
+                                /*for k in 0..n {
                                     // not exactly right but close enough
                                     let _i = ((buffer[k * 2] as f32) - 128.0) / 255.0;
                                     let _q = ((buffer[k * 2 + 1] as f32) - 128.0) / 255.0;
 
                                     //println!("{i:.04}+{q:.04}i, ");
-                                }
+                                }*/
+
+                                reader.consume(buffer_len);
                             }
                             Err(error) => {
-                                return if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                                if error.kind() == std::io::ErrorKind::UnexpectedEof {
                                     tracing::warn!("reader eof");
                                 }
                                 else {
                                     tracing::warn!(%error, "reader error");
                                 };
+
+                                break;
                             }
                         }
                     }

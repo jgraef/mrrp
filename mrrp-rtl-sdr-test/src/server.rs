@@ -221,13 +221,16 @@ async fn handle_command(
 ) -> Result<(), Error> {
     use mrrp_rtl_tcp::protocol::Command;
 
-    tracing::debug!(?command, "handling command");
-
     match command {
         Command::SetSampleRate { sample_rate } => {
+            tracing::debug!(?command, "handling command");
             device.set_sample_rate(sample_rate as f32).await?;
         }
-        _ => tracing::debug!(?command, "ignored command"),
+        Command::SetCenterFrequency { frequency } => {
+            tracing::debug!(?command, "handling command");
+            device.set_center_frequency(frequency as f32).await?;
+        }
+        _ => tracing::debug!(?command, "ignoring command"),
     }
 
     Ok(())
