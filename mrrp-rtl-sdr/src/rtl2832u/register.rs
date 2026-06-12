@@ -283,7 +283,8 @@ impl Register {
 /// registers `[u8; 20]`.
 pub trait RegisterValue<R = Register>: Debug + Default + Copy + Clone + PartialEq {
     const ADDRESS: Register;
-    type Bits: Bits;
+    type Bits: Bits<Self::Endianess>;
+    type Endianess;
 
     fn from_bits(bits: Self::Bits) -> Self;
     fn as_bits(&self) -> Self::Bits;
@@ -292,7 +293,7 @@ pub trait RegisterValue<R = Register>: Debug + Default + Copy + Clone + PartialE
 /// Plain bits type for a register
 ///
 /// Defines conversion from and to bytes.
-pub trait Bits: Debug {
+pub trait Bits<E>: Debug {
     type Bytes: AsRef<[u8]>;
     const LENGTH: u16;
 
@@ -300,7 +301,7 @@ pub trait Bits: Debug {
     fn into_bytes(&self) -> Self::Bytes;
 }
 
-impl Bits for u8 {
+impl<E> Bits<E> for u8 {
     type Bytes = [u8; 1];
 
     const LENGTH: u16 = 1;
@@ -316,9 +317,15 @@ impl Bits for u8 {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum LittleEndian {}
+
+#[derive(Clone, Copy, Debug)]
+pub enum BigEndian {}
+
 macro_rules! impl_bits {
     ($ty:ty, $bytes:expr) => {
-        impl Bits for $ty {
+        impl Bits<LittleEndian> for $ty {
             type Bytes = [u8; $bytes];
 
             const LENGTH: u16 = $bytes;
@@ -333,6 +340,22 @@ macro_rules! impl_bits {
                 self.to_le_bytes()
             }
         }
+
+        impl Bits<BigEndian> for $ty {
+            type Bytes = [u8; $bytes];
+
+            const LENGTH: u16 = $bytes;
+
+            #[inline(always)]
+            fn from_bytes(bytes: &[u8]) -> Self {
+                Self::from_be_bytes(bytes.try_into().unwrap())
+            }
+
+            #[inline(always)]
+            fn into_bytes(&self) -> Self::Bytes {
+                self.to_be_bytes()
+            }
+        }
     };
 }
 
@@ -340,7 +363,7 @@ impl_bits!(u16, 2);
 impl_bits!(u32, 4);
 impl_bits!(u64, 8);
 
-impl<const N: usize> Bits for [u8; N] {
+impl<E, const N: usize> Bits<E> for [u8; N] {
     type Bytes = Self;
 
     const LENGTH: u16 = const { N as u16 };
@@ -444,11 +467,18 @@ pub mod shadow {
 macro_rules! registers {
     {
         $(
-            $(#[$attrs:meta])* $name:ident: $int:ty = $block:ident $args:tt $($shadow:ident)? $({$($fields:tt)*})?;
+            $(#[$attrs:meta])* $name:ident: $int:ty $(as $endianess:ty)? = $block:ident $args:tt $($shadow:ident)? $({$($fields:tt)*})?;
         )*
     } => {
         $(
-            registers!(@generate_code(($($attrs)*), $name, $int, registers!(@parse_address($block, $args)), $({$($fields)*})?));
+            registers!(@generate_code(
+                ($($attrs)*),
+                $name,
+                $int,
+                registers!(@parse_address($block, $args)),
+                registers!(@decide_endianess($block, ($($endianess)?))),
+                $({$($fields)*})?
+            ));
         )*
 
         /// All register addresses in this block
@@ -471,15 +501,27 @@ macro_rules! registers {
     (@parse_address($block:ident, ($address:expr))) => {
         Register::$block($address)
     };
-    (@generate_code(($($attrs:meta)*), $name:ident, $int:ty, $address:expr, )) => {
+    (@decide_endianess(demod, ())) => {
+        // default to big endian
+        BigEndian
+    };
+    (@decide_endianess($block:ident, ())) => {
+        // default to little endian
+        LittleEndian
+    };
+    (@decide_endianess($block:ident, ($endianess:ty))) => {
+        // endianess specified
+        $endianess
+    };
+    (@generate_code(($($attrs:meta)*), $name:ident, $int:ty, $address:expr, $endianess:ty, )) => {
         $(#[$attrs])*
         #[allow(non_camel_case_types)]
         #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
         pub struct $name(pub $int);
 
-        registers!(@generate_impls($name, $int, $address));
+        registers!(@generate_impls($name, $int, $address, $endianess));
     };
-    (@generate_code(($($attrs:meta)*), $name:ident, $int:ty, $address:expr, {$($fields:tt)*})) => {
+    (@generate_code(($($attrs:meta)*), $name:ident, $int:ty, $address:expr, $endianess:ty, {$($fields:tt)*})) => {
         bitfield! {
             $(#[$attrs])*
             #[allow(non_camel_case_types)]
@@ -490,13 +532,14 @@ macro_rules! registers {
             $($fields)*
         }
 
-        registers!(@generate_impls($name, $int, $address));
+        registers!(@generate_impls($name, $int, $address, $endianess));
     };
-    (@generate_impls($name:ident, $int:ty, $address:expr)) => {
+    (@generate_impls($name:ident, $int:ty, $address:expr, $endianess:ty)) => {
         #[automatically_derived]
         impl RegisterValue for $name {
             const ADDRESS: Register = $address;
             type Bits = $int;
+            type Endianess = $endianess;
 
             fn from_bits(bits: Self::Bits) -> Self {
                 Self(bits)
@@ -671,7 +714,7 @@ pub mod usb {
     make_enum! {
         pub enum EndpointTransferType(u8) {
             Control = 0b00,
-            Isochrronous = 0b01,
+            Isochronous = 0b01,
             Bulk = 0b10,
             Interrupt = 0b11,
         }
@@ -723,7 +766,11 @@ pub mod sys {
         };
 
         /// PAD Configuration for GPIO pins
-        GP_CFG: u16 = sys(0x3007) shadow;
+        ///
+        /// # Note
+        ///
+        /// The 8051 is only a 8bit processor, and all registers are 8bit. But if we treat this as little endian 16bit, it's easier to address a specific config for a pin.
+        GP_CFG: u16 as LittleEndian = sys(0x3007) shadow;
 
         /// System Interrupt Enable Register (GPIO5-GPIO7)
         SYSINTE_1: u8 = sys(0x3009) shadow {
@@ -826,6 +873,9 @@ pub mod demod {
             /// REG_GPO: 0, 0x10
             pub bool, reg_gpo, set_reg_gpo: 0;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
         AD7_SETTING: u16 = demod(0, 0x11) {
             /// AD7_SETTING: 0, 0x11
             pub u16, ad7_setting, set_ad7_setting: 15, 0;
@@ -880,7 +930,7 @@ pub mod demod {
             /// TODO: We think disabling this will reject all packet. Test this with the mode setting.
             pub bool, enable, set_enable: 7;
         };
-        PID_ENABLE: u32 = demod(0, 0x62);
+        PID_ENABLE: u32 as LittleEndian = demod(0, 0x62);
         // todo: this or individual registers? also [u16; 32] doesn't implement our trait yet.
         //PID_VALUE: [u16; 32] = demod(0, 0x66);
         VAL_LVL_PIP_ERR_LVL_PIP_SYNC_LVL_PIP_CKOUT_PWR_PIP_CKOUTPAR_PIP: u8 = demod(0, 0xb7) {
@@ -967,12 +1017,18 @@ pub mod demod {
             /// RF_AGC_MAX: 1, 0x0b
             pub u8, rf_agc_max, set_rf_agc_max: 7, 0;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
         IF_AGC_MAN_IF_AGC_MAN_VAL: u16 = demod(1, 0x0c) {
             /// IF_AGC_MAN: 1, 0x0c
             pub bool, if_agc_man, set_if_agc_man: 6;
             /// IF_AGC_MAN_VAL: 1, 0x0c
             pub u16, if_agc_man_val, set_if_agc_man_val: 13, 0;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
         RF_AGC_MAN_RF_AGC_MAN_VAL: u16 = demod(1, 0x0e) {
             /// RF_AGC_MAN: 1, 0x0e
             pub bool, rf_agc_man, set_rf_agc_man: 6;
@@ -993,6 +1049,10 @@ pub mod demod {
             /// Enable adjacent channel rejection - 1=on
             pub bool, en_aci, set_en_aci: 1;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
+        ///
         /// See PSET_IFFREQ
         UNK_DDC_OFFSET: u16 = demod(1, 0x16) {};
 
@@ -1009,7 +1069,7 @@ pub mod demod {
         /// [Linux sdr driver][1] also sets this to 0
         ///
         /// [1]: https://code.googlesource.com/linux/torvalds/linux/+/6d36c728bc2e2d632f4b0dea00df5532e20dfdab/drivers/media/dvb-frontends/rtl2832_sdr.c#509
-        PSET_IFFREQ: u32 = demod(1, 0x18) shadow {
+        PSET_IFFREQ: u32 as BigEndian = demod(1, 0x18) shadow {
             /// PSET_IFFREQ: 1, 0x19
             ///
             /// ```plain
@@ -1027,7 +1087,7 @@ pub mod demod {
             /// EN_CACQ_NOTCH: 1, 0x61
             pub bool, en_cacq_notch, set_en_cacq_notch: 4;
         };
-        SAMP_FREQ_CORR: u16 = demod(1, 0x3e) shadow {
+        SAMP_FREQ_CORR: u16 as BigEndian = demod(1, 0x3e) shadow {
             /// Unknown
             ///
             /// In the rtl_test dump it's 0b00, but in my `small_init` dump it's 0b01.
@@ -1043,7 +1103,7 @@ pub mod demod {
             /// tmp = offs & 0xff;
             /// r |= rtlsdr_demod_write_reg(dev, 1, 0x3f, tmp, 1);
             /// tmp = (offs >> 8) & 0x3f;
-            /// r |= rtlsdr_demod_write_r
+            /// r |= rtlsdr_demod_write_reg(dev, 1, 0x3e, tmp, 1);
             /// ```
             pub i16, samp_freq_corr, set_samp_freq_corr: 13, 0;
         };
@@ -1057,7 +1117,7 @@ pub mod demod {
             /// KB_P3: 1, 0x65
             pub u8, kb_p3, set_kb_p3: 2, 0;
         };
-        EST_KQ: u16 = demod(1, 0x66) {
+        EST_KQ: u16 as BigEndian = demod(1, 0x66) {
             /// Est_kq
             ///
             /// Estimated Gain for IQ Gain Mismatch, u(12, 11f)
@@ -1065,7 +1125,7 @@ pub mod demod {
             /// read-only
             pub u16, est_kq, set_est_kq: 11, 0;
         };
-        EST_SIN: u16 = demod(1, 0x68) {
+        EST_SIN: u16 as BigEndian = demod(1, 0x68) {
             /// Est_sin
             ///
             /// Estimated Sin for IQ `\theta` Mismatch, u(12, 10f)
@@ -1125,10 +1185,16 @@ pub mod demod {
             /// CDIV_PH1: 1, 0x7d
             pub u8, cdiv_ph1, set_cdiv_ph1: 7, 4;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
         TR_WAIT_MIN_8K: u16 = demod(1, 0x88) {
             /// TR_WAIT_MIN_8K: 1, 0x88
             pub u16, tr_wait_min_8k, set_tr_wait_min_8k: 11, 2;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
         RSD_BER_FAIL_VAL: u16 = demod(1, 0x8f) {
             /// RSD_BER_FAIL_VAL: 1, 0x8f
             pub u16, rsd_ber_fail_val, set_rsd_ber_fail_val: 15, 0;
@@ -1155,7 +1221,9 @@ pub mod demod {
         ///     pub u16, sm_pass, set_sm_pass: 11, 0;
         /// };
         /// ```
-        UNK_FSM: u16 = demod(1, 0x93);
+        ///
+        /// The endianess is unknown. If it's big-endian then the value we need to set is 0xf00f. Otherwise it's 0x0ff0.
+        UNK_FSM: u16 as BigEndian = demod(1, 0x93);
 
         MGD_THD0: u8 = demod(1, 0x95) {
             /// MGD_THD0: 1, 0x95
@@ -1181,14 +1249,15 @@ pub mod demod {
             /// MGD_THD5: 1, 0x9a
             pub u8, mgd_thd5, set_mgd_thd5: 7, 0;
         };
-        MGD_THD6: u8 = demod(1, 0x9b) {
+        // commented out to avoid accidentally using them before fixing the overlap with CFREQ_OFF_RATIO_RSAMP_RATIO
+        /*MGD_THD6: u8 = demod(1, 0x9b) {
             /// MGD_THD6: 1, 0x9b
             pub u8, mgd_thd6, set_mgd_thd6: 7, 0;
         };
         MGD_THD7: u8 = demod(1, 0x9c) {
             /// MGD_THD7: 1, 0x9c
             pub u8, mgd_thd7, set_mgd_thd7: 7, 0;
-        };
+        };*/
         /// These two overlap in a very confusing way. Can't be combined into 32bit either.
         ///
         /// ```plain
@@ -1202,11 +1271,21 @@ pub mod demod {
         /// 0xa1   rrrrrrrr
         /// 0xa2   rrrrrr--
         /// ```
-        CFREQ_OFF_RATIO_RSAMP_RATIO: u64 = demod(1, 0x9b) shadow {
+        ///
+        /// # Note
+        ///
+        /// We include the lower 2 bits with `rsamp_ratio` and they seem to be intended to be used with it.
+        /// Either the register layout, or the formular is wrong. We need to test what effect the lower
+        /// 2 bits have. See [`rsamp_ratio_from_hz`].
+        ///
+        /// # FIXME
+        ///
+        /// This overlaps with [`MGD_THD6`] and [`MGD_THD7`]. We might be able to shift this up 2 bytes, but the problem remains, that this doesn't fit nicely.
+        CFREQ_OFF_RATIO_RSAMP_RATIO: u64 as BigEndian = demod(1, 0x9b) shadow {
             /// CFREQ_OFF_RATIO: 1, 0x9d
             pub u32, cfreq_off_ratio, set_cfreq_off_ratio: 47, 28;
             /// RSAMP_RATIO: 1, 0x9f
-            pub u32, rsamp_ratio, set_rsamp_ratio: 27, 2;
+            pub u32, rsamp_ratio, set_rsamp_ratio: 27, 0;
         };
         EN_BK_TRK: u8 = demod(1, 0xa6) {
             /// EN_BK_TRK: 1, 0xa6
@@ -1326,6 +1405,9 @@ pub mod demod {
             /// SCALE1_BAC: 2, 0xac
             pub u8, scale1_bac, set_scale1_bac: 7, 0;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
         K1_CR_STEP12: u16 = demod(2, 0xad) {
             /// K1_CR_STEP12: 2, 0xad
             pub u8, k1_cr_step12, set_k1_cr_step12: 9, 4;
@@ -1350,7 +1432,7 @@ pub mod demod {
             /// ACI_DET_IND: 3, 0x12
             pub bool, aci_det_ind, set_aci_det_ind: 0;
         };
-        SFREQ_OFF: u16 = demod(3, 0x18) {
+        SFREQ_OFF: u16 as BigEndian = demod(3, 0x18) {
             /// SFREQ_OFF: 3, 0x18
             pub u16, sfreq_off, set_sfreq_off: 13, 0;
         };
@@ -1366,6 +1448,9 @@ pub mod demod {
             /// RX_C_RATE_HP: 3, 0x3d
             pub u8, rx_c_rate_hp, set_rx_c_rate_hp: 5, 3;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
         RSD_BER_EST: u16 = demod(3, 0x4e) {
             /// RSD_BER_EST: 3, 0x4e
             pub u16, rsd_ber_est, set_rsd_ber_est: 15, 0;
@@ -1378,18 +1463,21 @@ pub mod demod {
             /// FSM_STAGE: 3, 0x51
             pub u8, fsm_stage, set_fsm_stage: 6, 3;
         };
-        IF_AGC_VAL: u16 = demod(3, 0x59) {
+        IF_AGC_VAL: u16 as LittleEndian = demod(3, 0x59) {
             /// IF_AGC_VAL: 3, 0x59
             pub u16, if_agc_val, set_if_agc_val: 13, 0;
         };
-        RF_AGC_VAL: u16 = demod(3, 0x5b) {
+        RF_AGC_VAL: u16 as LittleEndian = demod(3, 0x5b) {
             /// RF_AGC_VAL: 3, 0x5b
             pub u16, rf_agc_val, set_rf_agc_val: 13, 0;
         };
-        CFREQ_OFF: u32 = demod(3, 0x5e) {
+        CFREQ_OFF: u32 as BigEndian = demod(3, 0x5e) {
             /// CFREQ_OFF: 3, 0x5f
             pub u32, cfreq_off, set_cfreq_off: 17, 0;
         };
+        /// Unknown
+        ///
+        /// Unknown endianess
         CE_EST_EVM: u16 = demod(4, 0x0c) {
             /// CE_EST_EVM: 4, 0x0c
             pub u16, ce_est_evm, set_ce_est_evm: 15, 0;

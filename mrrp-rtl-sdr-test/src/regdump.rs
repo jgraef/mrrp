@@ -213,10 +213,10 @@ impl<'a> reg::Visitor for PrintRegs<'a> {
             .unwrap();
 
             if let Some(offset) = offset.checked_sub(self.offset) {
-                let n = usize::try_from(<R::Bits as reg::Bits>::LENGTH).unwrap();
+                let n = usize::try_from(<R::Bits as reg::Bits<R::Endianess>>::LENGTH).unwrap();
                 if offset + n <= self.buffer.len() {
                     let data = &self.buffer[offset..][..n];
-                    let bits = <R::Bits as reg::Bits>::from_bytes(data);
+                    let bits = <R::Bits as reg::Bits<R::Endianess>>::from_bytes(data);
                     let value = R::from_bits(bits);
                     println!("{:?} = {value:?}", R::ADDRESS);
                 }

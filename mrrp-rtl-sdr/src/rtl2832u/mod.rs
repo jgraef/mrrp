@@ -259,10 +259,13 @@ impl Rtl2832u {
         R: RegisterValue + shadow::ShadowRegister,
     {
         let data = self
-            .read(R::ADDRESS, <R::Bits as register::Bits>::LENGTH)
+            .read(
+                R::ADDRESS,
+                <R::Bits as register::Bits<R::Endianess>>::LENGTH,
+            )
             .await?;
 
-        let bits = <R::Bits as register::Bits>::from_bytes(&data);
+        let bits = <R::Bits as register::Bits<R::Endianess>>::from_bytes(&data);
         let value = R::from_bits(bits);
 
         tracing::debug!(address = ?R::ADDRESS, ?value, "read register");
@@ -446,7 +449,7 @@ impl Rtl2832u {
         .await?;
 
         // configure FSM
-        self.write_register(reg::demod::UNK_FSM(0x0ff0)).await?;
+        self.write_register(reg::demod::UNK_FSM(0xf00f)).await?;
 
         // disable DAGC, librtlsdr says this has no effect
         self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
@@ -660,7 +663,8 @@ impl Rtl2832u {
 
         let changed = self
             .write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|register| {
-                register.set_rsamp_ratio(rsamp_ratio);
+                // mask off the lower 2 bits, see [`rsamp_ratio_to_hz`].
+                register.set_rsamp_ratio(rsamp_ratio & !3);
             })
             .await?;
 
@@ -765,48 +769,88 @@ pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
     (f as i32).cast_unsigned() & 0x003f_ffff
 }
 
-pub fn rsamp_ratio_from_hz(f_symbol: f32, f_crystal: f32) -> u32 {
-    let r = (f_crystal * 4194304.0 / f_symbol).floor();
+/// Calculate `rsamp_ratio` from sample rate in Hz.
+///
+/// The formula in the datasheet is wrong. It would be right if you were writing
+/// the `rsamp_ratio` starting from bit 0, but it starts at bit 2. librtlsdr
+/// writes it starting from bit 0, but masks the lower 2 bits, such that they're
+/// 0. The examples and default value in the datasheet then don't make much
+/// sense either, because some have the lower 2 bits set. Or maybe the register
+/// really starts at bit 0 and the lower 2 bits can be used.
+///
+/// We chose to keep the formula and extend the register to include the lower 2
+/// bits. The caller must check if the want the lower 2 bits to be 0.
+pub fn rsamp_ratio_from_hz(sample_rate: f32, crystal_frequency: f32) -> u32 {
+    let r = (crystal_frequency * 4194304.0 / sample_rate).floor();
     (r as u32) & 0x03ff_ffff
 }
 
-pub fn rsamp_ratio_to_hz(rsamp_ratio: u32, f_crystal: f32) -> f32 {
-    f_crystal * 4194304.0 / rsamp_ratio as f32
+/// Calculate the sample rate in Hz from the `rsamp_ratio`.
+///
+/// See [`rsamp_ratio_from_hz`].
+pub fn rsamp_ratio_to_hz(rsamp_ratio: u32, crystal_frequency: f32) -> f32 {
+    crystal_frequency * 4194304.0 / rsamp_ratio as f32
 }
 
 #[cfg(test)]
 mod tests {
     use crate::rtl2832u::{
+        DEFAULT_CRYSTAL_FREQUENCY,
         FirFilter,
         pset_iffreq_from_hz,
         rsamp_ratio_from_hz,
+        rsamp_ratio_to_hz,
     };
 
     #[test]
     fn test_pset_iffreq_from_hz() {
-        assert_eq!(pset_iffreq_from_hz(4570000.0, 28800000.0), 0x0035_d82e);
-        assert_eq!(pset_iffreq_from_hz(36167000.0, 28800000.0), 0x002f_a0ff);
-        assert_eq!(pset_iffreq_from_hz(36125000.0, 28800000.0), 0x002f_b8e4);
-        assert_eq!(pset_iffreq_from_hz(0.0, 28800000.0), 0);
+        assert_eq!(
+            pset_iffreq_from_hz(4570000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            0x0035_d82e
+        );
+        assert_eq!(
+            pset_iffreq_from_hz(36167000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            0x002f_a0ff
+        );
+        assert_eq!(
+            pset_iffreq_from_hz(36125000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            0x002f_b8e4
+        );
+        assert_eq!(
+            pset_iffreq_from_hz(0.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            0
+        );
     }
 
     #[test]
     fn test_rsamp_ratio_from_hz() {
         assert_eq!(
-            rsamp_ratio_from_hz(64.0 * 1000000.0 / 7.0, 28800000.0),
+            rsamp_ratio_from_hz(64.0 * 1000000.0 / 7.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             // tried debugging the discrepancy and we're pretty sure it's because of
             // rounding of f_symbol
             0x00c9_9999 + 1
         );
         assert_eq!(
-            rsamp_ratio_from_hz(8.0 * 1000000.0, 28800000.0),
+            rsamp_ratio_from_hz(8.0 * 1000000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             0x00e6_6666
         );
         assert_eq!(
-            rsamp_ratio_from_hz(48.0 * 1000000.0 / 7.0, 28800000.0),
+            rsamp_ratio_from_hz(48.0 * 1000000.0 / 7.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             // note that this has one more c than the datasheet. probably a typo
             0x010c_cccc
         );
+
+        // this is what librtlsdr writes when sampling at 2.048 MSa/s
+        assert_eq!(
+            rsamp_ratio_from_hz(2048000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            58982400,
+        );
+
+        // this is what librtlsdr writes when sampling at 2.4 MSa/s
+        assert_eq!(
+            rsamp_ratio_from_hz(2400000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            50331648
+        )
     }
 
     const ENCODED_FILTER: &[u8; 20] =

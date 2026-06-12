@@ -115,16 +115,19 @@ impl Device {
 
         tracing::info!(tuner = tuner.name(), "found tuner");
 
-        // todo: this is specifically for R828D and Blog v4 for testing
+        {
+            // todo: this is specifically for R828D and Blog v4 for testing. it should be
+            // moved into the blog-specific tuner code
 
-        rtl2832u.set_if_mode(IfMode::If).await?;
-        rtl2832u
-            .set_if_frequency(
-                r82xx::DEFAULT_IF_FREQUENCY as f32,
-                rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32,
-            )
-            .await?;
-        rtl2832u.enable_spectrum_inversion(true).await?;
+            rtl2832u.set_if_mode(IfMode::If).await?;
+            rtl2832u
+                .set_if_frequency(
+                    r82xx::DEFAULT_IF_FREQUENCY as f32,
+                    rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32,
+                )
+                .await?;
+            rtl2832u.enable_spectrum_inversion(true).await?;
+        }
 
         let sample_rate = rtl2832u.get_sample_rate(rtl_crystal_frequency).await?;
         tracing::debug!(?sample_rate, "initial sample rate");
