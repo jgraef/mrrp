@@ -94,7 +94,7 @@ pub async fn dump_regs(
     };
 
     for page in demod {
-        if page > 4 {
+        if page & 0xf0 != 0 {
             bail!("Invalid demod page: {page}");
         }
         dump_block(reg::Block::Demod { page }).await?;

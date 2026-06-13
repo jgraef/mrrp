@@ -264,7 +264,9 @@ async fn handle_data(
             else {
                 tracing::debug!("no receivers left");
                 // no receivers left. drop reader
-                reader_opt = None;
+                if let Some(reader) = reader_opt.take() {
+                    reader.close().await?;
+                }
             }
         }
         else {

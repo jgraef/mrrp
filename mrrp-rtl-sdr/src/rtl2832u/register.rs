@@ -96,7 +96,7 @@ impl Block {
     pub fn with_address(&self, address: u16) -> Register {
         match self {
             Block::Demod { page } => {
-                if *page > 4 {
+                if *page & 0xf0 != 0 {
                     panic!("Invalid demod page: {page}");
                 }
 
@@ -217,7 +217,7 @@ impl Register {
     pub fn w_index(&self, write: bool) -> u16 {
         let mut w_index = match self {
             Register::Demod { page, address: _ } => {
-                assert!(*page <= 4);
+                assert_eq!(*page & 0xf0, 0);
                 u16::from(*page)
             }
             Register::Usb { address: _ } => 0x0100,

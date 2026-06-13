@@ -15,6 +15,7 @@ use std::{
         Path,
         PathBuf,
     },
+    sync::OnceLock,
     time::{
         Duration,
         Instant,
@@ -101,6 +102,7 @@ async fn main() -> Result<(), Error> {
 
             if demod.is_empty() && !usb && !system && !tuner && !rom && !tuner_i2c {
                 // all
+                // todo: also dump undocumented demod pages
                 demod.extend(0..5);
                 usb = true;
                 system = true;
@@ -166,10 +168,14 @@ async fn main() -> Result<(), Error> {
             stream,
             sample_rate,
             center_frequency,
+            test_hop,
         } => {
             let mut device = open_device(serial.as_deref()).await?;
 
+            tracing::info!(?sample_rate, "Setting sample rate");
             device.set_sample_rate(sample_rate).await?;
+
+            tracing::info!(?center_frequency, "Setting center frequency");
             device.set_center_frequency(center_frequency).await?;
 
             if stream {
@@ -183,69 +189,87 @@ async fn main() -> Result<(), Error> {
                 let mut samples_per_second: Option<SamplesPerSecond> = None;
                 const MEASUREMENT_INVERVAL: Duration = Duration::from_secs(1);
 
-                run_til_shutdown(async {
-                    loop {
-                        match reader.fill_buf().await {
-                            Ok(buffer) => {
-                                let buffer_len = buffer.len();
-                                if buffer_len % 2 != 0 {
-                                    tracing::warn!(
-                                        buffer_len,
-                                        "Returned sample buffer's length is not a multiple of 2"
-                                    );
-                                }
-
-                                let now = Instant::now();
-                                let sample_count = buffer.len() / 2;
-
-                                if let Some(samples_per_second) = &mut samples_per_second {
-                                    samples_per_second.sample_count += sample_count;
-                                    let interval = now - samples_per_second.start_time;
-
-                                    if interval > MEASUREMENT_INVERVAL {
-                                        let sps = samples_per_second.sample_count as f32
-                                            / interval.as_secs_f32();
-                                        tracing::debug!(
-                                            "Samples per second: {:.3} MSa/s",
-                                            sps / 1000000.0
+                let stream_task = tokio::spawn(async move {
+                    run_til_shutdown(async {
+                        loop {
+                            match reader.fill_buf().await {
+                                Ok(buffer) => {
+                                    let buffer_len = buffer.len();
+                                    if buffer_len % 2 != 0 {
+                                        tracing::warn!(
+                                            buffer_len,
+                                            "Returned sample buffer's length is not a multiple of 2"
                                         );
-
-                                        // reset measurement
-                                        samples_per_second.start_time = now;
-                                        samples_per_second.sample_count = 0;
                                     }
+
+                                    let now = Instant::now();
+                                    let sample_count = buffer.len() / 2;
+
+                                    if let Some(samples_per_second) = &mut samples_per_second {
+                                        samples_per_second.sample_count += sample_count;
+                                        let interval = now - samples_per_second.start_time;
+
+                                        if interval > MEASUREMENT_INVERVAL {
+                                            let sps = samples_per_second.sample_count as f32
+                                                / interval.as_secs_f32();
+                                            tracing::info!(
+                                                "Samples per second: {:.3} MSa/s",
+                                                sps / 1000000.0
+                                            );
+
+                                            // reset measurement
+                                            samples_per_second.start_time = now;
+                                            samples_per_second.sample_count = 0;
+                                        }
+                                    }
+                                    else {
+                                        samples_per_second = Some(SamplesPerSecond {
+                                            start_time: now,
+                                            sample_count,
+                                        });
+                                    }
+
+                                    /*for k in 0..n {
+                                        // not exactly right but close enough
+                                        let _i = ((buffer[k * 2] as f32) - 128.0) / 255.0;
+                                        let _q = ((buffer[k * 2 + 1] as f32) - 128.0) / 255.0;
+
+                                        //println!("{i:.04}+{q:.04}i, ");
+                                    }*/
+
+                                    reader.consume(buffer_len);
                                 }
-                                else {
-                                    samples_per_second = Some(SamplesPerSecond {
-                                        start_time: now,
-                                        sample_count,
-                                    });
+                                Err(error) => {
+                                    if error.kind() == std::io::ErrorKind::UnexpectedEof {
+                                        tracing::warn!("reader eof");
+                                    }
+                                    else {
+                                        tracing::warn!(%error, "reader error");
+                                    };
+
+                                    break;
                                 }
-
-                                /*for k in 0..n {
-                                    // not exactly right but close enough
-                                    let _i = ((buffer[k * 2] as f32) - 128.0) / 255.0;
-                                    let _q = ((buffer[k * 2 + 1] as f32) - 128.0) / 255.0;
-
-                                    //println!("{i:.04}+{q:.04}i, ");
-                                }*/
-
-                                reader.consume(buffer_len);
-                            }
-                            Err(error) => {
-                                if error.kind() == std::io::ErrorKind::UnexpectedEof {
-                                    tracing::warn!("reader eof");
-                                }
-                                else {
-                                    tracing::warn!(%error, "reader error");
-                                };
-
-                                break;
                             }
                         }
-                    }
-                })
-                .await;
+                    })
+                    .await;
+
+                    tracing::info!("Closing reader");
+                    reader.close().await?;
+
+                    Ok::<(), Error>(())
+                });
+
+                if test_hop {
+                    // test to change center frequnecy after a while
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+                    let new_center_frequency = center_frequency + 400_000.0;
+                    tracing::info!("Changing center frequency to {new_center_frequency}");
+                    device.set_center_frequency(new_center_frequency).await?;
+                }
+
+                // wait for stream task to finish
+                stream_task.await??;
             }
 
             device.close().await?;
@@ -421,6 +445,9 @@ enum Command {
 
         #[clap(short, long)]
         stream: bool,
+
+        #[clap(long)]
+        test_hop: bool,
     },
     Tcp {
         #[clap(short, long)]
@@ -447,23 +474,28 @@ enum Command {
 }
 
 fn shutdown_signal() -> CancellationToken {
-    let cancellation_token = CancellationToken::new();
+    static ONCE: OnceLock<CancellationToken> = OnceLock::new();
 
-    // todo: sigterm, etc.
+    ONCE.get_or_init(|| {
+        let cancellation_token = CancellationToken::new();
 
-    tokio::spawn({
-        let cancellation_token = cancellation_token.clone();
-        async move {
-            if let Err(error) = tokio::signal::ctrl_c().await {
-                tracing::error!(%error, "Ctrl-C signal returned an error");
+        // todo: sigterm, etc.
+
+        tokio::spawn({
+            let cancellation_token = cancellation_token.clone();
+            async move {
+                if let Err(error) = tokio::signal::ctrl_c().await {
+                    tracing::error!(%error, "Ctrl-C signal returned an error");
+                }
+
+                tracing::info!("Received Ctrl-C. Shutting down.");
+                cancellation_token.cancel();
             }
+        });
 
-            tracing::info!("Received Ctrl-C. Shutting down.");
-            cancellation_token.cancel();
-        }
-    });
-
-    cancellation_token
+        cancellation_token
+    })
+    .clone()
 }
 
 async fn run_til_shutdown<R>(fut: impl Future<Output = R>) -> Option<R> {

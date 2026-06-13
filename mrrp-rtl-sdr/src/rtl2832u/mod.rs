@@ -183,6 +183,21 @@ impl Rtl2832u {
                 |error| tracing::error!(%error, ?address, ?length, "USB error during read"),
             )?;
 
+        /*if matches!(address.block(), Block::Demod { page: _ }) {
+            // this is a weird thing that librtlsdr does. we couldn't find out any reason
+            // behind this, and didn't even know pages beyond 4 worked.
+            let _response_data = self
+                .usb_interface
+                .control_in(
+                    Register::demod(0x0a, 0x01).control_in(1),
+                    self.control_timeout,
+                )
+                .await
+                .inspect_err(
+                    |error| tracing::error!(%error, ?address, ?length, "USB error during read - from demod page 0x0a, address 0x01"),
+                )?;
+        }*/
+
         if response_data.len() != response_data.len() {
             return Err(Error::InvalidControlResponse {
                 expected_length: length,
@@ -390,7 +405,7 @@ impl Rtl2832u {
         // the linux driver clears bits 2 and 3 at startup, but doesn't use it
         // otherwise.
         //
-        //self.write_register(reg::sys::DEMOD_CTL_1(0x22)).await?;
+        self.write_register(reg::sys::DEMOD_CTL_1(0x22)).await?;
 
         // demod PLL enable, release reset, ADC_I enable, ADC_Q enable
         //
@@ -536,8 +551,11 @@ impl Rtl2832u {
             // enable actually determines if the demod chip is powered.
 
             // disable demod PLL, ADC I and Q
-            self.write_register_with::<reg::sys::DEMOD_CTL>(|demod_ctl| {
-                demod_ctl.set_hardware_reset(true);
+            self.write_register_update::<reg::sys::DEMOD_CTL>(|demod_ctl| {
+                //demod_ctl.set_hardware_reset(true);
+                demod_ctl.set_pll_enable(false);
+                demod_ctl.set_adc_i_enable(false);
+                demod_ctl.set_adc_q_enable(false);
             })
             .await?;
         }
@@ -588,11 +606,24 @@ impl Rtl2832u {
         // enable in-phase ADC input
         //
         // this has not been touched before, but we know the lower nibble has to be
-        // 0xd. should be use `write_register_update` anyway? would be nice if
+        // 0xd. should we use `write_register_update` anyway? would be nice if
         // we knew what that lower nibble actually encodes.
         self.write_register_with::<reg::demod::ADC_ENABLE>(|adc_enable| {
-            adc_enable.set_en_i(true);
-            adc_enable.set_en_q(is_zero_if);
+            // librtlsdr comments:
+            //
+            // ```c
+            // /* only enable In-phase ADC input */
+            // rtlsdr_demod_write_reg(dev, 0, 0x08, 0x4d, 1);
+            // ```
+            //
+            // but they have bit 6 (ad_en_reg1, adc_q) on, and bit 7 (and_en_reg, adc_i)
+            // off. this corresponds to that the datasheet says should be set
+            // for IF mode. so their comment is just wrong.
+            //
+            // tl;dr: turn ADC I branch only on for zero-if.
+            //
+            adc_enable.set_en_q(true);
+            adc_enable.set_en_i(is_zero_if);
 
             // idk what this is. it's this at startup and librtlsdr sets this, whenever they
             // toggle ADC inputs
@@ -664,7 +695,7 @@ impl Rtl2832u {
         let changed = self
             .write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|register| {
                 // mask off the lower 2 bits, see [`rsamp_ratio_to_hz`].
-                register.set_rsamp_ratio(rsamp_ratio & !3);
+                register.set_rsamp_ratio(rsamp_ratio & !0b11);
             })
             .await?;
 
@@ -799,7 +830,6 @@ mod tests {
         FirFilter,
         pset_iffreq_from_hz,
         rsamp_ratio_from_hz,
-        rsamp_ratio_to_hz,
     };
 
     #[test]

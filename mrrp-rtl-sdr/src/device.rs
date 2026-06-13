@@ -33,6 +33,7 @@ use crate::{
         IfMode,
         Rtl2832u,
         filter::FirFilter,
+        register as reg,
     },
     tuner::{
         AnyTuner,
@@ -78,7 +79,11 @@ pub struct Device {
     /// RTL2832U.
     rtl_crystal_frequency: f32,
 
+    /// The current sample rate
     sample_rate: f32,
+
+    /// The current center frequency
+    center_frequency: Option<f32>,
 }
 
 impl Device {
@@ -143,6 +148,7 @@ impl Device {
             frequency_correction: 0,
             rtl_crystal_frequency,
             sample_rate,
+            center_frequency: None,
         })
     }
 
@@ -165,6 +171,16 @@ impl Device {
     #[inline(always)]
     pub fn device_info(&self) -> &DeviceInfo {
         &self.device_info
+    }
+
+    #[inline(always)]
+    pub fn sample_rate(&self) -> f32 {
+        self.sample_rate
+    }
+
+    #[inline(always)]
+    pub fn center_frequency(&self) -> Option<f32> {
+        self.center_frequency
     }
 
     /// todo: pub for testing only
@@ -215,37 +231,43 @@ impl Device {
 
         let inner = &mut *self.inner.lock().await;
 
-        // librtlsdr sets the "exact" sample rate here. We think they basically convert
-        // from the encoded value back to Hz. But they also do some bit-manipulation.
-        {
-            let mut i2c_repeater_guard = inner.rtl2832u.enable_i2c_repeater().await?;
-            inner
-                .tuner
-                .set_bandwidth(&mut *i2c_repeater_guard, sample_rate)
-                .await?;
-            i2c_repeater_guard.disable().await?;
-        }
-
-        // todo: in `r820t_set_bw` this also sets the if_freq.
-        // it also calls `rtlsdr_set_center_freq`, which basically just calls
-        // `rtlsdr_set_if_freq` (direct sampling) or `tuner->set_if_freq`
-
+        // set rtl2832u's sample rate.
+        //
+        // this returns the sample rate that we actually get.
         let actual_sample_rate = inner
             .rtl2832u
             .set_sample_rate(sample_rate as f32, self.rtl_crystal_frequency)
             .await?;
+        tracing::debug!(?actual_sample_rate);
 
-        // set if frequency, because tuner can change this when changing bandwidth.
+        {
+            let mut i2c_repeater_guard = inner.rtl2832u.enable_i2c_repeater().await?;
+
+            // configure tuner for the actual sample rate we have.
+            inner
+                .tuner
+                .set_bandwidth(&mut *i2c_repeater_guard, actual_sample_rate)
+                .await?;
+
+            // after changing the tuner bandwidth, its if frequency changes, which means
+            // we're not tuned correctly anymore.
+            if let Some(center_frequency) = self.center_frequency {
+                inner
+                    .tuner
+                    .set_center_frequency(&mut *&mut i2c_repeater_guard, center_frequency)
+                    .await?;
+            }
+
+            i2c_repeater_guard.disable().await?;
+        }
+
+        // set rtl2832u's if frequency, because tuner can change this when changing
+        // bandwidth.
         inner.configure_if().await?;
 
-        tracing::debug!(?actual_sample_rate);
         self.sample_rate = actual_sample_rate;
 
         Ok(())
-    }
-
-    pub fn sample_rate(&self) -> f32 {
-        self.sample_rate
     }
 
     pub async fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
@@ -265,6 +287,8 @@ impl Device {
             i2c_repeater_guard.disable().await?;
         }
 
+        self.center_frequency = Some(center_frequency);
+
         Ok(())
     }
 }
@@ -273,6 +297,8 @@ impl Drop for Device {
     fn drop(&mut self) {
         if self.reset_on_drop {
             tracing::warn!("Device dropped without closing. Attempting to reset the device.");
+
+            self.reset_on_drop = false;
 
             let inner = self.inner.clone();
 
@@ -358,6 +384,8 @@ impl AsyncBufRead for Reader {
 impl Drop for Reader {
     fn drop(&mut self) {
         if self.stop_on_drop {
+            self.stop_on_drop = false;
+
             let inner = self.inner.clone();
             tokio::spawn(async move {
                 let mut inner = inner.lock().await;
@@ -379,22 +407,55 @@ pub struct Inner {
 
 impl Inner {
     async fn reset(&mut self) -> Result<(), Error> {
-        /*
-        todo: does this help? we always get an error when shutting down the r828d, when we're actually streaming data.
+        // We have an issue that the I2C bus is sometimes unreliable here and either
+        // enabling the I2C repeater, or some I2C commands will fail with "device
+        // stalled".
+        //
+        // ```log
+        // 2026-06-12T14:48:46.711135Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: setting R828D to standby
+        // 2026-06-12T14:48:46.711154Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: flushing registers
+        // modified: [0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0c, 0x11, 0x17, 0x19]
+        // Length: 32 (0x20) bytes
+        // 0000:   00 00 00 00  00 a0 b1 3a  40 c0 36 8f  35 53 75 68   .......:@.6.5Suh
+        // 0010:   8c 03 06 31  84 72 1c f4  48 0c 68 00  24 dd 6e 40   ...1.r..H.h.$.n@
+        // 2026-06-12T14:48:46.711180Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: write registers run=5..11 command=[5, 160, 177, 58, 64, 192, 54]
+        // 2026-06-12T14:48:46.711193Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u::i2c: writing I2C i2c_address=I2cAddress(0x74) data=[5, 160, 177, 58, 64, 192, 54]
+        // 2026-06-12T14:48:46.713900Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: write registers run=12..13 command=[12, 53]
+        // 2026-06-12T14:48:46.713932Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u::i2c: writing I2C i2c_address=I2cAddress(0x74) data=[12, 53]
+        // 2026-06-12T14:48:46.715615Z ERROR handle_commands: mrrp_rtl_sdr::rtl2832u: USB error during write error=endpoint stalled address=I2c { i2c_address: I2cAddress(0x74) } data=[12, 53]
+        // ```
+        //
+        // This occurred only with the server, not stream-test. We don't know exactly
+        // why.
+        //
+        // Another suspected reason is interference on the I2C bus while sampling. The
+        // information in the datasheet is really not enough to know what kind of
+        // interference is to be expected. The go implementation hints that it might be
+        // interference during sampling.
+        //
+        // Disabling ADCs before shutting down the tuner seems to solve the issue.
+        //
+        // The question that remains: Do we also need to keep this in mind when we
+        // otherwise talk to the tuner via I2C? For example when we set bandwidth or
+        // frequency?
+        //
+        // This does indeed seem to be an issue:
+        //
+        // ```log
+        // 2026-06-13T13:05:06.487934Z DEBUG handle_commands: mrrp_rtl_sdr_test::server: handling command command=SetCenterFrequency { frequency: 99502000 }
+        // 2026-06-13T13:05:06.487958Z DEBUG handle_commands: mrrp_rtl_sdr::device: setting center frequency center_frequency=99502000.0
+        // 2026-06-13T13:05:06.487984Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u: writing register address=Demod { page: 1, address: 0x01 } value=SOFT_RST_IIC_REPEAT { .0: 24, soft_rst: false, iic_repeat: true }
+        // 2026-06-13T13:05:06.489708Z ERROR handle_commands: mrrp_rtl_sdr::rtl2832u: USB error during write error=endpoint stalled address=Demod { page: 1, address: 0x01 } data=[24]
+        // 2026-06-13T13:05:06.489815Z ERROR connection{address=127.0.0.1:33916}: mrrp_rtl_tcp::server: error=Handler(endpoint stalled)
+        // ```
 
-        2026-06-12T14:48:46.711135Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: setting R828D to standby
-        2026-06-12T14:48:46.711154Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: flushing registers
-        modified: [0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0c, 0x11, 0x17, 0x19]
-        Length: 32 (0x20) bytes
-        0000:   00 00 00 00  00 a0 b1 3a  40 c0 36 8f  35 53 75 68   .......:@.6.5Suh
-        0010:   8c 03 06 31  84 72 1c f4  48 0c 68 00  24 dd 6e 40   ...1.r..H.h.$.n@
-        2026-06-12T14:48:46.711180Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: write registers run=5..11 command=[5, 160, 177, 58, 64, 192, 54]
-        2026-06-12T14:48:46.711193Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u::i2c: writing I2C i2c_address=I2cAddress(0x74) data=[5, 160, 177, 58, 64, 192, 54]
-        2026-06-12T14:48:46.713900Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: write registers run=12..13 command=[12, 53]
-        2026-06-12T14:48:46.713932Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u::i2c: writing I2C i2c_address=I2cAddress(0x74) data=[12, 53]
-        2026-06-12T14:48:46.715615Z ERROR handle_commands: mrrp_rtl_sdr::rtl2832u: USB error during write error=endpoint stalled address=I2c { i2c_address: I2cAddress(0x74) } data=[12, 53]
-        */
-        self.rtl2832u.stop_epa().await?;
+        // disable ADC I and Q
+        self.rtl2832u
+            .write_register_update::<reg::sys::DEMOD_CTL>(|demod_ctl| {
+                demod_ctl.set_adc_i_enable(false);
+                demod_ctl.set_adc_q_enable(false);
+            })
+            .await?;
 
         // reset tuner
         let mut i2c_repeater_guard = self.rtl2832u.enable_i2c_repeater().await?;

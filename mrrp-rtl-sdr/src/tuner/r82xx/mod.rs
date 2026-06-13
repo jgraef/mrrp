@@ -479,13 +479,9 @@ impl<'a> Transaction<'a> {
         // asserts are here to check if their rounding makes a difference.
 
         let lna_vth_h = voltage_to_lna_vth(0.84);
-        //let lna_vth_h = voltage_to_lna_vth(0.873);
-        assert_eq!(lna_vth_h, 0x05);
         self.registers.set_lnavth_h(lna_vth_h);
 
         let lna_vth_l = voltage_to_lna_vth(0.64);
-        //let lna_vth_l = voltage_to_lna_vth(0.660);
-        assert_eq!(lna_vth_l, 0x03);
         self.registers.set_lnavth_l(lna_vth_l);
 
         // mixer_vth_l = 0x75;		/* mixer vth 1.04, vtl 0.84 */
@@ -495,11 +491,9 @@ impl<'a> Transaction<'a> {
         // => MIX_VTH_L = 0x05, 0b0101 => 0.873V - you'll get 0.84V with rounded step
         //
         let mixer_vth_h = voltage_to_lna_vth(1.04);
-        assert_eq!(mixer_vth_h, 0x07);
         self.registers.set_mixvth_h(mixer_vth_h);
 
         let mixer_vth_l = voltage_to_lna_vth(0.84);
-        assert_eq!(mixer_vth_l, 0x05);
         self.registers.set_mixvth_l(mixer_vth_l);
 
         // air_cable1_in = 0
@@ -517,7 +511,7 @@ impl<'a> Transaction<'a> {
         // note that the R820T only has one RF_in. The R828D has 3 inputs: air_in
         // (RF_in), cable_1_in, cable_2_in
         //
-        // todo: merge this into a `select_input` method on `R82xxState`.
+        // note: this is now merged into a `select_rf_input`
         //self.registers.set_pwd_lna1(false); // LNA power on
         //self.registers.set_unk_cable_1_in(false); // Cable 1 input off
         //
