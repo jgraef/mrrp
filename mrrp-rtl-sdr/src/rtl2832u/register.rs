@@ -70,7 +70,18 @@ impl Block {
             Block::Demod { page: _ } => None,
             Block::Usb => Some(0x2000),
             Block::System => Some(0x3000),
-            Block::Tuner => todo!("not in datasheet"),
+            Block::Tuner => {
+                // todo: we don't know the base address. if pattern recognition
+                // serves, this would be 0x4000. There is stuff there if you
+                // read 0x4000 via system block, but it's USB strings and we're
+                // unsure whether that's relevant for this block (we suspect
+                // that the block number doesn't do much when reading).
+                //
+                // so you could try to read this as an experiment, i guess.
+                //
+                // otherwise this is not used at all.
+                None
+            }
             Block::Rom => None,
             Block::I2c => None,
         }
@@ -828,6 +839,13 @@ pub mod demod {
             /// MPEG_IO_OPT_1_0: 0, 0x07
             pub u8, mpeg_io_opt_1_0, set_mpeg_io_opt_1_0: 7, 6;
         };
+        /// ADC enable flags
+        ///
+        /// Demod, page 0, offset 0x08
+        ///
+        /// The two known bits here enable I and Q ADCs
+        ///
+        /// The lower 4 bits here are 0xd. they're this at startup, and librtlsdr always keeps them that way when toggling ADC inputs.
         ADC_ENABLE: u8 = demod(0, 0x08) shadow {
             /// AD_EN_REG1: 0, 0x08
             ///
@@ -838,7 +856,7 @@ pub mod demod {
             /// Enable ADC_I
             pub bool, en_i, set_en_i: 7;
 
-            // note the lower 4 bits here are 0xd. they're this at startup, and librtlsdr always keeps them that way when toggling ADC inputs.
+
         };
         AD_AVI_AD_AVQ_AD_AV_REF: u8 = demod(0, 0x09) {
             /// AD_AVI: 0, 0x09
@@ -1222,7 +1240,11 @@ pub mod demod {
         /// };
         /// ```
         ///
-        /// The endianess is unknown. If it's big-endian then the value we need to set is 0xf00f. Otherwise it's 0x0ff0.
+        /// The endianess is unknown. If it's big-endian then the value we need to set is 0xf00f. Otherwise it's 0x0ff0. We choose to interpret it as big-endian for now.
+        ///
+        /// When we had this misconfigured as 0x0ff0 by accident, we didn't get any
+        /// data out. but the EPA reader still worked. so it's likely related to the
+        /// packet filter.
         UNK_FSM: u16 as BigEndian = demod(1, 0x93);
 
         MGD_THD0: u8 = demod(1, 0x95) {

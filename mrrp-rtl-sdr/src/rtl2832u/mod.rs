@@ -304,7 +304,7 @@ impl Rtl2832u {
     /// ```
     /// # use mrrp_rtl_sdr::rtl2832u::{Rtl2832u, Error, register::sys::DEMOD_CTL};
     /// # async fn example() -> Result<(), Error> {
-    /// # let rtl2832u: Rtl2832u = todo!();
+    /// # let rtl2832u: Rtl2832u = panic!("we can't have a proper device in example code");
     /// rtl2832u
     ///     .write_register_with::<DEMOD_CTL>(|demod_ctl| {
     ///         demod_ctl.set_pll_enable(true);
@@ -588,7 +588,7 @@ impl Rtl2832u {
         // enable in-phase ADC input
         //
         // this has not been touched before, but we know the lower nibble has to be
-        // 0x0d. should be use `write_register_update` anyway? would be nice if
+        // 0xd. should be use `write_register_update` anyway? would be nice if
         // we knew what that lower nibble actually encodes.
         self.write_register_with::<reg::demod::ADC_ENABLE>(|adc_enable| {
             adc_enable.set_en_i(true);
@@ -610,10 +610,10 @@ impl Rtl2832u {
     ) -> Result<(), Error> {
         let value = pset_iffreq_from_hz(frequency, crystal_frequency);
 
-        // todo: we made the pset_iffreq register 32bit for convenience, but there might
+        // note: we made the pset_iffreq register 32bit for convenience, but there might
         // be something important in the upper bits (DDC offset?). these bits
-        // are also not 0 at startup, so just to be sure, we'll to an update here and
-        // only change bits that we want changed.
+        // are also not 0 at startup, but we think DDC offset is to be initialized to 0
+        // anyway. either way, a proper update here will avoid bugs.
 
         self.write_register_update::<reg::demod::PSET_IFFREQ>(|pset_iffreq| {
             pset_iffreq.set_pset_iffreq(value);

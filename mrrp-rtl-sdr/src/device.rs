@@ -38,9 +38,9 @@ use crate::{
         AnyTuner,
         AnyTunerProbe,
         FallbackTunerProbe,
+        IfSetting,
         Tuner,
         TunerProbe,
-        r82xx,
     },
 };
 
@@ -115,28 +115,30 @@ impl Device {
 
         tracing::info!(tuner = tuner.name(), "found tuner");
 
-        {
-            // todo: this is specifically for R828D and Blog v4 for testing. it should be
-            // moved into the blog-specific tuner code
+        let mut inner = Inner { rtl2832u, tuner };
 
-            rtl2832u.set_if_mode(IfMode::If).await?;
-            rtl2832u
-                .set_if_frequency(
-                    r82xx::DEFAULT_IF_FREQUENCY as f32,
-                    rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32,
-                )
-                .await?;
-            rtl2832u.enable_spectrum_inversion(true).await?;
-        }
+        // initialize IF on rtl2832u
+        inner.configure_if().await?;
 
-        let sample_rate = rtl2832u.get_sample_rate(rtl_crystal_frequency).await?;
+        // get the initial sample rate
+        let sample_rate = inner
+            .rtl2832u
+            .get_sample_rate(rtl_crystal_frequency)
+            .await?;
         tracing::debug!(?sample_rate, "initial sample rate");
+
+        // todo: we can't really figure out the initial center frequency, because e.g.
+        // the R82xx doesn't let us read the relevant registers.
+        //
+        // we have considered writing the center frequency into unused rtl2832u's system
+        // memory memory. we would have to make sure that this memory is absolutely
+        // unused - which is hard, or impossible.
 
         Ok(Self {
             device_info,
             reset_on_drop: options.reset_on_drop,
             inner: SharedInner {
-                inner: Arc::new(Mutex::new(Inner { rtl2832u, tuner })),
+                inner: Arc::new(Mutex::new(inner)),
             },
             frequency_correction: 0,
             rtl_crystal_frequency,
@@ -211,13 +213,14 @@ impl Device {
     pub async fn set_sample_rate(&mut self, sample_rate: f32) -> Result<(), Error> {
         tracing::debug!(?sample_rate, "setting sample rate");
 
-        let Inner { rtl2832u, tuner } = &mut *self.inner.lock().await;
+        let inner = &mut *self.inner.lock().await;
 
         // librtlsdr sets the "exact" sample rate here. We think they basically convert
         // from the encoded value back to Hz. But they also do some bit-manipulation.
         {
-            let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
-            tuner
+            let mut i2c_repeater_guard = inner.rtl2832u.enable_i2c_repeater().await?;
+            inner
+                .tuner
                 .set_bandwidth(&mut *i2c_repeater_guard, sample_rate)
                 .await?;
             i2c_repeater_guard.disable().await?;
@@ -227,12 +230,15 @@ impl Device {
         // it also calls `rtlsdr_set_center_freq`, which basically just calls
         // `rtlsdr_set_if_freq` (direct sampling) or `tuner->set_if_freq`
 
-        let actual_sample_rate = rtl2832u
+        let actual_sample_rate = inner
+            .rtl2832u
             .set_sample_rate(sample_rate as f32, self.rtl_crystal_frequency)
             .await?;
 
-        tracing::debug!(?actual_sample_rate);
+        // set if frequency, because tuner can change this when changing bandwidth.
+        inner.configure_if().await?;
 
+        tracing::debug!(?actual_sample_rate);
         self.sample_rate = actual_sample_rate;
 
         Ok(())
@@ -258,12 +264,6 @@ impl Device {
 
             i2c_repeater_guard.disable().await?;
         }
-
-        // todo: set IF frequency/mode
-
-        //transaction.set_if_mode(if_mode).await?;
-
-        //transaction.set_if_frequency(if_frequency).await?;
 
         Ok(())
     }
@@ -403,6 +403,38 @@ impl Inner {
 
         // reset rtl2832u
         self.rtl2832u.reset(Default::default()).await?;
+
+        Ok(())
+    }
+
+    async fn configure_if(&mut self) -> Result<(), Error> {
+        let if_setting = self.tuner.if_setting();
+
+        tracing::debug!(?if_setting, "setting IF");
+
+        match if_setting {
+            IfSetting::ZeroIf => {
+                self.rtl2832u.set_if_mode(IfMode::ZeroIf).await?;
+
+                // todo: do we have to set the IF frequency or spectrum
+                // inversion here? probably not the IF frequency, but maybe the
+                // spectrum can still be inverted?
+            }
+            IfSetting::If {
+                frequency,
+                invert_spectrum,
+            } => {
+                self.rtl2832u.set_if_mode(IfMode::If).await?;
+
+                self.rtl2832u
+                    .set_if_frequency(frequency, rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32)
+                    .await?;
+
+                self.rtl2832u
+                    .enable_spectrum_inversion(invert_spectrum)
+                    .await?;
+            }
+        }
 
         Ok(())
     }

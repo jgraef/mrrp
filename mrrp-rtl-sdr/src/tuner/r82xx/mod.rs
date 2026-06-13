@@ -39,6 +39,7 @@ use crate::{
         i2c::I2cDevice,
     },
     tuner::{
+        IfSetting,
         Tuner,
         TunerError,
         TunerProbe,
@@ -865,22 +866,26 @@ impl<'a> Transaction<'a> {
 
         self.shutdown_ours();
 
-        let mut any_difference = false;
-        for (i, expected) in SHUTDOWN_REGITSERS.iter().copied() {
-            if self.registers[i] != expected {
-                println!(
-                    "Register 0x{i:02x} differs:\n  expected: 0x{:02x}\n  provided: 0x{:02x}",
-                    expected, self.registers[i]
-                );
-                any_difference = true;
+        {
+            // todo: the dongle gets funky when standby is not done right. but it seems to
+            // work pretty well now. we'll leave this here for a while
+
+            let mut any_difference = false;
+            for (i, expected) in SHUTDOWN_REGITSERS.iter().copied() {
+                if self.registers[i] != expected {
+                    println!(
+                        "Register 0x{i:02x} differs:\n  expected: 0x{:02x}\n  provided: 0x{:02x}",
+                        expected, self.registers[i]
+                    );
+                    any_difference = true;
+                }
+            }
+
+            if any_difference {
+                tracing::warn!("FIXME: Shutdown incomplete. Running hard-coded shutdown sequence.");
+                self.shutdown_librtlsdr();
             }
         }
-
-        if any_difference {
-            todo!("shutdown incomplete");
-        }
-
-        //self.shutdown_librtlsdr();
     }
 
     #[allow(dead_code)]
@@ -1031,10 +1036,14 @@ impl Tuner for R82xx {
     ) -> Result<(), Self::Error> {
         let mut transaction = self.begin_transaction(rtl2832u);
         transaction.set_center_frequency(center_frequency)?;
+        transaction.commit().await
+    }
 
-        // todo
-        //transaction.commit().await
-        Ok(())
+    fn if_setting(&self) -> IfSetting {
+        IfSetting::If {
+            frequency: self.if_frequency,
+            invert_spectrum: true,
+        }
     }
 
     async fn shutdown<'a>(&mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {

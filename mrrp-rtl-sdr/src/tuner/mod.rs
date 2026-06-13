@@ -8,7 +8,10 @@ use std::{
 
 use futures_util::TryFutureExt;
 
-use crate::rtl2832u::Rtl2832u;
+use crate::rtl2832u::{
+    IfMode,
+    Rtl2832u,
+};
 
 pub trait TunerError: std::error::Error + Send + Sync + Sized + 'static {}
 
@@ -45,6 +48,8 @@ pub trait Tuner: Debug + Sized + Send + Sync + 'static {
         rtl2832u: &'a mut Rtl2832u,
         center_frequency: f32,
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
+
+    fn if_setting(&self) -> IfSetting;
 
     fn shutdown<'a>(
         &'a mut self,
@@ -170,6 +175,8 @@ trait AnyTunerTrait: Debug + Send + Sync + 'static {
         center_frequency: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
 
+    fn if_setting(&self) -> IfSetting;
+
     fn shutdown<'a>(
         &'a mut self,
         rtl2832u: &'a mut Rtl2832u,
@@ -201,6 +208,10 @@ where
             Tuner::set_center_frequency(self, rtl2832u, center_frequency)
                 .map_err(AnyTunerError::new),
         )
+    }
+
+    fn if_setting(&self) -> IfSetting {
+        Tuner::if_setting(self)
     }
 
     fn shutdown<'a>(
@@ -248,6 +259,10 @@ impl Tuner for AnyTuner {
         self.0.set_center_frequency(rtl2832u, center_frequency)
     }
 
+    fn if_setting(&self) -> IfSetting {
+        self.0.if_setting()
+    }
+
     fn shutdown<'a>(
         &'a mut self,
         rtl2832u: &'a mut Rtl2832u,
@@ -284,6 +299,10 @@ impl Tuner for NullTuner {
         Ok(())
     }
 
+    fn if_setting(&self) -> IfSetting {
+        IfSetting::ZeroIf
+    }
+
     async fn shutdown<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
         let _ = rtl2832u;
         Ok(())
@@ -300,5 +319,31 @@ impl TunerProbe for NullTuner {
     ) -> impl Future<Output = Result<Option<Self::Tuner>, Self::Error>> + Send + 'a {
         let _ = rtl2832u;
         std::future::ready(Ok(Some(Self)))
+    }
+}
+
+/// If configuration of a tuner that is needed to configure the [`Rtl2832u`].
+///
+/// # TODO
+///
+/// - Does the [`ZeroIf`](Self::ZeroIf) need a variant specifying whether to
+///   pick I or Q? The RTL2832U might expect this on the Q channel, but we can
+///   swap them.
+/// - Do we want the [`If`](Self::If) variant to be able to swap I and Q?
+#[derive(Clone, Copy, Debug)]
+pub enum IfSetting {
+    ZeroIf,
+    If {
+        frequency: f32,
+        invert_spectrum: bool,
+    },
+}
+
+impl IfSetting {
+    pub fn if_mode(&self) -> IfMode {
+        match self {
+            IfSetting::ZeroIf => IfMode::ZeroIf,
+            IfSetting::If { .. } => IfMode::If,
+        }
     }
 }

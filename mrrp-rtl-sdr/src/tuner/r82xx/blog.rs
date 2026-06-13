@@ -47,6 +47,7 @@ use crate::{
         },
     },
     tuner::{
+        IfSetting,
         Tuner,
         TunerError,
         TunerProbe,
@@ -278,6 +279,10 @@ impl Tuner for BlogTuner {
         transaction.commit().await?;
 
         Ok(())
+    }
+
+    fn if_setting(&self) -> IfSetting {
+        self.r82xx.if_setting()
     }
 
     async fn shutdown<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
