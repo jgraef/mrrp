@@ -263,15 +263,22 @@ async fn main() -> Result<(), Error> {
                 if test_hop {
                     // test to change center frequnecy after a while
                     tokio::time::sleep(Duration::from_secs(5)).await;
+
                     let new_center_frequency = center_frequency + 400_000.0;
                     tracing::info!("Changing center frequency to {new_center_frequency}");
+
+                    let t_start = Instant::now();
                     device.set_center_frequency(new_center_frequency).await?;
+                    let dt = t_start.elapsed();
+
+                    tracing::info!("Changing frequency took {dt:?}");
                 }
 
                 // wait for stream task to finish
                 stream_task.await??;
             }
 
+            tracing::info!("Closing device");
             device.close().await?;
         }
         Command::Tcp {

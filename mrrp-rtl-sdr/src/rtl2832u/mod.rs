@@ -183,21 +183,6 @@ impl Rtl2832u {
                 |error| tracing::error!(%error, ?address, ?length, "USB error during read"),
             )?;
 
-        /*if matches!(address.block(), Block::Demod { page: _ }) {
-            // this is a weird thing that librtlsdr does. we couldn't find out any reason
-            // behind this, and didn't even know pages beyond 4 worked.
-            let _response_data = self
-                .usb_interface
-                .control_in(
-                    Register::demod(0x0a, 0x01).control_in(1),
-                    self.control_timeout,
-                )
-                .await
-                .inspect_err(
-                    |error| tracing::error!(%error, ?address, ?length, "USB error during read - from demod page 0x0a, address 0x01"),
-                )?;
-        }*/
-
         if response_data.len() != response_data.len() {
             return Err(Error::InvalidControlResponse {
                 expected_length: length,
@@ -405,7 +390,7 @@ impl Rtl2832u {
         // the linux driver clears bits 2 and 3 at startup, but doesn't use it
         // otherwise.
         //
-        self.write_register(reg::sys::DEMOD_CTL_1(0x22)).await?;
+        //self.write_register(reg::sys::DEMOD_CTL_1(0x22)).await?;
 
         // demod PLL enable, release reset, ADC_I enable, ADC_Q enable
         //

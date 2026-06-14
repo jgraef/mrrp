@@ -33,7 +33,6 @@ use crate::{
         IfMode,
         Rtl2832u,
         filter::FirFilter,
-        register as reg,
     },
     tuner::{
         AnyTuner,
@@ -326,6 +325,10 @@ impl Drop for Device {
 /// by explicitely closing the reader via the [`close`](Self::close) method.
 /// Otherwise you can also disable this behavior via the
 /// [`disam_stop_on_drop`](Self::disarm_stop_on_drop) method.
+///
+/// # TODO
+///
+/// Should this map a device stalled error to EOF?
 #[derive(Debug)]
 pub struct Reader {
     epa_reader: EpaReader,
@@ -401,62 +404,12 @@ impl Drop for Reader {
 /// todo: pub only for testing
 #[derive(Debug)]
 pub struct Inner {
-    rtl2832u: Rtl2832u,
-    tuner: AnyTuner,
+    pub rtl2832u: Rtl2832u,
+    pub tuner: AnyTuner,
 }
 
 impl Inner {
     async fn reset(&mut self) -> Result<(), Error> {
-        // We have an issue that the I2C bus is sometimes unreliable here and either
-        // enabling the I2C repeater, or some I2C commands will fail with "device
-        // stalled".
-        //
-        // ```log
-        // 2026-06-12T14:48:46.711135Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: setting R828D to standby
-        // 2026-06-12T14:48:46.711154Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: flushing registers
-        // modified: [0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0c, 0x11, 0x17, 0x19]
-        // Length: 32 (0x20) bytes
-        // 0000:   00 00 00 00  00 a0 b1 3a  40 c0 36 8f  35 53 75 68   .......:@.6.5Suh
-        // 0010:   8c 03 06 31  84 72 1c f4  48 0c 68 00  24 dd 6e 40   ...1.r..H.h.$.n@
-        // 2026-06-12T14:48:46.711180Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: write registers run=5..11 command=[5, 160, 177, 58, 64, 192, 54]
-        // 2026-06-12T14:48:46.711193Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u::i2c: writing I2C i2c_address=I2cAddress(0x74) data=[5, 160, 177, 58, 64, 192, 54]
-        // 2026-06-12T14:48:46.713900Z DEBUG handle_commands: mrrp_rtl_sdr::tuner::r82xx: write registers run=12..13 command=[12, 53]
-        // 2026-06-12T14:48:46.713932Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u::i2c: writing I2C i2c_address=I2cAddress(0x74) data=[12, 53]
-        // 2026-06-12T14:48:46.715615Z ERROR handle_commands: mrrp_rtl_sdr::rtl2832u: USB error during write error=endpoint stalled address=I2c { i2c_address: I2cAddress(0x74) } data=[12, 53]
-        // ```
-        //
-        // This occurred only with the server, not stream-test. We don't know exactly
-        // why.
-        //
-        // Another suspected reason is interference on the I2C bus while sampling. The
-        // information in the datasheet is really not enough to know what kind of
-        // interference is to be expected. The go implementation hints that it might be
-        // interference during sampling.
-        //
-        // Disabling ADCs before shutting down the tuner seems to solve the issue.
-        //
-        // The question that remains: Do we also need to keep this in mind when we
-        // otherwise talk to the tuner via I2C? For example when we set bandwidth or
-        // frequency?
-        //
-        // This does indeed seem to be an issue:
-        //
-        // ```log
-        // 2026-06-13T13:05:06.487934Z DEBUG handle_commands: mrrp_rtl_sdr_test::server: handling command command=SetCenterFrequency { frequency: 99502000 }
-        // 2026-06-13T13:05:06.487958Z DEBUG handle_commands: mrrp_rtl_sdr::device: setting center frequency center_frequency=99502000.0
-        // 2026-06-13T13:05:06.487984Z DEBUG handle_commands: mrrp_rtl_sdr::rtl2832u: writing register address=Demod { page: 1, address: 0x01 } value=SOFT_RST_IIC_REPEAT { .0: 24, soft_rst: false, iic_repeat: true }
-        // 2026-06-13T13:05:06.489708Z ERROR handle_commands: mrrp_rtl_sdr::rtl2832u: USB error during write error=endpoint stalled address=Demod { page: 1, address: 0x01 } data=[24]
-        // 2026-06-13T13:05:06.489815Z ERROR connection{address=127.0.0.1:33916}: mrrp_rtl_tcp::server: error=Handler(endpoint stalled)
-        // ```
-
-        // disable ADC I and Q
-        self.rtl2832u
-            .write_register_update::<reg::sys::DEMOD_CTL>(|demod_ctl| {
-                demod_ctl.set_adc_i_enable(false);
-                demod_ctl.set_adc_q_enable(false);
-            })
-            .await?;
-
         // reset tuner
         let mut i2c_repeater_guard = self.rtl2832u.enable_i2c_repeater().await?;
         self.tuner.shutdown(&mut *i2c_repeater_guard).await?;

@@ -31,6 +31,7 @@ use crate::rtl2832u::{
     register::{
         Register,
         demod::SOFT_RST_IIC_REPEAT,
+        sys::DEMOD_CTL,
     },
 };
 
@@ -224,19 +225,57 @@ impl Rtl2832u {
     /// Enables the I2C repeater and returns a guard that allows you to disable
     /// it again.
     pub async fn enable_i2c_repeater(&mut self) -> Result<I2cRepeaterGuard<'_>, Error> {
+        // this prevents interference between the ADCs and I2C
+        //
+        // we can't find where librtlsdr does this - they might just not do it. but we
+        // always had issues accessing the I2C bus until we tried this. The I2C repeater
+        // is supposed to be off for a reason, that is not well documented, but it might
+        // be that it interferes with the ADCs. When we don't do this, sometimes
+        // enabling the repeater fails. Other times a I2C write fails.
+        let restore_adc = self.read_register::<DEMOD_CTL>().await?;
+        self.write_register_update::<DEMOD_CTL>(|demod_ctl| {
+            demod_ctl.set_adc_i_enable(false);
+            demod_ctl.set_adc_q_enable(false);
+        })
+        .await?;
+
+        // we also tried toggling these off, but this doesn't seem to help
+        /*let current_adc_value = rtl2832u.read_register::<reg::demod::ADC_ENABLE>().await?;
+
+        rtl2832u
+            .write_register_update::<reg::demod::ADC_ENABLE>(|adc_enable| {
+                adc_enable.set_en_i(false);
+                adc_enable.set_en_q(false);
+            })
+            .await?;*/
+
         self.set_i2c_repeater(true).await?;
-        Ok(I2cRepeaterGuard { rtl2832u: self })
+        Ok(I2cRepeaterGuard {
+            rtl2832u: self,
+            restore_adc,
+        })
     }
 }
 
 #[derive(Debug)]
 pub struct I2cRepeaterGuard<'rtl> {
     rtl2832u: &'rtl mut Rtl2832u,
+
+    /// State of the `DEMOD_CTL` register that we have to restore when the I2C
+    /// repeater is disabled.
+    ///
+    /// Specifically we disable the ADC in this register and want to enable them
+    /// again, if they were on.
+    restore_adc: DEMOD_CTL,
 }
 
 impl<'rtl> I2cRepeaterGuard<'rtl> {
     pub async fn disable(self) -> Result<(), Error> {
         self.rtl2832u.set_i2c_repeater(false).await?;
+
+        // restore ADCs
+        self.rtl2832u.write_register(self.restore_adc).await?;
+
         Ok(())
     }
 }
