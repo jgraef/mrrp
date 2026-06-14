@@ -30,6 +30,7 @@ use crate::{
     rtl2832u::{
         EpaReader,
         IfMode,
+        ResetOptions,
         Rtl2832u,
         filter::FirFilter,
     },

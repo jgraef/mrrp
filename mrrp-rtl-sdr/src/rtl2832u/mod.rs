@@ -560,7 +560,11 @@ impl Rtl2832u {
             // reset state from datasheet
             self.write_register::<reg::sys::GPO>(0x18.into()).await?;
             self.write_register::<reg::sys::GPOE>(0x19.into()).await?;
-            self.write_register::<reg::sys::GPD>(0x0e.into()).await?;
+
+            // the datasheet says this resets to 0x0e on startup, but it's really 0x06
+            //
+            // that means pin 3 is reset to be an output.
+            self.write_register::<reg::sys::GPD>(0x06.into()).await?;
         }
 
         Ok(())
@@ -860,6 +864,11 @@ mod tests {
         assert_eq!(
             pset_iffreq_from_hz(1815000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             0x003b_f778
+        );
+
+        assert_eq!(
+            pset_iffreq_from_hz(3570000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            0x0038_1112
         );
     }
 

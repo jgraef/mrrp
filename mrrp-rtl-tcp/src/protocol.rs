@@ -344,3 +344,30 @@ impl Encoder<Header> for HeaderCodec {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        DongleInfo,
+        TunerType,
+        protocol::Header,
+    };
+
+    #[test]
+    fn header_encode() {
+        let mut buffer = vec![];
+        Header {
+            dongle_info: DongleInfo {
+                tuner_type: TunerType::R828D,
+                tuner_gain_count: 29,
+            },
+        }
+        .encode(&mut buffer);
+
+        // first 12 bytes captured from rtl_tcp: nc localhost 1234 | head -c 12
+        assert_eq!(
+            buffer,
+            &b"\x52\x54\x4c\x30\x00\x00\x00\x06\x00\x00\x00\x1d"[..]
+        );
+    }
+}

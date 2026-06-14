@@ -585,6 +585,52 @@ impl PllDivider {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PllAutoTuneClockRate {
+    Khz128,
+    Khz32,
+    Khz8,
+}
+
+impl PllAutoTuneClockRate {
+    pub const fn from_code(code: u8) -> Result<Self, InvalidPllAutoTuneClockRateCode> {
+        match code {
+            0b00 => Ok(Self::Khz128),
+            0b01 => Ok(Self::Khz32),
+            0b10 => Ok(Self::Khz8),
+            _ => Err(InvalidPllAutoTuneClockRateCode { code }),
+        }
+    }
+
+    pub const fn code(&self) -> u8 {
+        match self {
+            PllAutoTuneClockRate::Khz128 => 0b00,
+            PllAutoTuneClockRate::Khz32 => 0b01,
+            PllAutoTuneClockRate::Khz8 => 0b10,
+        }
+    }
+}
+
+impl From<PllAutoTuneClockRate> for u8 {
+    fn from(value: PllAutoTuneClockRate) -> Self {
+        value.code()
+    }
+}
+
+impl TryFrom<u8> for PllAutoTuneClockRate {
+    type Error = InvalidPllAutoTuneClockRateCode;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        Self::from_code(value)
+    }
+}
+
+#[derive(Clone, Copy, Debug, thiserror::Error)]
+#[error("Invalid PLL_AUTO_CLK code: 0x{code:02x}")]
+pub struct InvalidPllAutoTuneClockRateCode {
+    pub code: u8,
+}
+
 #[cfg(test)]
 mod tests {
     use crate::tuner::r82xx::{

@@ -272,10 +272,13 @@ async fn main() -> Result<(), Error> {
             device,
             listen_address,
             buffer_size,
+            log_dropped,
         } => {
             let device = device.open_device().await?;
             let tcp_listener = TcpListener::bind(listen_address).await?;
-            let server_handler = ServerHandler::new(device, buffer_size).await?;
+            let server_handler = ServerHandler::new(device, buffer_size)
+                .await?
+                .with_log_dropped(log_dropped);
             let server = RtlTcpServer::new(server_handler, tcp_listener)
                 .with_graceful_shutdown(shutdown_signal());
 
@@ -456,6 +459,9 @@ enum Command {
 
         #[clap(short, long, default_value = "65536")]
         buffer_size: usize,
+
+        #[clap(long)]
+        log_dropped: bool,
     },
     /// Dumps system memory.
     ///

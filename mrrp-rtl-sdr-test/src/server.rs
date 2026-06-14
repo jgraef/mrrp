@@ -29,6 +29,7 @@ pub struct ServerHandler {
     command_sender: mpsc::Sender<Command>,
     data_subscriber: ring_buffer::Subscriber<u8>,
     dongle_info: mrrp_rtl_tcp::DongleInfo,
+    log_dropped: bool,
 }
 
 impl ServerHandler {
@@ -39,7 +40,7 @@ impl ServerHandler {
         // todo
         let dongle_info = mrrp_rtl_tcp::DongleInfo {
             tuner_type: mrrp_rtl_tcp::TunerType::R828D,
-            tuner_gain_count: 10,
+            tuner_gain_count: 29,
         };
 
         let (command_sender, command_receiver) = mpsc::channel(64);
@@ -66,7 +67,13 @@ impl ServerHandler {
             command_sender,
             data_subscriber,
             dongle_info,
+            log_dropped: false,
         })
+    }
+
+    pub fn with_log_dropped(mut self, log_dropped: bool) -> Self {
+        self.log_dropped = log_dropped;
+        self
     }
 }
 
@@ -85,6 +92,7 @@ impl server::Handler for ServerHandler {
 
         let sample_stream = SampleStream {
             data_receiver: self.data_subscriber.subscribe(),
+            log_dropped: self.log_dropped,
         };
 
         Ok((command_handler, sample_stream, self.dongle_info))
@@ -134,6 +142,7 @@ pin_project! {
     pub struct SampleStream {
         #[pin]
         data_receiver: ring_buffer::Receiver<u8>,
+        log_dropped: bool,
     }
 }
 
@@ -144,10 +153,21 @@ impl server::SampleStream for SampleStream {
         self: Pin<&'a mut Self>,
         cx: &mut Context,
     ) -> Poll<Result<impl Buf + 'a, Self::Error>> {
-        match self.project().data_receiver.poll_receive(cx) {
+        let this = self.project();
+
+        match this.data_receiver.poll_receive(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(Closed)) => Poll::Ready(Ok(Buffer::Eof)),
-            Poll::Ready(Ok(buffer)) => Poll::Ready(Ok(Buffer::Filled(buffer))),
+            Poll::Ready(Ok(receive_guard)) => {
+                if *this.log_dropped {
+                    let num_dropped = receive_guard.num_dropped();
+                    if num_dropped > 0 {
+                        tracing::warn!(?num_dropped, "Dropped samples");
+                    }
+                }
+
+                Poll::Ready(Ok(Buffer::Filled(receive_guard)))
+            }
         }
     }
 }

@@ -764,6 +764,8 @@ pub mod sys {
         GPOE: u8 = sys(0x3003) shadow;
 
         /// Direction Control for General-Purpose I/O
+        ///
+        /// 1=input, 0=output
         GPD: u8 = sys(0x3004) shadow;
 
         /// System Interrupt Enable Register

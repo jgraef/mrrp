@@ -11,6 +11,18 @@ use paste::paste;
 
 pub const NUM_REGISTERS: u8 = 0x20;
 
+/// Initial values, starting from 0x05
+#[rustfmt::skip]
+pub const INITIAL: &[u8] = &[
+          0x83, 0x30, 0x75, // 0x05 ..= 0x07
+    0xc0, 0x40, 0xd6, 0x6c, // 0x08 ..= 0x0b
+    0xf5, 0x63, 0x75, 0x68, // 0x0c ..= 0x0f
+    0x6c, 0x83, 0x80, 0x00, // 0x10 ..= 0x13
+    0x0f, 0x00, 0xc0, 0x30, // 0x14 ..= 0x17
+    0x48, 0xcc, 0x60, 0x00, // 0x18 ..= 0x1b
+    0x54, 0xae, 0x4a, 0xc0, // 0x1c ..= 0x1f
+];
+
 /// Buffered register state of the R82xxx
 ///
 /// This doesn't perform any actual reads or writes, but caches data locally. To
@@ -313,6 +325,7 @@ registers! {
     };
     0x02: {
         unk_autotune_done: [7],
+        pll_lock: [6],
         /// VCO indicator
         ///
         /// Read-only
@@ -320,11 +333,10 @@ registers! {
         /// TODO: split?
         ///
         /// ```plain
-        /// vco_lock: [6],
         /// vco_core: [5],
         /// vco_band: [4:0],
         /// ```
-        vco_indicator: [6:0],
+        vco_indicator: [5:0],
     };
     0x03: {
         /// RF indicator

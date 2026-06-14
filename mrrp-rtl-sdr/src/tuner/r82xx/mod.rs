@@ -24,6 +24,7 @@ mod types;
 use std::{
     fmt::Debug,
     ops::Range,
+    time::Duration,
 };
 
 use pretty_hex::PrettyHex;
@@ -55,18 +56,6 @@ pub const DEFAULT_IF_FREQUENCY: u32 = 3570000;
 
 pub const DEFAULT_CRYSTAL_FREQ: u32 = 16000000;
 
-/// Initial values, starting from 0x05
-#[rustfmt::skip]
-pub const INITIAL: &[u8] = &[
-          0x83, 0x30, 0x75, // 0x05 ..= 0x07
-    0xc0, 0x40, 0xd6, 0x6c, // 0x08 ..= 0x0b
-    0xf5, 0x63, 0x75, 0x68, // 0x0c ..= 0x0f
-    0x6c, 0x83, 0x80, 0x00, // 0x10 ..= 0x13
-    0x0f, 0x00, 0xc0, 0x30, // 0x14 ..= 0x17
-    0x48, 0xcc, 0x60, 0x00, // 0x18 ..= 0x1b
-    0x54, 0xae, 0x4a, 0xc0, // 0x1c ..= 0x1f
-];
-
 pub const MAX_I2C_MESSAGE_LENGTH: u8 = 0x08;
 pub const VERSION_VALUE: u8 = 0x31;
 
@@ -80,6 +69,9 @@ pub enum Error {
 
     #[error(transparent)]
     NoPllConfig(#[from] NoPllConfig),
+
+    #[error("No PLL lock")]
+    NoPllLock,
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
@@ -126,7 +118,7 @@ impl TunerProbe for R82xxProbe {
                 let mut r82xx = R82xx::new(i2c_device, *model);
 
                 let mut transaction = r82xx.begin_transaction(rtl2832u);
-                transaction.initialize().await?;
+                transaction.initialize();
                 transaction.commit().await?;
 
                 return Ok(Some(r82xx));
@@ -270,6 +262,14 @@ impl<'a> Transaction<'a> {
         let mut buf = [0u8; 0x20];
 
         let mut flush_run = async |run: Range<u8>| -> Result<(), Error> {
+            if run.start < 0x05 {
+                todo!(
+                    "There should be no modifications to registers 0x00..0x05. Register modified: 0x{:02x}..0x{:02x}",
+                    run.start,
+                    run.end,
+                );
+            }
+
             buf[0] = run.start;
             buf[1..usize::from(run.end) - usize::from(run.start) + 1]
                 .copy_from_slice(&self.registers[run.clone()]);
@@ -324,12 +324,8 @@ impl<'a> Transaction<'a> {
     /// transaction during initialization. But it will not flush the transaction
     /// when it's done initializing. The caller has to do this - so they might
     /// queue up more writes.
-    pub async fn initialize(&mut self) -> Result<(), Error> {
+    pub fn initialize(&mut self) {
         tracing::debug!(tuner = ?self.r82xx.model, "initializing");
-        //tracing::debug!("initial state: {:#?}", self.state);
-
-        //self.sync().await?;
-        //tracing::debug!("synced state: {state:#?}");
 
         // TODO: do we want to remove this and instead explicitely initialize registers
         // via setters? we should also remove anything that is overwritten immediately
@@ -338,10 +334,6 @@ impl<'a> Transaction<'a> {
         self.registers[5..NUM_REGISTERS].copy_from_slice(&INITIAL);
 
         // the following initialization is derived from `r82xx_set_tv_standard`
-        //
-        // note: right now this doesn't do any async, so we could have this on the state
-        // instead. but the librtlsdr code also calibrates the device, which would need
-        // to flush.
 
         // initialize VGA gain
         self.registers.set_pwd_vga(true);
@@ -382,10 +374,19 @@ impl<'a> Transaction<'a> {
         //
         self.registers.set_unk_vco_current(0b000);
         self.registers.set_unk_cp_offset(0b11);
-        self.registers.set_s_i2c(0b10);
-        self.registers.set_n_i2c(0b000100);
-        self.registers.set_sdm_in(0x1c72); // 72 1c
-        self.registers.set_pll_auto_clk(0b10);
+
+        // initialize PLL divider
+        //
+        // not necessary, since this will just be configured in `set_pll`
+        // self.registers.set_s_i2c(0b10);
+        // self.registers.set_n_i2c(0b000100);
+        // self.registers.set_sdm_in(0x1c72); // 72 1c
+
+        // librtlsdr initializes this to 0b10 (8 kHz)
+        //
+        // librtlsdr changes this during r82xx_set_pll to 0b00 (128 kHz)
+        self.registers
+            .set_pll_auto_clk(PllAutoTuneClockRate::Khz8.into());
 
         // todo: hard-coded for testing
         self.registers.set_sel_div(0b100);
@@ -602,8 +603,6 @@ impl<'a> Transaction<'a> {
         // /* agc clk 60hz */
         // rc = r82xx_write_reg_mask(priv, 0x1a, 0x20, 0x30);
         self.registers.set_unk_agc_clk(0b10);
-
-        Ok(())
     }
 
     /// Select RF input
@@ -672,7 +671,7 @@ impl<'a> Transaction<'a> {
         self.if_frequency = filter_setting.if_frequency;
     }
 
-    pub fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
+    pub async fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
         let lo_frequency = center_frequency + self.if_frequency;
 
         // todo: this configures the tracking filter, so why would this use the LO
@@ -704,13 +703,16 @@ impl<'a> Transaction<'a> {
         // but we should test this.
         //
         // also code 0x8 is 16 dB, not 16.3 dB
+        assert_eq!(self.registers.vga_code(), 0x08);
+
         //
         // this also turns on the ADC (unk_adc_enable=false). the reg init array has
         // this true, so we set this to false in initialize
         //
         //self.registers.set_unk_adc_enable(false); // on,
+        assert!(!self.registers.unk_adc_enable());
 
-        self.set_pll(lo_frequency)?;
+        self.set_pll(lo_frequency).await?;
 
         Ok(())
     }
@@ -781,8 +783,23 @@ impl<'a> Transaction<'a> {
         self.registers.set_tf_lp(setting.tf_lp);
     }
 
-    pub fn set_pll(&mut self, lo_frequency: f32) -> Result<(), NoPllConfig> {
-        self.registers.set_ref_div2(false);
+    pub async fn set_pll(&mut self, lo_frequency: f32) -> Result<(), Error> {
+        // /* set pll autotune = 128kHz */
+        // rc = r82xx_write_reg_mask(priv, 0x1a, 0x00, 0x0c);
+        //
+        // but this also set in initialize, and librtlsdr changes this at the end of the
+        // function
+        self.registers
+            .set_pll_auto_clk(PllAutoTuneClockRate::Khz128.into());
+        self.flush().await?;
+        //assert_eq!(self.registers.pll_auto_clk(), 0);
+
+        // uint8_t refdiv2 = 0;
+        // rc = r82xx_write_reg_mask(priv, 0x10, refdiv2, 0x10);
+        //
+        // but this also set in initialize
+        //self.registers.set_ref_div2(false);
+        assert!(!self.registers.ref_div2());
 
         // 0x12 at init = 0x80
         //
@@ -801,10 +818,11 @@ impl<'a> Transaction<'a> {
         // cp_0406 = false (false in reg init)
 
         // Set VCO current to max
-        self.registers.set_unk_vco_current(0b000);
+        //self.registers.set_unk_vco_current(0b000);
 
         // SDM power on
-        self.registers.set_pw_sdm(false);
+        //self.registers.set_pw_sdm(false);
+        assert!(!self.registers.pw_sdm());
 
         // check that we get the same register value as librtlsdr
         //
@@ -824,7 +842,7 @@ impl<'a> Transaction<'a> {
 
         tracing::debug!(?sel_div, ?vco_frequency, crystal_frequency = ?self.r82xx.crystal_frequency);
 
-        // caculate PLL divider settings
+        // calculate PLL divider settings
         let pll_divider = PllDivider::from_vco_frequency(
             vco_frequency,
             self.r82xx.crystal_frequency,
@@ -852,7 +870,46 @@ impl<'a> Transaction<'a> {
         self.registers.set_s_i2c(pll_divider.s_i2c);
         self.registers.set_sdm_in(pll_divider.sdm);
 
-        // todo: check PLL lock
+        {
+            // check PLL lock
+
+            // librtlsdr has commented-out delays. they start at 10ms and are increased by
+            // 1ms after each check
+            const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+            // librtlsdr only checks at most twice
+            const MAX_ATTEMPTS: usize = 5;
+
+            self.flush().await?;
+
+            let mut retry_interval = tokio::time::interval(RETRY_INTERVAL);
+            let mut attempt = 0;
+            let mut locked = false;
+
+            while !locked {
+                self.read(3).await?;
+                locked = self.registers.pll_lock();
+
+                if locked {
+                    break;
+                }
+
+                tracing::warn!(attempt, "PLL not locked yet");
+                retry_interval.tick().await;
+
+                attempt += 1;
+
+                if attempt >= MAX_ATTEMPTS {
+                    tracing::error!(?attempt, "PLL didn't lock");
+                    return Err(Error::NoPllLock);
+                }
+            }
+
+            tracing::debug!("PLL locked");
+        }
+
+        // change PLL_AUTO_CLK back to 0b10 (8 kHz)
+        self.registers
+            .set_pll_auto_clk(PllAutoTuneClockRate::Khz8.into());
 
         Ok(())
     }
@@ -1031,7 +1088,7 @@ impl Tuner for R82xx {
         center_frequency: f32,
     ) -> Result<(), Self::Error> {
         let mut transaction = self.begin_transaction(rtl2832u);
-        transaction.set_center_frequency(center_frequency)?;
+        transaction.set_center_frequency(center_frequency).await?;
         transaction.commit().await
     }
 

@@ -246,7 +246,7 @@ impl Tuner for BlogTuner {
         // set frequency in R82xx
         //
         // todo: we should discard the transaction explicitely, if this fails.
-        transaction.set_center_frequency(center_frequency)?;
+        transaction.set_center_frequency(center_frequency).await?;
 
         // if upconverter is used, disable tracking filter
         if use_upconverter {
