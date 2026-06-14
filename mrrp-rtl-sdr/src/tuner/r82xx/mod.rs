@@ -852,6 +852,8 @@ impl<'a> Transaction<'a> {
         self.registers.set_s_i2c(pll_divider.s_i2c);
         self.registers.set_sdm_in(pll_divider.sdm);
 
+        // todo: check PLL lock
+
         Ok(())
     }
 

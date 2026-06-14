@@ -1,7 +1,7 @@
 use anyhow::Error;
 use clap::Subcommand;
 
-use crate::open::open_rtl2832u;
+use crate::open::DeviceArgs;
 
 #[derive(Debug, Subcommand)]
 pub enum GpioCommand {
@@ -19,12 +19,8 @@ pub enum GpioCommand {
 
 type GpioValue = bool;
 
-pub async fn gpio_command(
-    serial: Option<&str>,
-    pin: u8,
-    command: GpioCommand,
-) -> Result<(), Error> {
-    let (mut rtl2832u, _) = open_rtl2832u(serial).await?;
+pub async fn gpio_command(device: DeviceArgs, pin: u8, command: GpioCommand) -> Result<(), Error> {
+    let (mut rtl2832u, _) = device.open_rtl2832u().await?;
 
     match command {
         GpioCommand::Mode => {

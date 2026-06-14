@@ -28,7 +28,6 @@ use crate::{
     Error,
     enumerate::DeviceInfo,
     rtl2832u::{
-        self,
         EpaReader,
         IfMode,
         Rtl2832u,
@@ -74,10 +73,6 @@ pub struct Device {
     /// RTL2832U.
     frequency_correction: i16,
 
-    /// The crystal frequency (in Hz) that was set on the
-    /// RTL2832U.
-    rtl_crystal_frequency: f32,
-
     /// The current sample rate
     sample_rate: f32,
 
@@ -95,8 +90,6 @@ impl Device {
 
         // initialize baseband
         rtl2832u.initialize(&options.fir_filter).await?;
-
-        let rtl_crystal_frequency = rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32;
 
         // probe tuners
         let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
@@ -125,10 +118,7 @@ impl Device {
         inner.configure_if().await?;
 
         // get the initial sample rate
-        let sample_rate = inner
-            .rtl2832u
-            .get_sample_rate(rtl_crystal_frequency)
-            .await?;
+        let sample_rate = inner.rtl2832u.get_sample_rate().await?;
         tracing::debug!(?sample_rate, "initial sample rate");
 
         // todo: we can't really figure out the initial center frequency, because e.g.
@@ -145,7 +135,6 @@ impl Device {
                 inner: Arc::new(Mutex::new(inner)),
             },
             frequency_correction: 0,
-            rtl_crystal_frequency,
             sample_rate,
             center_frequency: None,
         })
@@ -203,10 +192,13 @@ impl Device {
     ///
     /// This is a 14-bit signed integer, thus must be between -8192 and 8191
     /// inclusive.
-    pub async fn set_frequency_correction(
-        &mut self,
-        frequency_correction: i16,
-    ) -> Result<(), Error> {
+    ///
+    /// # TODO
+    ///
+    /// Not public atm, because it's completely untested. Also the argument
+    /// should probably be `f32` and just be clamped and rounded.
+    #[allow(dead_code)]
+    async fn set_frequency_correction(&mut self, frequency_correction: i16) -> Result<(), Error> {
         if self.frequency_correction != frequency_correction {
             assert!(
                 frequency_correction >= -8192 && frequency_correction <= 8191,
@@ -233,10 +225,7 @@ impl Device {
         // set rtl2832u's sample rate.
         //
         // this returns the sample rate that we actually get.
-        let actual_sample_rate = inner
-            .rtl2832u
-            .set_sample_rate(sample_rate as f32, self.rtl_crystal_frequency)
-            .await?;
+        let actual_sample_rate = inner.rtl2832u.set_sample_rate(sample_rate as f32).await?;
         tracing::debug!(?actual_sample_rate);
 
         {
@@ -263,6 +252,15 @@ impl Device {
         // set rtl2832u's if frequency, because tuner can change this when changing
         // bandwidth.
         inner.configure_if().await?;
+
+        // librtlsdr sets the sample frequency correction here too. we don't support
+        // changing this yet, but this will set the two most significant bits to 0.
+        // these are unknown but librtlsdr sets them to 0 while doing this, and they
+        // start out as 0b10.
+        inner
+            .rtl2832u
+            .set_sample_frequency_correction(self.frequency_correction)
+            .await?;
 
         self.sample_rate = actual_sample_rate;
 
@@ -440,9 +438,7 @@ impl Inner {
             } => {
                 self.rtl2832u.set_if_mode(IfMode::If).await?;
 
-                self.rtl2832u
-                    .set_if_frequency(frequency, rtl2832u::DEFAULT_CRYSTAL_FREQUENCY as f32)
-                    .await?;
+                self.rtl2832u.set_if_frequency(frequency).await?;
 
                 self.rtl2832u
                     .enable_spectrum_inversion(invert_spectrum)

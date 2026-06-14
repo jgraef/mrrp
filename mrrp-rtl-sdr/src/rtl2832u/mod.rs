@@ -80,21 +80,19 @@ pub enum Error {
 
 /// Options for [`Rtl2832u`]
 #[derive(Clone, Debug)]
-pub struct OpenOptions {
-    /// Detach the kernel driver before claiming the USB interface.
-    ///
-    /// This only works on Linux, and is ignored on other platforms.
-    pub detach_kernel_driver: bool,
-
+pub struct Options {
     /// Timeout for a control operation. Default is 5 seconds.
     pub control_timeout: Duration,
+
+    /// The crystal frequency used by the RTL2832U
+    pub crystal_frequency: f32,
 }
 
-impl Default for OpenOptions {
+impl Default for Options {
     fn default() -> Self {
         Self {
-            detach_kernel_driver: false,
             control_timeout: Duration::from_secs(5),
+            crystal_frequency: DEFAULT_CRYSTAL_FREQUENCY as f32,
         }
     }
 }
@@ -144,6 +142,9 @@ pub struct Rtl2832u {
     /// Keeps track which GPIO pin is currently in use, meaning a [`GpioPin`] or
     /// derived [`InputPin`], or [`OutputPin`], exist for it.
     gpio_state: Arc<GpioState>,
+
+    /// The crystal frequency used by the RTL2832U
+    crystal_frequency: f32,
 }
 
 impl Rtl2832u {
@@ -151,13 +152,14 @@ impl Rtl2832u {
     ///
     /// This method doesn't initialize anything. It actually doesn't interact
     /// with the device at all.
-    pub fn new(usb_interface: nusb::Interface, control_timeout: Duration) -> Self {
+    pub fn new(usb_interface: nusb::Interface, open_options: Options) -> Self {
         Self {
             usb_interface,
-            control_timeout,
+            control_timeout: open_options.control_timeout,
             shadow_map: ShadowMap::default(),
             i2c_state: Arc::new(I2cState::default()),
             gpio_state: Arc::new(GpioState::default()),
+            crystal_frequency: open_options.crystal_frequency,
         }
     }
 
@@ -299,6 +301,9 @@ impl Rtl2832u {
     /// a buffer with its [`Default`] value (i.e. all zeros), and calls your
     /// closure with it.
     ///
+    /// It will not write anything, if the value that would be written is
+    /// exactly what is already known to be in the register.
+    ///
     /// # Example
     ///
     /// ```
@@ -322,7 +327,11 @@ impl Rtl2832u {
         let mut value = Default::default();
         f(&mut value);
 
-        self.write_register(value).await
+        if R::shadow_read(&self.shadow_map).is_none_or(|known_value| *known_value != value) {
+            self.write_register(value).await?;
+        }
+
+        Ok(())
     }
 
     /// Modify a register value
@@ -430,10 +439,10 @@ impl Rtl2832u {
         .await?;
 
         // clear pset_iffreq (librtlsdr)
-        self.write_register_with::<reg::demod::PSET_IFFREQ>(|pset_iffreq| {
-            pset_iffreq.set_pset_iffreq(0)
-        })
-        .await?;
+        //self.write_register_with::<reg::demod::PSET_IFFREQ>(|pset_iffreq| {
+        //    pset_iffreq.set_pset_iffreq(0)
+        //})
+        //.await?;
 
         // set filter
         self.write_register(reg::demod::UNK_FIR_FILTER::from_filter(fir_filter))
@@ -602,7 +611,7 @@ impl Rtl2832u {
             // ```
             //
             // but they have bit 6 (ad_en_reg1, adc_q) on, and bit 7 (and_en_reg, adc_i)
-            // off. this corresponds to that the datasheet says should be set
+            // off. this corresponds to what the datasheet says should be set
             // for IF mode. so their comment is just wrong.
             //
             // tl;dr: turn ADC I branch only on for zero-if.
@@ -619,12 +628,8 @@ impl Rtl2832u {
         Ok(())
     }
 
-    pub async fn set_if_frequency(
-        &mut self,
-        frequency: f32,
-        crystal_frequency: f32,
-    ) -> Result<(), Error> {
-        let value = pset_iffreq_from_hz(frequency, crystal_frequency);
+    pub async fn set_if_frequency(&mut self, frequency: f32) -> Result<(), Error> {
+        let value = pset_iffreq_from_hz(frequency, self.crystal_frequency);
 
         // note: we made the pset_iffreq register 32bit for convenience, but there might
         // be something important in the upper bits (DDC offset?). these bits
@@ -661,11 +666,7 @@ impl Rtl2832u {
     /// This will set the sample rate to the closest possible value to the
     /// provided sample rate, and return the actual sample rate set in the
     /// device.
-    pub async fn set_sample_rate(
-        &mut self,
-        sample_rate: f32,
-        crystal_frequency: f32,
-    ) -> Result<f32, Error> {
+    pub async fn set_sample_rate(&mut self, sample_rate: f32) -> Result<f32, Error> {
         // librtlsdr ensures the sample_rate is valid. is there something in the
         // datasheet about this?
         //
@@ -674,8 +675,8 @@ impl Rtl2832u {
         //    || ((sample_rate > 300000) && (sample_rate <= 900000))
         //{}
 
-        let rsamp_ratio = rsamp_ratio_from_hz(sample_rate, crystal_frequency);
-        let actual_sample_rate = rsamp_ratio_to_hz(rsamp_ratio, crystal_frequency);
+        let rsamp_ratio = rsamp_ratio_from_hz(sample_rate, self.crystal_frequency);
+        let actual_sample_rate = rsamp_ratio_to_hz(rsamp_ratio, self.crystal_frequency);
 
         let changed = self
             .write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|register| {
@@ -701,13 +702,13 @@ impl Rtl2832u {
         Ok(actual_sample_rate)
     }
 
-    pub async fn get_sample_rate(&mut self, crystal_frequency: f32) -> Result<f32, Error> {
+    pub async fn get_sample_rate(&mut self) -> Result<f32, Error> {
         let rsamp_ratio = self
             .read_register::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>()
             .await?;
         Ok(rsamp_ratio_to_hz(
             rsamp_ratio.rsamp_ratio(),
-            crystal_frequency,
+            self.crystal_frequency,
         ))
     }
 }
@@ -770,9 +771,9 @@ pub enum IfMode {
 ///
 /// # Arguments
 ///
-/// - `f_if_d`: Intermediate frequency (IF) after sub-sampling
-/// - `f_crystal`: Crystal frequency
-pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
+/// - `if_frequency`: Intermediate frequency (IF) after sub-sampling
+/// - `crystal_frequency`: Crystal frequency
+pub fn pset_iffreq_from_hz(if_frequency: f32, crystal_frequency: f32) -> u32 {
     // librtlsdr does this with u32's but we're pretty sure that overflows.
     //
     // example: r82xx if is 3570000, multiplied by 4194304 is at least 44 bits. the
@@ -781,9 +782,22 @@ pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
     // and since we're multiplying by 4194304 (2**22) floating-point arithmetic is
     // well-suited here.
 
-    let f = -(f_if_d * 4194304.0 / f_crystal).floor();
+    let f = -(if_frequency * 4194304.0 / crystal_frequency).floor();
     (f as i32).cast_unsigned() & 0x003f_ffff
 }
+
+/* this has a bug. see test below
+pub fn pset_iffreq_to_hz(mut pset_iffreq: u32, crystal_frequency: f32) -> f32 {
+    assert_eq!(pset_iffreq & 0xffc0_0000, 0);
+
+    // manually sign-extend
+    if pset_iffreq & 0x0020_0000 != 0 {
+        pset_iffreq |= 0xffc0_0000;
+    }
+
+    dbg!(-pset_iffreq.cast_signed());
+    (-pset_iffreq.cast_signed()) as f32 * crystal_frequency / 4194304.0
+}*/
 
 /// Calculate `rsamp_ratio` from sample rate in Hz.
 ///
@@ -798,13 +812,14 @@ pub fn pset_iffreq_from_hz(f_if_d: f32, f_crystal: f32) -> u32 {
 /// bits. The caller must check if the want the lower 2 bits to be 0.
 pub fn rsamp_ratio_from_hz(sample_rate: f32, crystal_frequency: f32) -> u32 {
     let r = (crystal_frequency * 4194304.0 / sample_rate).floor();
-    (r as u32) & 0x03ff_ffff
+    (r as u32) & 0x0fff_ffff
 }
 
 /// Calculate the sample rate in Hz from the `rsamp_ratio`.
 ///
 /// See [`rsamp_ratio_from_hz`].
 pub fn rsamp_ratio_to_hz(rsamp_ratio: u32, crystal_frequency: f32) -> f32 {
+    assert_eq!(rsamp_ratio & 0xf000_0000, 0);
     crystal_frequency * 4194304.0 / rsamp_ratio as f32
 }
 
@@ -823,19 +838,51 @@ mod tests {
             pset_iffreq_from_hz(4570000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             0x0035_d82e
         );
+
         assert_eq!(
             pset_iffreq_from_hz(36167000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             0x002f_a0ff
         );
+
         assert_eq!(
             pset_iffreq_from_hz(36125000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             0x002f_b8e4
         );
+
         assert_eq!(
             pset_iffreq_from_hz(0.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             0
         );
+
+        // from instrumented rtl_tcp:
+        //
+        // rtlsdr_set_if_freq: freq=1815000, rtl_xtal=28800000, pset_if_freq=3bf778
+        assert_eq!(
+            pset_iffreq_from_hz(1815000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            0x003b_f778
+        );
     }
+
+    /*#[test]
+    fn test_pset_iffreq_to_hz() {
+        assert_eq!(
+            pset_iffreq_to_hz(0x0035_d82e, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            4569996.5
+        );
+        assert_eq!(
+            pset_iffreq_to_hz(0x002f_a0ff, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            36167000.0
+        );
+        assert_eq!(
+            pset_iffreq_to_hz(0x002f_b8e4, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            36125000.0
+        );
+        assert_eq!(pset_iffreq_to_hz(0, DEFAULT_CRYSTAL_FREQUENCY as f32), 0.0);
+        assert_eq!(
+            pset_iffreq_to_hz(0x003b_f778, DEFAULT_CRYSTAL_FREQUENCY as f32),
+            1815000.0
+        );
+    }*/
 
     #[test]
     fn test_rsamp_ratio_from_hz() {

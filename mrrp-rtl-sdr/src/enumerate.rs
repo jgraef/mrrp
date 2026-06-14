@@ -119,22 +119,28 @@ impl DeviceInfo {
 
     /// Open the device
     pub async fn open(self, options: OpenOptions) -> Result<Device, Error> {
-        let rtl2832u = self.open_rtl2832u(options.rtl2832u).await?;
+        let rtl2832u = self
+            .open_rtl2832u(options.detach_kernel_driver, options.rtl2832u)
+            .await?;
         Device::from_rtl2832u(rtl2832u, self, options.device).await
     }
 
     /// Open a low-level [`Rtl2832u`] interface to the device.
-    pub async fn open_rtl2832u(&self, options: rtl2832u::OpenOptions) -> Result<Rtl2832u, Error> {
+    pub async fn open_rtl2832u(
+        &self,
+        detach_kernel_driver: bool,
+        options: rtl2832u::Options,
+    ) -> Result<Rtl2832u, Error> {
         let usb_device = self.usb.open().await?;
 
-        if options.detach_kernel_driver {
+        if detach_kernel_driver {
             usb_device.detach_kernel_driver(USB_INTERFACE)?;
         }
 
         let usb_interface = usb_device.claim_interface(USB_INTERFACE).await?;
 
         // create interface to RTL2832U device
-        Ok(Rtl2832u::new(usb_interface, options.control_timeout))
+        Ok(Rtl2832u::new(usb_interface, options))
     }
 }
 

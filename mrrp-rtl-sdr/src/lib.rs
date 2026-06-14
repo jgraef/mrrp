@@ -47,7 +47,12 @@ pub async fn open_any(options: OpenOptions) -> Result<Device, Error> {
 #[derive(Clone, Debug, Default)]
 pub struct OpenOptions {
     pub device: device::Options,
-    pub rtl2832u: rtl2832u::OpenOptions,
+    pub rtl2832u: rtl2832u::Options,
+
+    /// Detach the kernel driver before claiming the USB interface.
+    ///
+    /// This only works on Linux, and is ignored on other platforms.
+    pub detach_kernel_driver: bool,
 }
 
 mod assert_send_sync {

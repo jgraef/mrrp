@@ -251,7 +251,7 @@ impl GpioPin {
             })
             .await?;
 
-        pre_enable_hook(&mut *rtl2832u).await?;
+        pre_enable_hook(rtl2832u).await?;
 
         // enable output
         rtl2832u

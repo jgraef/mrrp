@@ -1297,7 +1297,7 @@ pub mod demod {
         /// # Note
         ///
         /// We include the lower 2 bits with `rsamp_ratio` and they seem to be intended to be used with it.
-        /// Either the register layout, or the formular is wrong. We need to test what effect the lower
+        /// Either the register layout, or the formula is wrong. We need to test what effect the lower
         /// 2 bits have. See [`rsamp_ratio_from_hz`].
         ///
         /// # FIXME

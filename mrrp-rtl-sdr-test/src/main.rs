@@ -47,10 +47,7 @@ use crate::{
         GpioCommand,
         gpio_command,
     },
-    open::{
-        open_device,
-        open_rtl2832u,
-    },
+    open::DeviceArgs,
     regdump::{
         dump_regs,
         hexyl,
@@ -72,16 +69,16 @@ async fn main() -> Result<(), Error> {
                 println!("{device_info:#?}");
             }
         }
-        Command::PoweronDemod { serial } => {
-            let (mut rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
+        Command::PoweronDemod { device } => {
+            let (mut rtl2832u, _) = device.open_rtl2832u().await?;
             rtl2832u.poweron_demod().await?;
         }
-        Command::Reset { serial } => {
-            let (mut rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
+        Command::Reset { device } => {
+            let (mut rtl2832u, _) = device.open_rtl2832u().await?;
             rtl2832u.reset(Default::default()).await?;
         }
         Command::DumpRegs {
-            serial,
+            device,
             mut demod,
             mut usb,
             mut system,
@@ -109,17 +106,7 @@ async fn main() -> Result<(), Error> {
                 // todo: tuner, rom
             }
 
-            dump_regs(
-                serial.as_deref(),
-                demod,
-                usb,
-                system,
-                tuner,
-                rom,
-                tuner_i2c,
-                path,
-            )
-            .await?;
+            dump_regs(device, demod, usb, system, tuner, rom, tuner_i2c, path).await?;
         }
         Command::PrintRegDump {
             path,
@@ -137,7 +124,7 @@ async fn main() -> Result<(), Error> {
             print_reg_dump(path, offset, length, decode, hexdump)?;
         }
         Command::DumpRomCode {
-            serial,
+            device,
             length,
             output,
         } => {
@@ -145,7 +132,7 @@ async fn main() -> Result<(), Error> {
 
             let mut writer = BufWriter::new(File::create(&output)?);
 
-            let (rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
+            let (rtl2832u, _) = device.open_rtl2832u().await?;
 
             let data = rtl2832u
                 .read(reg::Register::Rom { address: 0 }, length)
@@ -154,23 +141,23 @@ async fn main() -> Result<(), Error> {
             writer.write_all(&data)?;
         }
         Command::Gpio {
-            serial,
+            device,
             pin,
             command,
         } => {
-            gpio_command(serial.as_deref(), pin, command).await?;
+            gpio_command(device, pin, command).await?;
         }
-        Command::BiasTee { serial, command } => {
-            gpio_command(serial.as_deref(), 0, command).await?;
+        Command::BiasTee { device, command } => {
+            gpio_command(device, 0, command).await?;
         }
         Command::Test {
-            serial,
+            device,
             stream,
             sample_rate,
             center_frequency,
             test_hop,
         } => {
-            let mut device = open_device(serial.as_deref()).await?;
+            let mut device = device.open_device().await?;
 
             tracing::info!(?sample_rate, "Setting sample rate");
             device.set_sample_rate(sample_rate).await?;
@@ -282,11 +269,11 @@ async fn main() -> Result<(), Error> {
             device.close().await?;
         }
         Command::Tcp {
-            serial,
+            device,
             listen_address,
             buffer_size,
         } => {
-            let device = open_device(serial.as_deref()).await?;
+            let device = device.open_device().await?;
             let tcp_listener = TcpListener::bind(listen_address).await?;
             let server_handler = ServerHandler::new(device, buffer_size).await?;
             let server = RtlTcpServer::new(server_handler, tcp_listener)
@@ -308,10 +295,10 @@ async fn main() -> Result<(), Error> {
                 })
                 .await?;
         }
-        Command::SysDump { serial, output } => {
+        Command::SysDump { device, output } => {
             let mut writer = BufWriter::new(File::create(&output)?);
 
-            let (rtl2832u, _) = open_rtl2832u(serial.as_deref()).await?;
+            let (rtl2832u, _) = device.open_rtl2832u().await?;
 
             let length = 0x1000;
 
@@ -355,21 +342,21 @@ enum Command {
     ///
     /// This can be useful for e.g. dumping its registers
     PoweronDemod {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
     },
     /// Reset
     ///
     /// This doesn't perform a soft or hard reset (via the bits), but turns off
     /// the DEMOD chip and disables all GPIO outputs.
     Reset {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
     },
     /// Dump registers
     DumpRegs {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
 
         #[clap(long)]
         demod: Vec<u8>,
@@ -398,12 +385,16 @@ enum Command {
     /// reads from the specified base addresses.
     PrintRegDump {
         path: Option<PathBuf>,
+
         #[clap(short, long)]
         offset: Option<usize>,
+
         #[clap(short, long)]
         length: Option<usize>,
+
         #[clap(short = 'd', long)]
         decode: bool,
+
         #[clap(short = 'H', long)]
         hexdump: bool,
     },
@@ -411,8 +402,8 @@ enum Command {
     ///
     /// Doesn't seem to work.
     DumpRomCode {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
 
         #[clap(short, long)]
         output: PathBuf,
@@ -422,8 +413,8 @@ enum Command {
     },
     /// Control GPIO pins
     Gpio {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
 
         pin: u8,
 
@@ -434,15 +425,15 @@ enum Command {
     ///
     /// This is just an alias for `gpio 0`.
     BiasTee {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
 
         #[clap(subcommand)]
         command: GpioCommand,
     },
     Test {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
 
         #[clap(short = 'S', long, default_value = "2400000")]
         sample_rate: f32,
@@ -457,8 +448,8 @@ enum Command {
         test_hop: bool,
     },
     Tcp {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
 
         #[clap(short, long, default_value = "localhost:1234")]
         listen_address: String,
@@ -472,8 +463,8 @@ enum Command {
     /// datasheet-specified base address. It reads 0x00000 .. 0x10000 in chunks
     /// of 0x1000.
     SysDump {
-        #[clap(short, long)]
-        serial: Option<String>,
+        #[clap(flatten)]
+        device: DeviceArgs,
 
         #[clap(short, long)]
         output: PathBuf,

@@ -23,7 +23,7 @@ use mrrp_rtl_sdr::{
     },
 };
 
-use crate::open::open_rtl2832u;
+use crate::open::DeviceArgs;
 
 fn reg_dump_file_name_for_block(base: impl AsRef<Path>, block: reg::Block) -> PathBuf {
     let file_name = match block {
@@ -50,7 +50,7 @@ fn block_size(block: reg::Block) -> u16 {
 }
 
 pub async fn dump_regs(
-    serial: Option<&str>,
+    device: DeviceArgs,
     demod: Vec<u8>,
     usb: bool,
     system: bool,
@@ -60,7 +60,7 @@ pub async fn dump_regs(
     path: impl AsRef<Path>,
 ) -> Result<(), Error> {
     let path = path.as_ref();
-    let (mut rtl2832u, _) = open_rtl2832u(serial).await?;
+    let (mut rtl2832u, _) = device.open_rtl2832u().await?;
 
     if !demod.is_empty() || tuner_i2c {
         tracing::info!("We have to poweron the DEMOD chip.");
