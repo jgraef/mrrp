@@ -363,6 +363,18 @@ impl Rtl2832u {
         }
     }
 
+    /// Write the currently cached value for this to the device
+    pub async fn write_register_refresh<R>(&mut self) -> Result<(), Error>
+    where
+        R: RegisterValue + shadow::ShadowRegister,
+    {
+        if let Some(value) = R::shadow_read(&self.shadow_map) {
+            self.write_register(*value).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn initialize(&mut self, fir_filter: &FirFilter) -> Result<(), Error> {
         // check librtlsdr, but also [linux driver][1]
         //
@@ -461,6 +473,13 @@ impl Rtl2832u {
         self.write_register(reg::demod::UNK_FSM(0xf00f)).await?;
 
         // disable DAGC, librtlsdr says this has no effect
+        //
+        // this does "work". i think you have to enable UNK_DAGC.enable_dagc first.
+        // otherwise we got a device stalled error setting this.
+        //
+        // it did finally got rid of the frequency shift completely. only
+        // UNK_DAGC.enable_dagc only got rid of most of it, but about 500 hz shift
+        // remained.
         self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
             en_dagc.set_endagc(false);
         })
@@ -578,6 +597,7 @@ impl Rtl2832u {
             epa_ctl.set_fifo_reset(false);
         })
         .await?;
+
         Ok(())
     }
 
@@ -589,6 +609,7 @@ impl Rtl2832u {
             epa_ctl.set_fifo_reset(true);
         })
         .await?;
+
         Ok(())
     }
 
@@ -656,7 +677,7 @@ impl Rtl2832u {
     }
 
     /// Enables or disables spectrum inversion
-    pub async fn enable_spectrum_inversion(&mut self, enable: bool) -> Result<(), Error> {
+    pub async fn set_spectrum_inversion(&mut self, enable: bool) -> Result<(), Error> {
         self.write_register_update::<reg::demod::SPEC_INV_EN_ACI>(|spec_inv| {
             spec_inv.set_spec_inv(enable);
         })
@@ -706,7 +727,7 @@ impl Rtl2832u {
         Ok(actual_sample_rate)
     }
 
-    pub async fn get_sample_rate(&mut self) -> Result<f32, Error> {
+    pub async fn sample_rate(&mut self) -> Result<f32, Error> {
         let rsamp_ratio = self
             .read_register::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>()
             .await?;
@@ -714,6 +735,27 @@ impl Rtl2832u {
             rsamp_ratio.rsamp_ratio(),
             self.crystal_frequency,
         ))
+    }
+
+    pub async fn agc_mode(&mut self) -> Result<bool, Error> {
+        Ok(self
+            .read_register::<reg::demod::UNK_DAGC>()
+            .await?
+            .enable_dagc())
+    }
+
+    pub async fn set_agc_mode(&mut self, enable: bool) -> Result<(), Error> {
+        self.write_register_update::<reg::demod::UNK_DAGC>(|unk_dagc| {
+            unk_dagc.set_enable_dagc(enable);
+        })
+        .await?;
+
+        self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
+            en_dagc.set_endagc(enable);
+        })
+        .await?;
+
+        Ok(())
     }
 }
 

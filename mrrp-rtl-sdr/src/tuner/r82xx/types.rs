@@ -2,6 +2,15 @@ use std::fmt::Debug;
 
 use crate::rtl2832u::i2c::I2cAddress;
 
+/// IF filter settings
+///
+/// # TODO
+///
+/// What do the fields mean? Some fields do have descriptions in the R820T
+/// datasheet, but what the values represent, isn't really specified. E.g. for
+/// register 0x0b librtlsdr's `r82xx_set_tv_standard` comments "1.0 MHz". Is
+/// that the value in `filt_bw` or `hpf`. we think it's `filt_bw`, but what do
+/// the other possible values mean?
 #[derive(Clone, Copy, Debug)]
 pub struct IfFilterSetting {
     pub low_q: bool,

@@ -250,6 +250,10 @@ async fn handle_command(
             tracing::debug!(?command, "handling command");
             device.set_center_frequency(frequency as f32).await?;
         }
+        Command::SetAgcMode { enable } => {
+            tracing::debug!(?command, "handling command");
+            device.set_agc_mode(enable).await?;
+        }
         _ => tracing::debug!(?command, "ignoring command"),
     }
 

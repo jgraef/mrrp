@@ -30,7 +30,6 @@ use crate::{
     rtl2832u::{
         EpaReader,
         IfMode,
-        ResetOptions,
         Rtl2832u,
         filter::FirFilter,
     },
@@ -119,7 +118,7 @@ impl Device {
         inner.configure_if().await?;
 
         // get the initial sample rate
-        let sample_rate = inner.rtl2832u.get_sample_rate().await?;
+        let sample_rate = inner.rtl2832u.sample_rate().await?;
         tracing::debug!(?sample_rate, "initial sample rate");
 
         // todo: we can't really figure out the initial center frequency, because e.g.
@@ -289,6 +288,13 @@ impl Device {
 
         Ok(())
     }
+
+    pub async fn set_agc_mode(&mut self, enable: bool) -> Result<(), Error> {
+        tracing::debug!(?enable, "enable DAGC mode");
+        let Inner { rtl2832u, tuner: _ } = &mut *self.inner.lock().await;
+        rtl2832u.set_agc_mode(enable).await?;
+        Ok(())
+    }
 }
 
 impl Drop for Device {
@@ -442,7 +448,7 @@ impl Inner {
                 self.rtl2832u.set_if_frequency(frequency).await?;
 
                 self.rtl2832u
-                    .enable_spectrum_inversion(invert_spectrum)
+                    .set_spectrum_inversion(invert_spectrum)
                     .await?;
             }
         }
@@ -486,8 +492,13 @@ impl<'a> DerefMut for InnerGuard<'a> {
 }
 
 /// Applies `correction` (in PPM) to `frequency` (in Hz).
+///
+/// # TODO
+///
+/// This is dead code right now, as we don't apply any frequency correction at
+/// the moment.
 #[inline(always)]
-pub fn apply_frequency_correction(frequency: u32, correction: i16) -> u32 {
-    // todo: check for overflow?
-    (frequency as f32 * (1.0 + correction as f32 / 1.0e6)) as u32
+#[allow(dead_code)]
+pub fn apply_frequency_correction(frequency: f32, correction: f32) -> f32 {
+    frequency * (1.0 + correction / 1.0e6)
 }

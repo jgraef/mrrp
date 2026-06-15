@@ -928,7 +928,7 @@ pub mod demod {
         /// - bit 1: on if in test mode (send counter?)
         /// - bit 0: (enable streaming?)
         ///
-        UNK_DAGC: u8 = demod(0, 0x19) {
+        UNK_DAGC: u8 = demod(0, 0x19) shadow {
             pub bool, enable_dagc, set_enable_dagc: 5;
             pub bool, unk_2, set_unk_2: 2;
             pub bool, test_mode, set_test_mode: 1;
@@ -1026,7 +1026,7 @@ pub mod demod {
             /// IF_AGC_MAX: 1, 0x09
             pub u8, if_agc_max, set_if_agc_max: 7, 0;
         };
-        EN_DAGC: u8 = demod(1, 0x11) {
+        EN_DAGC: u8 = demod(1, 0x11) shadow {
             pub bool, en_dagc, set_endagc: 0;
         };
         RF_AGC_MIN: u8 = demod(1, 0x0a) {
