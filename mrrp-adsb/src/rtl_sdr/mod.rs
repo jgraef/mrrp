@@ -2,7 +2,10 @@
 //!
 //! <https://www.radartutorial.eu/13.ssr/sr24.en.html>
 //! <https://www.idc-online.com/technical_references/pdfs/electronic_engineering/Mode_S_Reply_Encoding.pdf>
-#![allow(dead_code)]
+
+#[cfg(feature = "command")]
+pub mod command;
+pub mod demodulator;
 
 use std::{
     fmt::Debug,
@@ -14,15 +17,61 @@ use std::{
 };
 
 use futures_util::Stream;
-use num_complex::Complex;
 use pin_project_lite::pin_project;
-
-use crate::io::{
+#[cfg(feature = "tcp")]
+pub use rtlsdr_async::rtl_tcp::client as rtl_tcp;
+pub use rtlsdr_async::{
     AsyncReadSamples,
     AsyncReadSamplesExt,
-    ReadBuf,
-    combinators::MapInPlacePod,
+    Configure,
+    DeviceInfo,
+    DeviceIter,
+    Error,
+    Gain,
+    IqSample,
+    RtlSdr,
+    devices,
 };
+
+pub fn magnitude(sample: &IqSample) -> u16 {
+    #[inline(always)]
+    fn abs(x: u8) -> u8 {
+        if x >= 127 { x - 127 } else { 127 - x }
+    }
+
+    #[inline(always)]
+    fn square(x: u8) -> u16 {
+        let x = u16::from(abs(x));
+        x * x
+    }
+
+    square(sample.i) + square(sample.q)
+}
+
+pub type Magnitude = u16;
+
+#[derive(Clone, Copy, Debug)]
+pub struct Cursor<'a> {
+    pub samples: &'a [Magnitude],
+    pub position: usize,
+}
+
+impl<'a> Cursor<'a> {
+    #[inline(always)]
+    pub fn advance(&mut self, amount: usize) {
+        self.position += amount;
+    }
+
+    #[inline(always)]
+    pub fn advance_to_end(&mut self) {
+        self.position = self.samples.len();
+    }
+
+    #[inline(always)]
+    pub fn remaining(&self) -> &[Magnitude] {
+        &self.samples[self.position..]
+    }
+}
 
 /// Preamble: 8 µs / 16 samples
 const PREAMBLE_SAMPLES: usize = 16;
@@ -80,7 +129,7 @@ impl Demodulator {
         }
     }
 
-    pub fn next(&mut self, cursor: &mut Cursor<f32>) -> Option<Frame> {
+    pub fn next(&mut self, cursor: &mut Cursor) -> Option<Frame> {
         while find_preamble(cursor) {
             //tracing::debug!(?cursor.position, "found preamble");
 
@@ -107,7 +156,7 @@ impl Demodulator {
         None
     }
 
-    fn read_frame(&mut self, cursor: &mut Cursor<f32>) -> Result<Frame, DemodFail> {
+    fn read_frame(&mut self, cursor: &mut Cursor) -> Result<Frame, DemodFail> {
         self.num_errors = 0;
 
         let first_byte = self.read_byte(cursor)?;
@@ -127,7 +176,7 @@ impl Demodulator {
     fn read_frame_rest<const N: usize>(
         &mut self,
         first_byte: u8,
-        cursor: &mut Cursor<f32>,
+        cursor: &mut Cursor,
     ) -> Result<[u8; N], DemodFail> {
         let mut data = [0u8; N];
         data[0] = first_byte;
@@ -137,7 +186,7 @@ impl Demodulator {
         Ok(data)
     }
 
-    fn read_bit(&self, cursor: &mut Cursor<f32>) -> Result<bool, bool> {
+    fn read_bit(&self, cursor: &mut Cursor) -> Result<bool, bool> {
         // these should exist, since we read a preamble first
         let a = cursor.samples[cursor.position - 2];
         let b = cursor.samples[cursor.position - 1];
@@ -202,7 +251,7 @@ impl Demodulator {
         }
     }
 
-    fn read_byte(&mut self, cursor: &mut Cursor<f32>) -> Result<u8, DemodFail> {
+    fn read_byte(&mut self, cursor: &mut Cursor) -> Result<u8, DemodFail> {
         let mut byte = 0;
 
         if cursor.remaining().len() < 2 * 8 {
@@ -235,9 +284,9 @@ impl Demodulator {
     }
 }
 
-fn is_preamble(samples: &[f32]) -> bool {
-    let mut low = f32::MIN;
-    let mut high = f32::MAX;
+fn is_preamble(samples: &[u16]) -> bool {
+    let mut low: u16 = 0;
+    let mut high: u16 = u16::MAX;
 
     for i in 0..PREAMBLE_SAMPLES {
         match i {
@@ -257,7 +306,7 @@ fn is_preamble(samples: &[f32]) -> bool {
     true
 }
 
-fn find_preamble(cursor: &mut Cursor<f32>) -> bool {
+fn find_preamble(cursor: &mut Cursor) -> bool {
     loop {
         let remaining = cursor.remaining();
         if remaining.len() >= PREAMBLE_SAMPLES {
@@ -284,23 +333,23 @@ pub enum Quality {
 
 pin_project! {
     #[derive(Debug)]
-    pub struct DemodulateStream<T> {
+    pub struct DemodulateStream<S> {
         #[pin]
-        stream: MapInPlacePod<T, Complex<f32>, fn(Complex<f32>) -> f32>,
+        stream: S,
         demodulator: Demodulator,
-        buffer: Vec<f32>,
+        buffer: Vec<Magnitude>,
         read_pos: usize,
         write_pos: usize,
         num_samples: usize,
     }
 }
 
-impl<T: AsyncReadSamples<Complex<f32>>> DemodulateStream<T> {
-    pub fn new(stream: T, demodulator: Demodulator, buffer_size: usize) -> Self {
+impl<S> DemodulateStream<S> {
+    pub fn new(stream: S, demodulator: Demodulator, buffer_size: usize) -> Self {
         Self {
-            stream: stream.map_in_place_pod(|sample| sample.re * sample.re + sample.im * sample.im),
+            stream,
             demodulator,
-            buffer: vec![0.0; buffer_size],
+            buffer: vec![0; buffer_size],
             read_pos: 0,
             write_pos: 0,
             num_samples: 0,
@@ -308,8 +357,20 @@ impl<T: AsyncReadSamples<Complex<f32>>> DemodulateStream<T> {
     }
 }
 
-impl<T: AsyncReadSamples<Complex<f32>>> Stream for DemodulateStream<T> {
-    type Item = Result<Frame, T::Error>;
+impl<S: Configure> DemodulateStream<S> {
+    pub async fn configure(&mut self, frequency: Option<u32>) -> Result<(), S::Error> {
+        self.stream
+            .set_center_frequency(frequency.unwrap_or(DOWNLINK_FREQUENCY))
+            .await?;
+        self.stream.set_sample_rate(SAMPLE_RATE).await?;
+        self.stream.set_tuner_gain(Gain::Auto).await?;
+        self.stream.set_agc_mode(true).await?;
+        Ok(())
+    }
+}
+
+impl<S: AsyncReadSamples> Stream for DemodulateStream<S> {
+    type Item = Result<Frame, S::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
@@ -340,16 +401,21 @@ impl<T: AsyncReadSamples<Complex<f32>>> Stream for DemodulateStream<T> {
                 }
             }
             else {
-                let mut read_buf = ReadBuf::new(&mut this.buffer[*this.write_pos..]);
-                match this.stream.poll_read_samples(cx, &mut read_buf) {
+                let buffer = &mut this.buffer[*this.write_pos..];
+
+                // we use the same buffer!
+                let iq_buffer: &mut [IqSample] = bytemuck::cast_slice_mut(buffer);
+
+                match this.stream.poll_read_samples(cx, iq_buffer) {
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(Err(error)) => return Poll::Ready(Some(Err(error))),
-                    Poll::Ready(Ok(())) => {
-                        if read_buf.filled().is_empty() {
+                    Poll::Ready(Ok(num_samples)) => {
+                        if num_samples == 0 {
                             return Poll::Ready(None);
                         }
 
-                        *this.num_samples = *this.write_pos + read_buf.filled().len();
+                        magnitude_of_samples_inplace(&mut iq_buffer[..num_samples]);
+                        *this.num_samples = *this.write_pos + num_samples;
                         *this.read_pos = 0;
                         *this.write_pos = 0;
                     }
@@ -359,36 +425,28 @@ impl<T: AsyncReadSamples<Complex<f32>>> Stream for DemodulateStream<T> {
     }
 }
 
-// todo: use SampleBuf instead, buf we need examine past samples sometimes.
-
-#[derive(Clone, Copy, Debug)]
-pub struct Cursor<'a, S> {
-    pub samples: &'a [S],
-    pub position: usize,
-}
-
-impl<'a, S> Cursor<'a, S> {
-    #[inline(always)]
-    pub fn advance(&mut self, amount: usize) {
-        self.position += amount;
-    }
-
-    #[inline(always)]
-    pub fn remaining(&self) -> &[S] {
-        &self.samples[self.position..]
+/// computes magnitudes of samples and replaces samples inplace with u16 of
+/// magnitude
+fn magnitude_of_samples_inplace(samples: &mut [IqSample]) {
+    // todo: is this fast?
+    // if not, we can just remove [`Sample`] and use u16. a custom magnitude
+    // function will take care of it.
+    for sample in samples.iter_mut() {
+        let magnitude = magnitude(&sample);
+        *sample = bytemuck::cast(magnitude);
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{
+    use crate::{
+        Cursor,
         Demodulator,
         Frame,
         Quality,
     };
-    use crate::modem::adsb::Cursor;
 
-    fn modulate(data: &[u8], mut sample: impl FnMut(bool) -> f32) -> Vec<f32> {
+    fn modulate(data: &[u8], mut sample: impl FnMut(bool) -> u16) -> Vec<u16> {
         let mut samples = vec![];
 
         // 0, 2, 7, 9 are high
@@ -422,15 +480,15 @@ mod tests {
         samples
     }
 
-    fn signal(signal: bool) -> f32 {
-        if signal { 1.0 } else { 0.0 }
+    fn best_signal(signal: bool) -> u16 {
+        if signal { u16::MAX } else { 0 }
     }
 
     #[test]
     fn it_demodulates_a_frame() {
         let input = b"\x8d\x40\x74\xb5\x23\x15\xa6\x76\xdd\x13\xa0\x66\x29\x67";
 
-        let samples = modulate(input, signal);
+        let samples = modulate(input, best_signal);
 
         let mut demodulator = Demodulator::new(Quality::NoChecks, 0);
         let mut cursor = Cursor {
