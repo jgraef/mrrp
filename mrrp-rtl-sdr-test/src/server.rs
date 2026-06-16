@@ -12,7 +12,11 @@ use anyhow::{
     anyhow,
 };
 use bytes::Buf;
-use mrrp_rtl_tcp::server;
+use mrrp_rtl_sdr::tuner::gain;
+use mrrp_rtl_tcp::{
+    protocol::TunerGainMode,
+    server,
+};
 use pin_project_lite::pin_project;
 use tokio::{
     io::AsyncBufReadExt,
@@ -33,14 +37,20 @@ pub struct ServerHandler {
 }
 
 impl ServerHandler {
-    pub async fn new(device: mrrp_rtl_sdr::Device, buffer_size: usize) -> Result<Self, Error> {
+    pub async fn new(mut device: mrrp_rtl_sdr::Device, buffer_size: usize) -> Result<Self, Error> {
         assert_ne!(buffer_size, 0, "buffer_size can't be 0");
         assert_eq!(buffer_size % 2, 0, "buffer_size must be a multiple of 2");
 
-        // todo
+        let tuner_type = tuner_type(&mut device).await;
+
+        let tuner_gain_count = device.available_tuner_gains().len();
+        let tuner_gain_count = tuner_gain_count.try_into().unwrap_or_else(|_| {
+            panic!("The tuner gain count is too large for a u32: {tuner_gain_count}")
+        });
+
         let dongle_info = mrrp_rtl_tcp::DongleInfo {
-            tuner_type: mrrp_rtl_tcp::TunerType::R828D,
-            tuner_gain_count: 29,
+            tuner_type,
+            tuner_gain_count,
         };
 
         let (command_sender, command_receiver) = mpsc::channel(64);
@@ -75,6 +85,20 @@ impl ServerHandler {
         self.log_dropped = log_dropped;
         self
     }
+}
+
+async fn tuner_type(device: &mut mrrp_rtl_sdr::Device) -> mrrp_rtl_tcp::TunerType {
+    let mrrp_rtl_sdr::device::Inner { rtl2832u: _, tuner } = &*device.inner_mut().await;
+
+    if let Some(r82xx) = tuner.downcast_ref::<mrrp_rtl_sdr::tuner::r82xx::R82xx>() {
+        match r82xx.model() {
+            mrrp_rtl_sdr::tuner::r82xx::Model::R820T => return mrrp_rtl_tcp::TunerType::R820T,
+            mrrp_rtl_sdr::tuner::r82xx::Model::R828D => return mrrp_rtl_tcp::TunerType::R828D,
+            _ => {}
+        }
+    }
+
+    mrrp_rtl_tcp::TunerType::UNKNOWN
 }
 
 impl server::Handler for ServerHandler {
@@ -241,6 +265,14 @@ async fn handle_command(
 ) -> Result<(), Error> {
     use mrrp_rtl_tcp::protocol::Command;
 
+    async fn set_tuner_gain(
+        device: &mut mrrp_rtl_sdr::Device,
+        gain: impl gain::IntoTunerGain,
+    ) -> Result<(), Error> {
+        device.set_tuner_gain(gain).await?;
+        Ok(())
+    }
+
     match command {
         Command::SetSampleRate { sample_rate } => {
             tracing::debug!(?command, "handling command");
@@ -253,6 +285,26 @@ async fn handle_command(
         Command::SetAgcMode { enable } => {
             tracing::debug!(?command, "handling command");
             device.set_agc_mode(enable).await?;
+        }
+        Command::SetTunerGainMode { mode } => {
+            tracing::debug!(?command, "handling command");
+
+            match mode {
+                TunerGainMode::Manual => {
+                    set_tuner_gain(device, gain::Index(0)).await?;
+                }
+                TunerGainMode::Auto => {
+                    set_tuner_gain(device, gain::Auto).await?;
+                }
+            }
+        }
+        Command::SetTunerGain { gain } => {
+            tracing::debug!(?command, "handling command");
+            set_tuner_gain(device, gain::Db(gain as f32 * 0.1)).await?;
+        }
+        Command::SetTunerGainIndex { index } => {
+            tracing::debug!(?command, "handling command");
+            set_tuner_gain(device, gain::Index(index.try_into()?)).await?;
         }
         _ => tracing::debug!(?command, "ignoring command"),
     }

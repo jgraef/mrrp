@@ -451,7 +451,7 @@ registers! {
         /// Mixer current control - 0=max current, 1=normal current
         pw0_mix: [5],
         /// Mixer gain mode - 0=manual, 1=auto
-        mixgain_mode: [4],
+        mix_gain_mode: [4],
         /// Mixer manual gain control - 0000(min) .. 1111(max)
         mix_gain: [3:0],
     };

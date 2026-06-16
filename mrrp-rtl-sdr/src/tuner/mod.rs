@@ -1,6 +1,7 @@
 pub mod r82xx;
 
 use std::{
+    any::Any,
     convert::Infallible,
     fmt::Debug,
     pin::Pin,
@@ -8,9 +9,12 @@ use std::{
 
 use futures_util::TryFutureExt;
 
-use crate::rtl2832u::{
-    IfMode,
-    Rtl2832u,
+use crate::{
+    rtl2832u::{
+        IfMode,
+        Rtl2832u,
+    },
+    tuner::gain::TunerGain,
 };
 
 pub trait TunerError: std::error::Error + Send + Sync + Sized + 'static {}
@@ -50,6 +54,21 @@ pub trait Tuner: Debug + Sized + Send + Sync + 'static {
     ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 
     fn if_setting(&self) -> IfSetting;
+
+    /// Return a list of available gains in dB.
+    ///
+    /// This list is sorted in ascending order.
+    fn gains(&self) -> &[f32];
+
+    /// Set tuner gain
+    ///
+    /// The provided index (if not auto), refers to the gains returned by
+    /// [`gains`][Self::gains].
+    fn set_gain<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        gain: TunerGain,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a;
 
     fn shutdown<'a>(
         &'a mut self,
@@ -160,7 +179,7 @@ impl TunerProbe for AnyTunerProbe {
     }
 }
 
-trait AnyTunerTrait: Debug + Send + Sync + 'static {
+trait AnyTunerTrait: Debug + Send + Sync + Any {
     fn name(&self) -> &str;
 
     fn set_bandwidth<'a>(
@@ -176,6 +195,14 @@ trait AnyTunerTrait: Debug + Send + Sync + 'static {
     ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
 
     fn if_setting(&self) -> IfSetting;
+
+    fn gains(&self) -> &[f32];
+
+    fn set_gain<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        gain: TunerGain,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>>;
 
     fn shutdown<'a>(
         &'a mut self,
@@ -214,6 +241,18 @@ where
         Tuner::if_setting(self)
     }
 
+    fn gains(&self) -> &[f32] {
+        Tuner::gains(self)
+    }
+
+    fn set_gain<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        gain: TunerGain,
+    ) -> Pin<Box<dyn Future<Output = Result<(), AnyTunerError>> + Send + 'a>> {
+        Box::pin(Tuner::set_gain(self, rtl2832u, gain).map_err(AnyTunerError::new))
+    }
+
     fn shutdown<'a>(
         &'a mut self,
         rtl2832u: &'a mut Rtl2832u,
@@ -225,8 +264,25 @@ where
 pub struct AnyTuner(Box<dyn AnyTunerTrait>);
 
 impl AnyTuner {
+    #[inline(always)]
     pub fn new(tuner: impl Tuner) -> Self {
         Self(Box::new(tuner))
+    }
+
+    #[inline(always)]
+    pub fn downcast_ref<T>(&self) -> Option<&T>
+    where
+        T: Tuner,
+    {
+        (&*self.0 as &dyn Any).downcast_ref::<T>()
+    }
+
+    #[inline(always)]
+    pub fn downcast_mut<T>(&mut self) -> Option<&mut T>
+    where
+        T: Tuner,
+    {
+        (&mut *self.0 as &mut dyn Any).downcast_mut::<T>()
     }
 }
 
@@ -261,6 +317,18 @@ impl Tuner for AnyTuner {
 
     fn if_setting(&self) -> IfSetting {
         self.0.if_setting()
+    }
+
+    fn gains(&self) -> &[f32] {
+        self.0.gains()
+    }
+
+    fn set_gain<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        gain: TunerGain,
+    ) -> impl Future<Output = Result<(), Self::Error>> + Send + 'a {
+        self.0.set_gain(rtl2832u, gain)
     }
 
     fn shutdown<'a>(
@@ -301,6 +369,19 @@ impl Tuner for NullTuner {
 
     fn if_setting(&self) -> IfSetting {
         IfSetting::ZeroIf
+    }
+
+    fn gains(&self) -> &[f32] {
+        &[]
+    }
+
+    async fn set_gain<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        gain: TunerGain,
+    ) -> Result<(), Self::Error> {
+        let _ = (rtl2832u, gain);
+        Ok(())
     }
 
     async fn shutdown<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
@@ -344,6 +425,127 @@ impl IfSetting {
         match self {
             IfSetting::ZeroIf => IfMode::ZeroIf,
             IfSetting::If { .. } => IfMode::If,
+        }
+    }
+}
+
+pub mod gain {
+    pub trait IntoTunerGain {
+        fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain;
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub enum TunerGain {
+        Auto,
+        Manual(usize),
+    }
+
+    impl TunerGain {
+        #[inline(always)]
+        pub fn from_db(gain: f32, available_gains: &[f32]) -> Self {
+            Index::from_db(gain, available_gains).into_tuner_gain(available_gains)
+        }
+    }
+
+    impl IntoTunerGain for TunerGain {
+        #[inline(always)]
+        fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
+            let _ = available_gains;
+            self
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct Auto;
+
+    impl IntoTunerGain for Auto {
+        /// Convert to [`TunerGain`] enum.
+        ///
+        /// The `available_gains` provides the gain values in dB that are
+        /// available. It is sorted in ascending order. This is needed by the
+        /// conversion from dB values to the [`TunerGain`] enum, as it only
+        /// understands indices.
+        #[inline(always)]
+        fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
+            let _ = available_gains;
+            TunerGain::Auto
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default, derive_more::From, derive_more::Into)]
+    pub struct Index(pub usize);
+
+    impl Index {
+        #[inline(always)]
+        pub fn from_db(gain: f32, available_gains: &[f32]) -> Self {
+            let index = closest_gain(gain, available_gains);
+
+            // if `gains` is empty, this will return `None`. Should we return an error in
+            // that case?
+            let index = index.unwrap_or_default();
+
+            Self(index)
+        }
+    }
+
+    impl IntoTunerGain for Index {
+        #[inline(always)]
+        fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
+            let _ = available_gains;
+            TunerGain::Manual(self.0)
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default, derive_more::From, derive_more::Into)]
+    pub struct Db(pub f32);
+
+    impl IntoTunerGain for Db {
+        #[inline(always)]
+        fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
+            Index::from_db(self.0, available_gains).into_tuner_gain(available_gains)
+        }
+    }
+
+    /// Finds the index of the closest gain value.
+    ///
+    /// Returns `None` if the provided `gains` array is empty.
+    pub fn closest_gain(gain: f32, available_gains: &[f32]) -> Option<usize> {
+        match available_gains.binary_search_by(|other| {
+            other
+                .partial_cmp(&gain)
+                .unwrap_or_else(|| panic!("Can't compare floats: {} and {}", other, gain))
+        }) {
+            Ok(index) => Some(index),
+            Err(index_after) => {
+                assert!(index_after <= available_gains.len());
+
+                if index_after == available_gains.len() {
+                    // value is larger than the last gain entry, so return that.
+                    //
+                    // there's the edge case that the gains array is empty. in that case we return
+                    // `None`
+                    index_after.checked_sub(1)
+                }
+                else if let Some(index_before) = index_after.checked_sub(1) {
+                    // value is less than `index_after`, but greater than `index_before`. check
+                    // which one is closer
+                    let distance_before = gain - available_gains[index_before];
+                    let distance_after = available_gains[index_after] - gain;
+                    assert!(distance_before > 0.0);
+                    assert!(distance_after > 0.0);
+
+                    if distance_before < distance_after {
+                        Some(index_before)
+                    }
+                    else {
+                        Some(index_after)
+                    }
+                }
+                else {
+                    // value is smaller than the first gain entry, so return that
+                    Some(index_after)
+                }
+            }
         }
     }
 }

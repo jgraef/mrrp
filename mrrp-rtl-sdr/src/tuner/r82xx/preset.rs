@@ -1,10 +1,13 @@
 use crate::tuner::r82xx::{
     CrystalCapacitor,
     IfFilterSetting,
+    LnaGainCode,
+    MixGainCode,
     OpenD,
     RfFilt,
     RfMux,
     TrackingFilterSetting,
+    VgaGainCode,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -556,6 +559,177 @@ pub fn frequency_setting(frequency: f32) -> &'static FrequencySetting {
         .unwrap_or_else(|| PRESET_FREQUENCY_SETTINGS.last().unwrap())
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GainSetting {
+    pub lna: LnaGainCode,
+    pub mix: MixGainCode,
+    pub vga: VgaGainCode,
+}
+
+impl GainSetting {
+    pub fn as_db(&self) -> f32 {
+        self.lna.as_db() + self.mix.as_db() + self.vga.as_db()
+    }
+}
+
+pub const GAIN_SETTINGS: &[GainSetting] = &[
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(0),
+        mix: MixGainCode::from_code_unchecked(0),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(1),
+        mix: MixGainCode::from_code_unchecked(0),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(1),
+        mix: MixGainCode::from_code_unchecked(1),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(2),
+        mix: MixGainCode::from_code_unchecked(1),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(2),
+        mix: MixGainCode::from_code_unchecked(2),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(3),
+        mix: MixGainCode::from_code_unchecked(2),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(3),
+        mix: MixGainCode::from_code_unchecked(3),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(4),
+        mix: MixGainCode::from_code_unchecked(3),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(4),
+        mix: MixGainCode::from_code_unchecked(4),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(5),
+        mix: MixGainCode::from_code_unchecked(4),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(5),
+        mix: MixGainCode::from_code_unchecked(5),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(6),
+        mix: MixGainCode::from_code_unchecked(5),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(6),
+        mix: MixGainCode::from_code_unchecked(6),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(7),
+        mix: MixGainCode::from_code_unchecked(6),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(7),
+        mix: MixGainCode::from_code_unchecked(7),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(8),
+        mix: MixGainCode::from_code_unchecked(7),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(8),
+        mix: MixGainCode::from_code_unchecked(8),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(9),
+        mix: MixGainCode::from_code_unchecked(8),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(9),
+        mix: MixGainCode::from_code_unchecked(9),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(10),
+        mix: MixGainCode::from_code_unchecked(9),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(10),
+        mix: MixGainCode::from_code_unchecked(10),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(11),
+        mix: MixGainCode::from_code_unchecked(10),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(11),
+        mix: MixGainCode::from_code_unchecked(11),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(12),
+        mix: MixGainCode::from_code_unchecked(11),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(12),
+        mix: MixGainCode::from_code_unchecked(12),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(13),
+        mix: MixGainCode::from_code_unchecked(12),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(13),
+        mix: MixGainCode::from_code_unchecked(13),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(14),
+        mix: MixGainCode::from_code_unchecked(13),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(14),
+        mix: MixGainCode::from_code_unchecked(14),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+    GainSetting {
+        lna: LnaGainCode::from_code_unchecked(15),
+        mix: MixGainCode::from_code_unchecked(14),
+        vga: VgaGainCode::from_code_unchecked(8),
+    },
+];
+
+pub const GAIN_VALUES: &[f32] = &[
+    16.3, 17.2, 17.7, 19.0, 20.0, 24.0, 25.0, 28.8, 30.7, 32.0, 32.9, 36.0, 37.0, 39.2, 41.7, 44.3,
+    46.0, 49.1, 50.1, 52.7, 53.5, 54.9, 56.5, 58.4, 59.7, 60.2, 60.8, 64.3, 64.6, 65.9,
+];
+
 /*
 #[test]
 fn filter_configs_bruteforce() {
@@ -678,7 +852,56 @@ fn filter_config(mut bw: u32) -> (u8, u8, u32) {
 
     (reg_0a, reg_0b, int_freq)
 }
- */
+
+
+#[test]
+fn make_gain_settings() {
+    let vga = VgaGainCode::from_code(0x08).unwrap();
+
+    let mut previous_combined_gain = f32::MIN;
+    let mut index = 0;
+    let mut presets = vec![];
+
+    loop {
+        let code = u8::try_from(index).unwrap();
+        let lna_code = code / 2 + code % 2;
+        let mix_code = code / 2;
+
+        if lna_code >= 16 || mix_code >= 16 {
+            break;
+        }
+
+        let lna = LnaGainCode::from_code(lna_code).unwrap();
+        let mix = MixGainCode::from_code(mix_code).unwrap();
+
+        let combined_gain = lna.as_db() + mix.as_db();
+
+        if combined_gain > previous_combined_gain {
+            presets.push(GainSetting { lna, mix, vga });
+        }
+
+        previous_combined_gain = combined_gain;
+        index += 1;
+    }
+
+    println!("pub const GAIN_SETTINGS: &[GainSetting] = &[");
+    for gain in &presets {
+        println!(
+            "  GainSetting {{ lna: LnaGainCode::from_code_unchecked({:?}), mix: MixGainCode::from_code_unchecked({:?}), vga: VgaGainCode::from_code_unchecked({:?}) }},",
+            gain.lna.code(),
+            gain.mix.code(),
+            gain.vga.code()
+        );
+    }
+    println!("];");
+
+    println!("pub const GAIN_VALUES: &[f32] = &[");
+    for gain in &presets {
+        println!("  {:.1}, ", gain.as_db());
+    }
+    println!("];");
+}
+    */
 
 #[derive(Clone, Copy, Debug)]
 pub struct NotchBand {
@@ -711,11 +934,15 @@ pub fn is_in_notch_band(frequency: f32) -> bool {
 mod tests {
     use crate::tuner::r82xx::{
         CrystalCapacitor,
+        MixGainCode,
         OpenD,
         RfFilt,
         RfMux,
         TrackingFilterSetting,
+        VgaGainCode,
         preset::{
+            GAIN_SETTINGS,
+            GAIN_VALUES,
             PRESET_BANDWIDTH_SETTINGS,
             PRESET_FREQUENCY_SETTINGS,
             bandwidth_setting,
@@ -814,6 +1041,62 @@ mod tests {
                 PRESET_BANDWIDTH_SETTINGS[i - 1].max_bandwidth
                     <= PRESET_BANDWIDTH_SETTINGS[i].min_bandwidth
             );
+        }
+    }
+
+    #[test]
+    fn gain_settings() {
+        #[rustfmt::skip]
+        pub const LIBRTLSDR_COMBINED_GAINS: [i32; 30] = [
+            0, 9, 14, 27, 37, 77, 87, 125, 144, 157, 166, 197, 207, 229, 254, 280, 297, 328, 338,
+            364, 372, 386, 402, 421, 434, 439, 445, 480,
+
+            // for some mysterious reason librtlsdr skips this one
+            483,
+
+            496,
+        ];
+
+        let mut previous_mix_code: Option<MixGainCode> = None;
+
+        let fixed_vga_code = VgaGainCode::from_code(0x08).unwrap();
+
+        for (i, gain_setting) in GAIN_SETTINGS.iter().enumerate() {
+            println!(
+                "{i}: {:.1} dB, {:.1} dB",
+                gain_setting.lna.as_db() + gain_setting.mix.as_db(),
+                gain_setting.as_db() - gain_setting.vga.as_db(),
+            );
+
+            assert_eq!((gain_setting.as_db() * 10.0).round() / 10.0, GAIN_VALUES[i]);
+        }
+
+        for (i, gain_setting) in GAIN_SETTINGS.iter().enumerate() {
+            assert_eq!(
+                ((gain_setting.as_db() - gain_setting.vga.as_db()) * 10.0).round() as i32,
+                LIBRTLSDR_COMBINED_GAINS[i]
+            );
+
+            assert_eq!(gain_setting.vga, fixed_vga_code);
+
+            if i % 2 == 0 {
+                assert_eq!(gain_setting.lna.code(), gain_setting.mix.code());
+
+                if let Some(previous_mix_code) = previous_mix_code {
+                    assert!(gain_setting.lna.code() > previous_mix_code.code());
+                    assert!(gain_setting.mix.code() > previous_mix_code.code());
+                }
+            }
+            else {
+                assert!(gain_setting.lna.code() > gain_setting.mix.code());
+
+                if let Some(previous_mix_code) = previous_mix_code {
+                    assert!(gain_setting.lna.code() > previous_mix_code.code());
+                    assert_eq!(gain_setting.mix.code(), previous_mix_code.code());
+                }
+            }
+
+            previous_mix_code = Some(gain_setting.mix);
         }
     }
 }

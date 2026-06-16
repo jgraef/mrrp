@@ -44,7 +44,10 @@ use crate::{
         Tuner,
         TunerError,
         TunerProbe,
+        gain::TunerGain,
         r82xx::preset::{
+            GAIN_SETTINGS,
+            GAIN_VALUES,
             bandwidth_setting,
             frequency_setting,
         },
@@ -72,6 +75,9 @@ pub enum Error {
 
     #[error("No PLL lock")]
     NoPllLock,
+
+    #[error("Invalid gain index: {index}")]
+    InvalidGain { index: usize },
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
@@ -717,8 +723,8 @@ impl<'a> Transaction<'a> {
         Ok(())
     }
 
-    pub fn set_vga_gain(&mut self, gain: VgaGain) {
-        match gain {
+    pub fn set_vga_gain(&mut self, gain: impl Into<VgaGain>) {
+        match gain.into() {
             VgaGain::Pin => {
                 self.registers.set_vga_mode(true);
             }
@@ -729,8 +735,8 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    pub fn set_lna_gain(&mut self, gain: LnaGain) {
-        match gain {
+    pub fn set_lna_gain(&mut self, gain: impl Into<LnaGain>) {
+        match gain.into() {
             LnaGain::Auto => {
                 self.registers.set_lna_gain_mode(false);
             }
@@ -741,16 +747,45 @@ impl<'a> Transaction<'a> {
         }
     }
 
-    pub fn set_mix_gain(&mut self, gain: MixGain) {
-        match gain {
+    pub fn set_mix_gain(&mut self, gain: impl Into<MixGain>) {
+        match gain.into() {
             MixGain::Auto => {
-                self.registers.set_mixgain_mode(true);
+                self.registers.set_mix_gain_mode(true);
             }
             MixGain::Code(code) => {
-                self.registers.set_mixgain_mode(false);
+                self.registers.set_mix_gain_mode(false);
                 self.registers.set_mix_gain(code.into());
             }
         }
+    }
+
+    pub fn set_gain_preset(&mut self, gain: TunerGain) -> Result<(), Error> {
+        // note: librtlsdr doesn't really use vga gain. it sets it to 0x0b for auto, and
+        // 0x08 for manual
+
+        match gain {
+            TunerGain::Auto => {
+                self.set_lna_gain(LnaGain::Auto);
+                self.set_mix_gain(MixGain::Auto);
+
+                // librtlsdr does this, so we'll do it as well (for now)
+                self.set_vga_gain(VgaGain::from_code(0x0b).unwrap());
+            }
+            TunerGain::Manual(index) => {
+                let gain_setting = GAIN_SETTINGS
+                    .get(index)
+                    .ok_or_else(|| Error::InvalidGain { index })?;
+                tracing::debug!(?index, ?gain_setting, "setting combined gain");
+
+                self.set_lna_gain(gain_setting.lna);
+                self.set_mix_gain(gain_setting.mix);
+
+                // these are all going to be 0x08 (for now)
+                self.set_vga_gain(gain_setting.vga);
+            }
+        }
+
+        Ok(())
     }
 
     pub fn set_crystal_config(&mut self, capacitor: CrystalCapacitor) {
@@ -920,15 +955,20 @@ impl<'a> Transaction<'a> {
         self.shutdown_ours();
 
         {
-            // todo: the dongle gets funky when standby is not done right. but it seems to
+            // todo: this will check if we shutdown the r82xx with our more verbose method
+            // the same way that librtlsdr would. if not we log warnings and run the
+            // librtlsdr sequence.
+            //
+            // the dongle gets funky when standby is not done right. but it seems to
             // work pretty well now. we'll leave this here for a while
 
             let mut any_difference = false;
             for (i, expected) in SHUTDOWN_REGITSERS.iter().copied() {
                 if self.registers[i] != expected {
-                    println!(
+                    tracing::warn!(
                         "Register 0x{i:02x} differs:\n  expected: 0x{:02x}\n  provided: 0x{:02x}",
-                        expected, self.registers[i]
+                        expected,
+                        self.registers[i]
                     );
                     any_difference = true;
                 }
@@ -966,7 +1006,7 @@ impl<'a> Transaction<'a> {
         // 0x07
         self.registers.set_pwd_mix(false); // turn mixer off
         self.registers.set_pw0_mix(true); // mixer low power setting
-        self.registers.set_mixgain_mode(true); // why does librtlsdr this to auto?
+        self.registers.set_mix_gain_mode(true); // why does librtlsdr set this to auto?
         self.registers.set_mix_gain(0b1010); // don't know why librtlsdr sets this to 0b1010, instead of 0b0000(min)
 
         // 0x08
@@ -1015,6 +1055,7 @@ impl<'a> Transaction<'a> {
 
         /*
         Note: Nvm, it's working now. We'll leave this here for a while, in case problems return.
+        The problem might have been that we didn't disable the ADCs while trying to do I2C.
 
         This still produces very strange behavior when trying to initialize the R828D after standby.
         Sometimes the R828D doesn't respond (USB timeout), but usually the DEMOD actually stalls (e.g. setting IIC_repeat fails).
@@ -1099,113 +1140,24 @@ impl Tuner for R82xx {
         }
     }
 
+    fn gains(&self) -> &[f32] {
+        GAIN_VALUES
+    }
+
+    async fn set_gain<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        gain: TunerGain,
+    ) -> Result<(), Self::Error> {
+        let mut transaction = self.begin_transaction(rtl2832u);
+        transaction.set_gain_preset(gain)?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
     async fn shutdown<'a>(&mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {
         let mut transaction = self.begin_transaction(rtl2832u);
         transaction.shutdown();
         transaction.commit().await
     }
 }
-
-/*
-#[test]
-fn sel_div() {
-    // slightly modified code from librtlsdr for sel_div selection.
-
-    // is their code for selecting sel_div wrong? the sel_div bits are assigned a
-    // bit out of order, so 0b11 would mean no divider, according to datasheet. but
-    // this doesn't seem to take this into account.
-
-    let mut mix_div = 2;
-
-    let vco_min: f32 = 1770000000.0;
-    let vco_max = vco_min * 2.0;
-
-    while mix_div <= 64 {
-        let mut div_buf = mix_div;
-        let mut div_num = 0;
-        while div_buf > 2 {
-            div_buf = div_buf >> 1;
-            div_num += 1;
-        }
-
-        let f_min = vco_min / mix_div as f32;
-        let f_max = vco_max / mix_div as f32;
-
-        println!(
-            "f={}..{} (MHz), mix_div={mix_div}, div_num={div_num:03b}",
-            f_min / 1000000.0,
-            f_max / 1000000.0
-        );
-
-        let our = find_sel_div(0.5 * (f_min + f_max));
-        println!("our: sel_div={:03b}, f_div={}", our.0, our.1);
-
-        mix_div = mix_div << 1;
-    }
-
-    fn find_sel_div(frequency: f32) -> (u8, f32) {
-        let vco_min: f32 = 1770000000.0;
-
-        let div = (vco_min / frequency).log2().floor().clamp(0.0, 5.0);
-        let sel_div = div as u8;
-        let f_div = 2.0f32.powi(i32::from(sel_div) + 1);
-        (sel_div, f_div)
-    }
-}
-
-#[test]
-fn test_set_pll() {
-    fn set_pll(frequency: f32) {
-        let crystal_frequency = BLOG_CRYSTAL_FREQ as f32;
-        let vco_power_ref = 1;
-
-        let sel_div = SelDiv::from_frequency(frequency);
-
-        // todo: librtlsdr adjusts the sel_div value using vco_fine_tune, though we
-        // haven't actually observed this taking effect (we tuned a bit while logging
-        // some values in r82xx_set_pll).
-
-        //self.registers.set_sel_div(sel_div.register_value());
-
-        // the VCO frequency we want
-        // vco_freq = (uint64_t)freq * (uint64_t)mix_div;
-        let vco_frequency = frequency * sel_div.effective_divider();
-
-        dbg!(vco_frequency, crystal_frequency);
-
-        // librtlsdr:
-        //
-        // uint32_t vco_fra;	/* VCO contribution by SDM (kHz) */
-        // pll_ref = priv->cfg->xtal;
-        // nint = vco_freq / (2 * pll_ref);
-        // vco_fra = (vco_freq - 2 * pll_ref * nint) / 1000;
-        // ni = (nint - 13) / 4;
-        // si = nint - 4 * ni - 13;
-        //
-        // datasheet:
-        //
-        // SI2C: 2 bits
-        // Ni2C: 6 bits
-        //
-        // Nint = 4*Ni2c+Si2c+13
-        // Ndiv = (Nint + Nfra)*2
-        // Nfra = SDM_IN[16] * 2^-1 + SDM_IN[15] * 2^-2 + ... + SDM_IN[2]* 2 ^-15 +
-        // SDM_IN[1] * 2^-16
-
-        let n_div = 0.5 * vco_frequency / crystal_frequency;
-        dbg!(n_div);
-
-        let n_int = n_div.floor() as u8;
-        let n_fra = (n_div.fract() * 65536.0) as u16;
-
-        if n_int > (128 / vco_power_ref) - 1 {
-            todo!("return error: no valid PLL values for frequency: {frequency}");
-        }
-
-        let n_i2c = (n_int - 13) / 4;
-        let s_i2c = n_int - 4 * n_i2c - 13;
-    }
-
-    set_pll(101625000.0);
-}
- */

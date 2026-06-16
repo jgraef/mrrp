@@ -40,6 +40,7 @@ use crate::{
         IfSetting,
         Tuner,
         TunerProbe,
+        gain::IntoTunerGain,
     },
 };
 
@@ -78,6 +79,9 @@ pub struct Device {
 
     /// The current center frequency
     center_frequency: Option<f32>,
+
+    /// Gain values in dB that are available with the tuner.
+    tuner_gains: Vec<f32>,
 }
 
 impl Device {
@@ -110,6 +114,9 @@ impl Device {
 
         i2c_repeater_guard.disable().await?;
 
+        let tuner_gains = tuner.gains().to_vec();
+        tracing::debug!(?tuner_gains);
+
         tracing::info!(tuner = tuner.name(), "found tuner");
 
         let mut inner = Inner { rtl2832u, tuner };
@@ -137,6 +144,7 @@ impl Device {
             frequency_correction: 0,
             sample_rate,
             center_frequency: None,
+            tuner_gains,
         })
     }
 
@@ -171,7 +179,24 @@ impl Device {
         self.center_frequency
     }
 
-    /// todo: pub for testing only
+    /// Provides access to the [`Rtl2832u`] and [tuner](AnyTuner).
+    ///
+    /// This acquires a lock, so should be held for as short as possible. The
+    /// lock is necessary because this inner struct is shared with [`Reader`]
+    /// for configuring USB on drop (i.e. it stalls endpoint A).
+    ///
+    /// # TODO
+    ///
+    /// Do we want to expose this? I'd prefer if you can actually somehow access
+    /// the [`Rtl2832u`] and tuner if possible. Especially the tuner is
+    /// important, as then you can downcast it to a specific tuner and use
+    /// settings that are not exposed via the trait.
+    ///
+    /// Also technically this doesn't need mutual ownership of the device, but
+    /// we think it makes sense to have it that way, as the Device is not
+    /// supposed to allow shared usage (except for the before-mentioned drop
+    /// handlers).
+    #[inline(always)]
     pub async fn inner_mut(&mut self) -> InnerGuard<'_> {
         self.inner.lock().await
     }
@@ -289,11 +314,40 @@ impl Device {
         Ok(())
     }
 
+    /// Enables or disables the [`Rtl2832U`]'s Digital Automatic Gain Control.
     pub async fn set_agc_mode(&mut self, enable: bool) -> Result<(), Error> {
         tracing::debug!(?enable, "enable DAGC mode");
         let Inner { rtl2832u, tuner: _ } = &mut *self.inner.lock().await;
         rtl2832u.set_agc_mode(enable).await?;
         Ok(())
+    }
+
+    /// Sets the tuner's gain.
+    ///
+    /// This can be either [`Auto`](crate::tuner::gain::Auto),
+    /// [`Index(usize)`](crate::tuner::gain::Index),
+    /// [`Db(f32)`](crate::tuner::gain::Db), or the enum these convert into,
+    /// [`TunerGain`](crate::tuner::gain::TunerGain).
+    pub async fn set_tuner_gain(&mut self, gain: impl IntoTunerGain) -> Result<(), Error> {
+        let gain = gain.into_tuner_gain(&self.tuner_gains);
+        tracing::debug!(?gain, "set tuner gain");
+
+        let Inner { rtl2832u, tuner } = &mut *self.inner.lock().await;
+
+        {
+            let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
+
+            tuner.set_gain(&mut *i2c_repeater_guard, gain).await?;
+
+            i2c_repeater_guard.disable().await?;
+        }
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    pub fn available_tuner_gains(&self) -> &[f32] {
+        &self.tuner_gains
     }
 }
 
@@ -498,7 +552,6 @@ impl<'a> DerefMut for InnerGuard<'a> {
 /// This is dead code right now, as we don't apply any frequency correction at
 /// the moment.
 #[inline(always)]
-#[allow(dead_code)]
 pub fn apply_frequency_correction(frequency: f32, correction: f32) -> f32 {
     frequency * (1.0 + correction / 1.0e6)
 }

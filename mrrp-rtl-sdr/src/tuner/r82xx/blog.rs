@@ -51,6 +51,7 @@ use crate::{
         Tuner,
         TunerError,
         TunerProbe,
+        gain::TunerGain,
         r82xx::{
             self,
             R82xx,
@@ -146,13 +147,14 @@ impl TunerProbe for BlogTunerProbe {
     }
 }
 
-/// Wraps [`R82xx`] to add support for the RTL-SDR Blog V4's upconverter.
+/// Wraps [`R82xx`] to add support for the RTL-SDR Blog V4's upconverter and
+/// other quirks.
 #[derive(Debug)]
 pub struct BlogTuner {
-    r82xx: R82xx,
+    pub r82xx: R82xx,
     model: Model,
     name: String,
-    upconverter_pin: OutputPin,
+    pub upconverter_pin: OutputPin,
 }
 
 impl BlogTuner {
@@ -166,9 +168,11 @@ impl BlogTuner {
             upconverter_pin,
         }
     }
-}
 
-impl BlogTuner {
+    pub fn model(&self) -> Model {
+        self.model
+    }
+
     pub fn upconverter_state(&self) -> bool {
         // we should always know the state since we initialized the pin
         self.upconverter_pin
@@ -283,6 +287,19 @@ impl Tuner for BlogTuner {
 
     fn if_setting(&self) -> IfSetting {
         self.r82xx.if_setting()
+    }
+
+    fn gains(&self) -> &[f32] {
+        self.r82xx.gains()
+    }
+
+    async fn set_gain<'a>(
+        &'a mut self,
+        rtl2832u: &'a mut Rtl2832u,
+        gain: TunerGain,
+    ) -> Result<(), Self::Error> {
+        self.r82xx.set_gain(rtl2832u, gain).await?;
+        Ok(())
     }
 
     async fn shutdown<'a>(&'a mut self, rtl2832u: &'a mut Rtl2832u) -> Result<(), Self::Error> {

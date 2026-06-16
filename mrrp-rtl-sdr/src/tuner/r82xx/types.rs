@@ -1,6 +1,12 @@
 use std::fmt::Debug;
 
-use crate::rtl2832u::i2c::I2cAddress;
+use crate::{
+    rtl2832u::i2c::I2cAddress,
+    tuner::gain::{
+        Auto,
+        closest_gain,
+    },
+};
 
 /// IF filter settings
 ///
@@ -219,14 +225,14 @@ impl VgaGain {
         }
     }
 
-    pub const fn from_db(gain: f32) -> Self {
+    pub fn from_db(gain: f32) -> Self {
         Self::Code(VgaGainCode::from_db(gain))
     }
 
     pub fn as_db(&self) -> Option<f32> {
         match self {
             VgaGain::Pin => None,
-            VgaGain::Code(vga_gain_code) => Some(vga_gain_code.as_db()),
+            VgaGain::Code(code) => Some(code.as_db()),
         }
     }
 }
@@ -237,6 +243,21 @@ impl TryFrom<u8> for VgaGain {
     #[inline(always)]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Self::from_code(value)
+    }
+}
+
+impl From<VgaGainCode> for VgaGain {
+    #[inline(always)]
+    fn from(value: VgaGainCode) -> Self {
+        Self::Code(value)
+    }
+}
+
+impl From<Auto> for VgaGain {
+    #[inline(always)]
+    fn from(value: Auto) -> Self {
+        let _ = value;
+        Self::Pin
     }
 }
 
@@ -251,11 +272,9 @@ impl TryFrom<u8> for VgaGain {
 pub struct VgaGainCode(u8);
 
 impl VgaGainCode {
-    /// Minimum representable gain value in dB
-    pub const MIN_DB: f32 = -12.0;
-
-    /// Maximum representable gain value in dB
-    pub const MAX_DB: f32 = 40.5;
+    pub const GAINS: [f32; 16] = [
+        -4.7, -2.1, 0.5, 3.5, 7.7, 11.2, 13.6, 14.9, 16.3, 19.5, 23.1, 26.5, 30.0, 33.7, 37.2, 40.8,
+    ];
 
     pub const fn from_code(code: u8) -> Result<Self, InvalidVgaGainCode> {
         if code & 0xf0 != 0 {
@@ -266,14 +285,28 @@ impl VgaGainCode {
         }
     }
 
-    pub const fn from_db(gain: f32) -> Self {
-        let code =
-            ((gain - Self::MIN_DB) / (Self::MAX_DB - Self::MIN_DB) * 15.0).clamp(0.0, 15.0) as u8;
+    pub const fn from_code_unchecked(code: u8) -> Self {
         Self(code)
     }
 
-    pub const fn as_db(&self) -> f32 {
-        self.0 as f32 / 15.0 * (Self::MAX_DB - Self::MIN_DB) + Self::MIN_DB
+    #[inline(always)]
+    pub fn from_db(gain: f32) -> Self {
+        Self(
+            closest_gain(gain, &Self::GAINS)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    #[inline(always)]
+    pub fn as_db(&self) -> f32 {
+        Self::GAINS[usize::from(self.0)]
+    }
+
+    #[inline(always)]
+    pub fn code(&self) -> u8 {
+        self.0
     }
 }
 
@@ -305,12 +338,42 @@ impl LnaGain {
             Err(error) => Err(error),
         }
     }
+
+    pub fn from_db(gain: f32) -> Self {
+        Self::Code(LnaGainCode::from_db(gain))
+    }
+
+    pub fn as_db(&self) -> Option<f32> {
+        match self {
+            LnaGain::Auto => None,
+            LnaGain::Code(code) => Some(code.as_db()),
+        }
+    }
+}
+
+impl From<LnaGainCode> for LnaGain {
+    #[inline(always)]
+    fn from(value: LnaGainCode) -> Self {
+        Self::Code(value)
+    }
+}
+
+impl From<Auto> for LnaGain {
+    #[inline(always)]
+    fn from(value: Auto) -> Self {
+        let _ = value;
+        Self::Auto
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Into)]
 pub struct LnaGainCode(u8);
 
 impl LnaGainCode {
+    pub const GAINS: [f32; 16] = [
+        0.0, 0.9, 2.2, 6.2, 10.0, 11.3, 14.4, 16.6, 19.2, 22.3, 24.9, 26.3, 28.2, 28.7, 32.2, 33.5,
+    ];
+
     pub const fn from_code(code: u8) -> Result<Self, InvalidLnaGainCode> {
         if code & 0xf0 != 0 {
             Err(InvalidLnaGainCode { code })
@@ -318,6 +381,30 @@ impl LnaGainCode {
         else {
             Ok(Self(code))
         }
+    }
+
+    pub const fn from_code_unchecked(code: u8) -> Self {
+        Self(code)
+    }
+
+    #[inline(always)]
+    pub fn from_db(gain: f32) -> Self {
+        Self(
+            closest_gain(gain, &Self::GAINS)
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    #[inline(always)]
+    pub fn as_db(&self) -> f32 {
+        Self::GAINS[usize::from(self.0)]
+    }
+
+    #[inline(always)]
+    pub fn code(&self) -> u8 {
+        self.0
     }
 }
 
@@ -349,12 +436,42 @@ impl MixGain {
             Err(error) => Err(error),
         }
     }
+
+    pub fn from_db(gain: f32) -> Self {
+        Self::Code(MixGainCode::from_db(gain))
+    }
+
+    pub fn as_db(&self) -> Option<f32> {
+        match self {
+            MixGain::Auto => None,
+            MixGain::Code(code) => Some(code.as_db()),
+        }
+    }
+}
+
+impl From<MixGainCode> for MixGain {
+    #[inline(always)]
+    fn from(value: MixGainCode) -> Self {
+        Self::Code(value)
+    }
+}
+
+impl From<Auto> for MixGain {
+    #[inline(always)]
+    fn from(value: Auto) -> Self {
+        let _ = value;
+        Self::Auto
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Into)]
 pub struct MixGainCode(u8);
 
 impl MixGainCode {
+    pub const GAINS: [f32; 16] = [
+        0.0, 0.5, 1.5, 2.5, 4.4, 5.3, 6.3, 8.8, 10.5, 11.5, 12.3, 13.9, 15.2, 15.8, 16.1, 15.3,
+    ];
+
     #[inline(always)]
     pub const fn from_code(code: u8) -> Result<Self, InvalidMixGainCode> {
         if code & 0xf0 != 0 {
@@ -363,6 +480,31 @@ impl MixGainCode {
         else {
             Ok(Self(code))
         }
+    }
+
+    pub const fn from_code_unchecked(code: u8) -> Self {
+        Self(code)
+    }
+
+    #[inline(always)]
+    pub fn from_db(gain: f32) -> Self {
+        // the last gain value actually decreases, so we exclude it here
+        Self(
+            closest_gain(gain, &Self::GAINS[..15])
+                .unwrap()
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    #[inline(always)]
+    pub fn as_db(&self) -> f32 {
+        Self::GAINS[usize::from(self.0)]
+    }
+
+    #[inline(always)]
+    pub fn code(&self) -> u8 {
+        self.0
     }
 }
 
@@ -380,8 +522,6 @@ impl TryFrom<u8> for MixGainCode {
 pub struct InvalidMixGainCode {
     pub code: u8,
 }
-
-// ----------------------------------------------
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Model {
@@ -642,34 +782,16 @@ pub struct InvalidPllAutoTuneClockRateCode {
 
 #[cfg(test)]
 mod tests {
+    use std::cmp::Ordering;
+
     use crate::tuner::r82xx::{
+        LnaGainCode,
+        MixGainCode,
         PllDivider,
         SelDiv,
+        VgaGainCode,
         blog::BLOG_CRYSTAL_FREQ,
-        types::VgaGainCode,
     };
-
-    #[test]
-    pub fn test_vga_code_from_db() {
-        // IF VGA manual gain control - 0000=-12 dB, 1111=40.5 dB; -3.5 dB/step
-
-        assert_eq!(VgaGainCode::from_db(-12.0), VgaGainCode(0b0000));
-        assert_eq!(VgaGainCode::from_db(-8.5), VgaGainCode(0b0001));
-        assert_eq!(VgaGainCode::from_db(-5.0), VgaGainCode(0b0010));
-        assert_eq!(VgaGainCode::from_db(-1.5), VgaGainCode(0b0011));
-        assert_eq!(VgaGainCode::from_db(2.0), VgaGainCode(0b0100));
-        assert_eq!(VgaGainCode::from_db(5.5), VgaGainCode(0b0101));
-        assert_eq!(VgaGainCode::from_db(9.0), VgaGainCode(0b0110));
-        assert_eq!(VgaGainCode::from_db(12.5), VgaGainCode(0b0111));
-        assert_eq!(VgaGainCode::from_db(16.0), VgaGainCode(0b1000));
-        assert_eq!(VgaGainCode::from_db(19.5), VgaGainCode(0b1001));
-        assert_eq!(VgaGainCode::from_db(23.0), VgaGainCode(0b1010));
-        assert_eq!(VgaGainCode::from_db(26.5), VgaGainCode(0b1011));
-        assert_eq!(VgaGainCode::from_db(30.0), VgaGainCode(0b1100));
-        assert_eq!(VgaGainCode::from_db(33.5), VgaGainCode(0b1101));
-        assert_eq!(VgaGainCode::from_db(37.0), VgaGainCode(0b1110));
-        assert_eq!(VgaGainCode::from_db(40.5), VgaGainCode(0b1111));
-    }
 
     #[test]
     pub fn test_sel_div() {
@@ -715,6 +837,59 @@ mod tests {
                 //sdm: 0x8000,
                 sdm: michele_sdm(3252000000),
             }
+        );
+    }
+
+    #[test]
+    fn gain_values() {
+        // taken from r82xx.c
+        const VGA_BASE_GAIN: i32 = -47;
+        const R82XX_VGA_GAIN_STEPS: [i32; 16] = [
+            0, 26, 26, 30, 42, 35, 24, 13, 14, 32, 36, 34, 35, 37, 35, 36,
+        ];
+        const R82XX_LNA_GAIN_STEPS: [i32; 16] =
+            [0, 9, 13, 40, 38, 13, 31, 22, 26, 31, 26, 14, 19, 5, 35, 13];
+        const R82XX_MIXER_GAIN_STEPS: [i32; 16] =
+            [0, 5, 10, 10, 19, 9, 10, 25, 17, 10, 8, 16, 13, 6, 3, -8];
+
+        fn gains_from_steps(base: i32, steps: &[i32]) -> Vec<f32> {
+            let mut previous = base;
+
+            steps
+                .iter()
+                .map(|step| {
+                    let value = previous + step;
+                    previous = value;
+                    value as f32 / 10.0
+                })
+                .collect()
+        }
+
+        let vga_gains = gains_from_steps(VGA_BASE_GAIN, &R82XX_VGA_GAIN_STEPS);
+        let lna_gains = gains_from_steps(0, &R82XX_LNA_GAIN_STEPS);
+        let mix_gains = gains_from_steps(0, &R82XX_MIXER_GAIN_STEPS);
+
+        //println!("vga_gains: {vga_gains:.01?}");
+        //println!("lna_gains: {lna_gains:.01?}");
+        //println!("mix_gains: {mix_gains:.01?}");
+
+        assert_eq!(vga_gains, VgaGainCode::GAINS);
+        assert_eq!(lna_gains, LnaGainCode::GAINS);
+        assert_eq!(mix_gains, MixGainCode::GAINS);
+
+        assert!(
+            VgaGainCode::GAINS.is_sorted_by(|a, b| a.partial_cmp(b).unwrap() == Ordering::Less)
+        );
+        assert!(
+            LnaGainCode::GAINS.is_sorted_by(|a, b| a.partial_cmp(b).unwrap() == Ordering::Less)
+        );
+        assert!(
+            MixGainCode::GAINS[..15]
+                .is_sorted_by(|a, b| a.partial_cmp(b).unwrap() == Ordering::Less)
+        );
+        assert!(
+            MixGainCode::GAINS[..15] < MixGainCode::GAINS[..16],
+            "fix code to reflect that all mix gains are sorted now"
         );
     }
 }

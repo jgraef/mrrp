@@ -1,6 +1,6 @@
 //! From-scratch implementation of RTL-SDR driver library for async Rust.
 
-mod device;
+pub mod device;
 pub mod enumerate;
 pub mod rtl2832u;
 pub mod tuner;
@@ -15,6 +15,7 @@ pub use crate::{
         DeviceInfo,
         enumerate_devices,
     },
+    tuner::gain::TunerGain,
 };
 
 #[derive(Debug, thiserror::Error)]

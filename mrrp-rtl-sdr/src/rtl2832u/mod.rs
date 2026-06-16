@@ -750,10 +750,11 @@ impl Rtl2832u {
         })
         .await?;
 
-        self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
+        // maybe this doesn't to anything? not sure anymore
+        /*self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
             en_dagc.set_endagc(enable);
         })
-        .await?;
+        .await?;*/
 
         Ok(())
     }
