@@ -703,26 +703,11 @@ impl Rtl2832u {
         let rsamp_ratio = rsamp_ratio_from_hz(sample_rate, self.crystal_frequency);
         let actual_sample_rate = rsamp_ratio_to_hz(rsamp_ratio, self.crystal_frequency);
 
-        let changed = self
-            .write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|register| {
-                // mask off the lower 2 bits, see [`rsamp_ratio_to_hz`].
-                register.set_rsamp_ratio(rsamp_ratio & !0b11);
-            })
-            .await?;
-
-        if changed {
-            // is this necessary?
-
-            // reset demod (soft reset)
-            self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
-                soft_rst.set_soft_rst(true);
-            })
-            .await?;
-            self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
-                soft_rst.set_soft_rst(false);
-            })
-            .await?;
-        }
+        self.write_register_update::<reg::demod::CFREQ_OFF_RATIO_RSAMP_RATIO>(|register| {
+            // mask off the lower 2 bits, see [`rsamp_ratio_to_hz`].
+            register.set_rsamp_ratio(rsamp_ratio & !0b11);
+        })
+        .await?;
 
         Ok(actual_sample_rate)
     }
@@ -759,6 +744,15 @@ impl Rtl2832u {
         })
         .await?;
 
+        Ok(())
+    }
+
+    pub async fn set_soft_reset(&mut self, enable: bool) -> Result<(), Error> {
+        // reset demod (soft reset)
+        self.write_register_update::<reg::demod::SOFT_RST_IIC_REPEAT>(|soft_rst| {
+            soft_rst.set_soft_rst(enable);
+        })
+        .await?;
         Ok(())
     }
 }

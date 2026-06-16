@@ -28,6 +28,12 @@ use tokio::{
 
 use crate::server::ring_buffer::Closed;
 
+#[derive(Clone, Copy, Debug)]
+pub struct ServerConfig {
+    pub buffer_size: usize,
+    pub fix_tuner_frequency: Option<f32>,
+}
+
 #[derive(Debug)]
 pub struct ServerHandler {
     command_sender: mpsc::Sender<Command>,
@@ -37,9 +43,16 @@ pub struct ServerHandler {
 }
 
 impl ServerHandler {
-    pub async fn new(mut device: mrrp_rtl_sdr::Device, buffer_size: usize) -> Result<Self, Error> {
-        assert_ne!(buffer_size, 0, "buffer_size can't be 0");
-        assert_eq!(buffer_size % 2, 0, "buffer_size must be a multiple of 2");
+    pub async fn new(
+        mut device: mrrp_rtl_sdr::Device,
+        config: ServerConfig,
+    ) -> Result<Self, Error> {
+        assert_ne!(config.buffer_size, 0, "buffer_size can't be 0");
+        assert_eq!(
+            config.buffer_size % 2,
+            0,
+            "buffer_size must be a multiple of 2"
+        );
 
         let tuner_type = tuner_type(&mut device).await;
 
@@ -54,16 +67,14 @@ impl ServerHandler {
         };
 
         let (command_sender, command_receiver) = mpsc::channel(64);
-        let (data_sender, data_subscriber) = ring_buffer::channel(buffer_size);
+        let (data_sender, data_subscriber) = ring_buffer::channel(config.buffer_size);
 
-        let _command_task = tokio::spawn(handle_commands(device, command_receiver));
+        let _command_task = tokio::spawn(handle_commands(device, command_receiver, config));
         let _data_task = tokio::spawn({
             let command_sender = command_sender.clone();
 
             async move {
-                if let Err(error) =
-                    handle_data(data_sender, command_sender.clone(), buffer_size).await
-                {
+                if let Err(error) = handle_data(data_sender, command_sender.clone()).await {
                     // todo: we need to propagate the error to the actual server
                     tracing::error!(%error, "server data handler error");
                     let _ = command_sender.send(Command::Shutdown {
@@ -229,6 +240,7 @@ impl<'a> Buf for Buffer<'a> {
 async fn handle_commands(
     mut device: mrrp_rtl_sdr::Device,
     mut command_receiver: mpsc::Receiver<Command>,
+    config: ServerConfig,
 ) {
     while let Some(command) = command_receiver.recv().await {
         match command {
@@ -236,14 +248,11 @@ async fn handle_commands(
                 command,
                 result_sender,
             } => {
-                let result = handle_command(&mut device, command).await;
+                let result = handle_command(&mut device, command, &config).await;
                 let _ = result_sender.send(result);
             }
-            Command::GetReader {
-                buffer_size,
-                result_sender,
-            } => {
-                let result = device.reader(buffer_size).await.map_err(Into::into);
+            Command::GetReader { result_sender } => {
+                let result = device.reader(config.buffer_size).await.map_err(Into::into);
                 let _ = result_sender.send(result);
             }
             Command::Shutdown { result_sender } => {
@@ -262,6 +271,7 @@ async fn handle_commands(
 async fn handle_command(
     device: &mut mrrp_rtl_sdr::Device,
     command: mrrp_rtl_tcp::protocol::Command,
+    config: &ServerConfig,
 ) -> Result<(), Error> {
     use mrrp_rtl_tcp::protocol::Command;
 
@@ -280,7 +290,16 @@ async fn handle_command(
         }
         Command::SetCenterFrequency { frequency } => {
             tracing::debug!(?command, "handling command");
-            device.set_center_frequency(frequency as f32).await?;
+            let frequency = frequency as f32;
+
+            if let Some(fixed_tuner_frequency) = config.fix_tuner_frequency {
+                device.set_center_frequency(fixed_tuner_frequency).await?;
+                let if_offset = frequency - fixed_tuner_frequency;
+                device.set_if_offset(if_offset).await?;
+            }
+            else {
+                device.set_center_frequency(frequency).await?;
+            }
         }
         Command::SetAgcMode { enable } => {
             tracing::debug!(?command, "handling command");
@@ -316,7 +335,6 @@ async fn handle_command(
 async fn handle_data(
     mut data_sender: ring_buffer::Sender<u8>,
     command_sender: mpsc::Sender<Command>,
-    buffer_size: usize,
 ) -> Result<(), Error> {
     let mut reader_opt: Option<mrrp_rtl_sdr::Reader> = None;
 
@@ -357,10 +375,7 @@ async fn handle_data(
             // we have receivers now, so we need to get a reader
             let (result_sender, result_receiver) = oneshot::channel();
             if command_sender
-                .send(Command::GetReader {
-                    buffer_size,
-                    result_sender,
-                })
+                .send(Command::GetReader { result_sender })
                 .await
                 .is_err()
             {
@@ -391,7 +406,6 @@ enum Command {
         result_sender: oneshot::Sender<Result<(), Error>>,
     },
     GetReader {
-        buffer_size: usize,
         result_sender: oneshot::Sender<Result<mrrp_rtl_sdr::Reader, Error>>,
     },
     Shutdown {

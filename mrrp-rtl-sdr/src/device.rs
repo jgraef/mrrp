@@ -94,6 +94,8 @@ pub struct Device {
 
     /// Gain values in dB that are available with the tuner.
     tuner_gains: Vec<f32>,
+
+    if_offset: f32,
 }
 
 impl Device {
@@ -134,7 +136,7 @@ impl Device {
         let mut inner = Inner { rtl2832u, tuner };
 
         // initialize IF on rtl2832u
-        inner.configure_if().await?;
+        inner.configure_if(0.0).await?;
 
         // get the initial sample rate
         let sample_rate = inner.rtl2832u.sample_rate().await?;
@@ -157,6 +159,7 @@ impl Device {
             sample_rate,
             center_frequency: None,
             tuner_gains,
+            if_offset: 0.0,
         })
     }
 
@@ -288,7 +291,7 @@ impl Device {
 
         // set rtl2832u's if frequency, because tuner can change this when changing
         // bandwidth.
-        inner.configure_if().await?;
+        inner.configure_if(self.if_offset).await?;
 
         // librtlsdr sets the sample frequency correction here too. we don't support
         // changing this yet, but this will set the two most significant bits to 0.
@@ -298,6 +301,17 @@ impl Device {
             .rtl2832u
             .set_sample_frequency_correction(self.frequency_correction)
             .await?;
+
+        // librtlsdr performs a soft-reset at the end
+        //
+        // the bug with the frequency shift was probably because we did this in
+        // `Rtl2832u::set_sample_rate`, and only if the value changed.
+        // we think this is actually necessary to apply the sample frequency correction.
+        // though we set it to 0, which is initially, we clear out a bit in that
+        // register. we think that bit might be automatic sample rate correction
+        // (however that would work), but the soft-reset needs to be done afterwards.
+        inner.rtl2832u.set_soft_reset(true).await?;
+        inner.rtl2832u.set_soft_reset(false).await?;
 
         self.sample_rate = actual_sample_rate;
 
@@ -322,6 +336,17 @@ impl Device {
         }
 
         self.center_frequency = Some(center_frequency);
+
+        Ok(())
+    }
+
+    pub async fn set_if_offset(&mut self, if_offset: f32) -> Result<(), Error> {
+        tracing::debug!(?if_offset, "setting IF offset");
+
+        self.if_offset = if_offset;
+
+        let inner = &mut *self.inner.lock().await;
+        inner.configure_if(if_offset).await?;
 
         Ok(())
     }
@@ -492,7 +517,7 @@ impl Inner {
         Ok(())
     }
 
-    async fn configure_if(&mut self) -> Result<(), Error> {
+    async fn configure_if(&mut self, mut if_offset: f32) -> Result<(), Error> {
         let if_setting = self.tuner.if_setting();
 
         tracing::debug!(?if_setting, "setting IF");
@@ -511,7 +536,13 @@ impl Inner {
             } => {
                 self.rtl2832u.set_if_mode(IfMode::If).await?;
 
-                self.rtl2832u.set_if_frequency(frequency).await?;
+                if invert_spectrum {
+                    if_offset *= -1.0;
+                }
+
+                self.rtl2832u
+                    .set_if_frequency(frequency + if_offset)
+                    .await?;
 
                 self.rtl2832u
                     .set_spectrum_inversion(invert_spectrum)

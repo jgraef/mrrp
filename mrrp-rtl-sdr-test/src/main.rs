@@ -53,7 +53,10 @@ use crate::{
         hexyl,
         print_reg_dump,
     },
-    server::ServerHandler,
+    server::{
+        ServerConfig,
+        ServerHandler,
+    },
 };
 
 #[tokio::main]
@@ -273,10 +276,15 @@ async fn main() -> Result<(), Error> {
             listen_address,
             buffer_size,
             log_dropped,
+            fix_tuner_frequency,
         } => {
             let device = device.open_device().await?;
             let tcp_listener = TcpListener::bind(listen_address).await?;
-            let server_handler = ServerHandler::new(device, buffer_size)
+            let server_config = ServerConfig {
+                buffer_size,
+                fix_tuner_frequency,
+            };
+            let server_handler = ServerHandler::new(device, server_config)
                 .await?
                 .with_log_dropped(log_dropped);
             let server = RtlTcpServer::new(server_handler, tcp_listener)
@@ -462,6 +470,9 @@ enum Command {
 
         #[clap(long)]
         log_dropped: bool,
+
+        #[clap(long)]
+        fix_tuner_frequency: Option<f32>,
     },
     /// Dumps system memory.
     ///
