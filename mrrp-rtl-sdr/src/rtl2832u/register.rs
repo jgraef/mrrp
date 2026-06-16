@@ -1113,6 +1113,8 @@ pub mod demod {
             /// In the rtl_test dump it's 0b00, but in my `small_init` dump it's 0b01.
             ///
             /// librtlsdr sets this to 0 when setting the frequency correction.
+            ///
+            /// See [`Device::set_sample_rate`] for the issue this causes.
             pub u8, unk_0, set_unk0: 15, 14;
             /// Sample frequency correction
             ///

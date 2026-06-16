@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "mrrp",
     "mrrp-cli",
+    "mrrp-hamlib",
     "mrrp-rtl-sdr",
     "mrrp-rtl-sdr-test",
     "mrrp-rtl-tcp",

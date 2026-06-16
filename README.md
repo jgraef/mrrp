@@ -6,7 +6,7 @@ This is a collection of crates for SDR (Software Defined Radio) with Rust.
 
 **IN DEVELOPMENT**
 
-This is still under a development and not usable yet.
+This is still under a development. Don't expect anything to be in a usable state.
 
 ## `mrrp`
 
@@ -39,8 +39,6 @@ TODO: Merge from adsbee repo.
 ## `mrrp-rigctl`
 
 [hamlib rigctl](https://github.com/Hamlib/Hamlib) client and server.
-
-TODO: Merge code
 
 ## Random TODOs
 

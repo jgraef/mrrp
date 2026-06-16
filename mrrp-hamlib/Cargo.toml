@@ -1,0 +1,12 @@
+[package]
+name = "mrrp-hamlib"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+derive_more = { version = "2.1.1", features = ["into"] }
+thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["net"] }
+tracing = "0.1.44"
