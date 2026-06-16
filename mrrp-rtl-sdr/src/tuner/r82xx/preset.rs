@@ -572,162 +572,52 @@ impl GainSetting {
     }
 }
 
-pub const GAIN_SETTINGS: &[GainSetting] = &[
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(0),
-        mix: MixGainCode::from_code_unchecked(0),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(1),
-        mix: MixGainCode::from_code_unchecked(0),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(1),
-        mix: MixGainCode::from_code_unchecked(1),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(2),
-        mix: MixGainCode::from_code_unchecked(1),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(2),
-        mix: MixGainCode::from_code_unchecked(2),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(3),
-        mix: MixGainCode::from_code_unchecked(2),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(3),
-        mix: MixGainCode::from_code_unchecked(3),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(4),
-        mix: MixGainCode::from_code_unchecked(3),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(4),
-        mix: MixGainCode::from_code_unchecked(4),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(5),
-        mix: MixGainCode::from_code_unchecked(4),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(5),
-        mix: MixGainCode::from_code_unchecked(5),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(6),
-        mix: MixGainCode::from_code_unchecked(5),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(6),
-        mix: MixGainCode::from_code_unchecked(6),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(7),
-        mix: MixGainCode::from_code_unchecked(6),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(7),
-        mix: MixGainCode::from_code_unchecked(7),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(8),
-        mix: MixGainCode::from_code_unchecked(7),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(8),
-        mix: MixGainCode::from_code_unchecked(8),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(9),
-        mix: MixGainCode::from_code_unchecked(8),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(9),
-        mix: MixGainCode::from_code_unchecked(9),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(10),
-        mix: MixGainCode::from_code_unchecked(9),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(10),
-        mix: MixGainCode::from_code_unchecked(10),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(11),
-        mix: MixGainCode::from_code_unchecked(10),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(11),
-        mix: MixGainCode::from_code_unchecked(11),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(12),
-        mix: MixGainCode::from_code_unchecked(11),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(12),
-        mix: MixGainCode::from_code_unchecked(12),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(13),
-        mix: MixGainCode::from_code_unchecked(12),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(13),
-        mix: MixGainCode::from_code_unchecked(13),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(14),
-        mix: MixGainCode::from_code_unchecked(13),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(14),
-        mix: MixGainCode::from_code_unchecked(14),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-    GainSetting {
-        lna: LnaGainCode::from_code_unchecked(15),
-        mix: MixGainCode::from_code_unchecked(14),
-        vga: VgaGainCode::from_code_unchecked(8),
-    },
-];
+/// Presets for LNA, mixer, and VGA gain settings
+pub const GAIN_SETTINGS: [GainSetting; 30] = {
+    const fn gs(lna: u8, mix: u8, vga: u8) -> GainSetting {
+        GainSetting {
+            lna: LnaGainCode::from_code_unchecked(lna),
+            mix: MixGainCode::from_code_unchecked(mix),
+            vga: VgaGainCode::from_code_unchecked(vga),
+        }
+    }
+    [
+        gs(0, 0, 8),   // 16.3
+        gs(0, 1, 8),   // 16.8
+        gs(1, 1, 8),   // 17.7
+        gs(1, 2, 8),   // 18.7
+        gs(2, 2, 8),   // 20.0
+        gs(2, 3, 8),   // 21.0
+        gs(3, 3, 8),   // 25.0
+        gs(3, 4, 8),   // 26.9
+        gs(4, 4, 8),   // 30.7
+        gs(4, 5, 8),   // 31.6
+        gs(5, 5, 8),   // 32.9
+        gs(5, 6, 8),   // 33.9
+        gs(6, 6, 8),   // 37.0
+        gs(7, 6, 8),   // 39.2
+        gs(7, 7, 8),   // 41.7
+        gs(7, 8, 8),   // 43.4
+        gs(8, 8, 8),   // 46.0
+        gs(8, 9, 8),   // 47.0
+        gs(9, 9, 8),   // 50.1
+        gs(9, 10, 8),  // 50.9
+        gs(10, 10, 8), // 53.5
+        gs(11, 10, 8), // 54.9
+        gs(11, 11, 8), // 56.5
+        gs(11, 12, 8), // 57.8
+        gs(12, 12, 8), // 59.7
+        gs(13, 12, 8), // 60.2
+        gs(13, 13, 8), // 60.8
+        gs(13, 14, 8), // 61.1
+        gs(14, 15, 8), // 63.8
+        gs(15, 15, 8), // 65.1
+    ]
+};
 
-pub const GAIN_VALUES: &[f32] = &[
-    16.3, 17.2, 17.7, 19.0, 20.0, 24.0, 25.0, 28.8, 30.7, 32.0, 32.9, 36.0, 37.0, 39.2, 41.7, 44.3,
-    46.0, 49.1, 50.1, 52.7, 53.5, 54.9, 56.5, 58.4, 59.7, 60.2, 60.8, 64.3, 64.6, 65.9,
+pub const GAIN_VALUES: [f32; 30] = [
+    16.3, 16.8, 17.7, 18.7, 20.0, 21.0, 25.0, 26.9, 30.7, 31.6, 32.9, 33.9, 37.0, 39.2, 41.7, 43.4,
+    46.0, 47.0, 50.1, 50.9, 53.5, 54.9, 56.5, 57.8, 59.7, 60.2, 60.8, 61.1, 63.8, 65.1,
 ];
 
 /*
@@ -858,50 +748,72 @@ fn filter_config(mut bw: u32) -> (u8, u8, u32) {
 fn make_gain_settings() {
     let vga = VgaGainCode::from_code(0x08).unwrap();
 
-    let mut previous_combined_gain = f32::MIN;
-    let mut index = 0;
     let mut presets = vec![];
 
-    loop {
-        let code = u8::try_from(index).unwrap();
-        let lna_code = code / 2 + code % 2;
-        let mix_code = code / 2;
-
-        if lna_code >= 16 || mix_code >= 16 {
-            break;
+    for lna_code in 0..16 {
+        for mix_code in 0..16 {
+            presets.push(GainSetting {
+                lna: LnaGainCode::from_code(lna_code).unwrap(),
+                mix: MixGainCode::from_code(mix_code).unwrap(),
+                vga,
+            });
         }
-
-        let lna = LnaGainCode::from_code(lna_code).unwrap();
-        let mix = MixGainCode::from_code(mix_code).unwrap();
-
-        let combined_gain = lna.as_db() + mix.as_db();
-
-        if combined_gain > previous_combined_gain {
-            presets.push(GainSetting { lna, mix, vga });
-        }
-
-        previous_combined_gain = combined_gain;
-        index += 1;
     }
 
-    println!("pub const GAIN_SETTINGS: &[GainSetting] = &[");
-    for gain in &presets {
+    // sort by gain in dB
+    presets.sort_by(|a, b| a.as_db().partial_cmp(&b.as_db()).unwrap());
+
+    // only keep presets where lna and mix gain codes differ at most by 1
+    presets
+        .retain(|preset| (i32::from(preset.lna.code()) - i32::from(preset.mix.code())).abs() <= 1);
+
+    // remove any presets that would decrease either lna or mix gain
+    {
+        let mut previous_lna_gain = LnaGainCode::ZERO;
+        let mut previous_mix_gain = MixGainCode::ZERO;
+
+        presets.retain(|preset| {
+            let keep = preset.lna >= previous_lna_gain && preset.mix >= previous_mix_gain;
+            if keep {
+                previous_lna_gain = preset.lna;
+                previous_mix_gain = preset.mix;
+            }
+            keep
+        });
+    }
+
+    // remove any presets that would result in the same gain in dB
+    presets.dedup_by(|a, b| (a.as_db() * 10.0).round() == (b.as_db() * 10.0).round());
+
+    let num_presets = presets.len();
+
+    println!("/// Presets for LNA, mixer, and VGA gain settings");
+    println!("pub const GAIN_SETTINGS: [GainSetting; {num_presets}] = {{");
+    println!("    const fn gs(lna: u8, mix: u8, vga: u8) -> GainSetting {{");
+    println!(
+        "        GainSetting {{ lna: LnaGainCode::from_code_unchecked(lna), mix: MixGainCode::from_code_unchecked(mix), vga: VgaGainCode::from_code_unchecked(vga) }}"
+    );
+    println!("    }}");
+    println!("    [");
+    for preset in &presets {
         println!(
-            "  GainSetting {{ lna: LnaGainCode::from_code_unchecked({:?}), mix: MixGainCode::from_code_unchecked({:?}), vga: VgaGainCode::from_code_unchecked({:?}) }},",
-            gain.lna.code(),
-            gain.mix.code(),
-            gain.vga.code()
+            "        gs({:?}, {:?}, {:?}), // {:.1}",
+            preset.lna.code(),
+            preset.mix.code(),
+            preset.vga.code(),
+            preset.as_db(),
         );
     }
-    println!("];");
+    println!("    ]");
+    println!("}};");
 
-    println!("pub const GAIN_VALUES: &[f32] = &[");
+    println!("pub const GAIN_VALUES: [f32; {num_presets}] = [");
     for gain in &presets {
-        println!("  {:.1}, ", gain.as_db());
+        println!("  {:.1},", gain.as_db());
     }
     println!("];");
 }
-    */
+*/
 
 #[derive(Clone, Copy, Debug)]
 pub struct NotchBand {
@@ -934,12 +846,10 @@ pub fn is_in_notch_band(frequency: f32) -> bool {
 mod tests {
     use crate::tuner::r82xx::{
         CrystalCapacitor,
-        MixGainCode,
         OpenD,
         RfFilt,
         RfMux,
         TrackingFilterSetting,
-        VgaGainCode,
         preset::{
             GAIN_SETTINGS,
             GAIN_VALUES,
@@ -1046,6 +956,12 @@ mod tests {
 
     #[test]
     fn gain_settings() {
+        for (i, gain_setting) in GAIN_SETTINGS.iter().enumerate() {
+            assert_eq!((gain_setting.as_db() * 10.0).round() / 10.0, GAIN_VALUES[i]);
+        }
+
+        // can't compare to librtlsdr as we use different presets.
+        /*
         #[rustfmt::skip]
         pub const LIBRTLSDR_COMBINED_GAINS: [i32; 30] = [
             0, 9, 14, 27, 37, 77, 87, 125, 144, 157, 166, 197, 207, 229, 254, 280, 297, 328, 338,
@@ -1063,15 +979,11 @@ mod tests {
 
         for (i, gain_setting) in GAIN_SETTINGS.iter().enumerate() {
             println!(
-                "{i}: {:.1} dB, {:.1} dB",
+                "{i}: {gain_setting:?} {:.1} dB, {:.1} dB",
                 gain_setting.lna.as_db() + gain_setting.mix.as_db(),
                 gain_setting.as_db() - gain_setting.vga.as_db(),
             );
 
-            assert_eq!((gain_setting.as_db() * 10.0).round() / 10.0, GAIN_VALUES[i]);
-        }
-
-        for (i, gain_setting) in GAIN_SETTINGS.iter().enumerate() {
             assert_eq!(
                 ((gain_setting.as_db() - gain_setting.vga.as_db()) * 10.0).round() as i32,
                 LIBRTLSDR_COMBINED_GAINS[i]
@@ -1097,6 +1009,6 @@ mod tests {
             }
 
             previous_mix_code = Some(gain_setting.mix);
-        }
+        }*/
     }
 }

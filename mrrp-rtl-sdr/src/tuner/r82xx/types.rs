@@ -276,6 +276,8 @@ impl VgaGainCode {
         -4.7, -2.1, 0.5, 3.5, 7.7, 11.2, 13.6, 14.9, 16.3, 19.5, 23.1, 26.5, 30.0, 33.7, 37.2, 40.8,
     ];
 
+    pub const ZERO: Self = Self(0);
+
     pub const fn from_code(code: u8) -> Result<Self, InvalidVgaGainCode> {
         if code & 0xf0 != 0 {
             Err(InvalidVgaGainCode { code })
@@ -374,6 +376,8 @@ impl LnaGainCode {
         0.0, 0.9, 2.2, 6.2, 10.0, 11.3, 14.4, 16.6, 19.2, 22.3, 24.9, 26.3, 28.2, 28.7, 32.2, 33.5,
     ];
 
+    pub const ZERO: Self = Self(0);
+
     pub const fn from_code(code: u8) -> Result<Self, InvalidLnaGainCode> {
         if code & 0xf0 != 0 {
             Err(InvalidLnaGainCode { code })
@@ -471,6 +475,8 @@ impl MixGainCode {
     pub const GAINS: [f32; 16] = [
         0.0, 0.5, 1.5, 2.5, 4.4, 5.3, 6.3, 8.8, 10.5, 11.5, 12.3, 13.9, 15.2, 15.8, 16.1, 15.3,
     ];
+
+    pub const ZERO: Self = Self(0);
 
     #[inline(always)]
     pub const fn from_code(code: u8) -> Result<Self, InvalidMixGainCode> {

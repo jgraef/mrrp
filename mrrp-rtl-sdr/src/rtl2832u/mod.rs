@@ -477,9 +477,9 @@ impl Rtl2832u {
         // this does "work". i think you have to enable UNK_DAGC.enable_dagc first.
         // otherwise we got a device stalled error setting this.
         //
-        // it did finally got rid of the frequency shift completely. only
-        // UNK_DAGC.enable_dagc only got rid of most of it, but about 500 hz shift
-        // remained.
+        // it did finally got rid of the frequency shift ~~completely. only
+        // UNK_DAGC.enable_dagc only got rid of most of it, but about 500 Hz shift
+        // remained.~~ nvm, 500 Hz remain
         self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
             en_dagc.set_endagc(false);
         })
@@ -751,10 +751,13 @@ impl Rtl2832u {
         .await?;
 
         // maybe this doesn't to anything? not sure anymore
-        /*self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
+        //
+        // after we commented this out, disabling dagc (the register write above)
+        // returned a device stalled error.
+        self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
             en_dagc.set_endagc(enable);
         })
-        .await?;*/
+        .await?;
 
         Ok(())
     }

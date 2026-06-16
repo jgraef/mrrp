@@ -250,6 +250,12 @@ impl Tuner for BlogTuner {
         // set frequency in R82xx
         //
         // todo: we should discard the transaction explicitely, if this fails.
+        //
+        // todo: the tracking filter/open_d settings are overwritten just below. but
+        // since set_center_frequency flushes registers when checking PLL lock, they
+        // will be set for a short moment. either we set tracking filter after
+        // PLL, so the below overwrite will go into the same batch, or we add a argument
+        // to the function to overwrite tracking filter/open_d.
         transaction.set_center_frequency(center_frequency).await?;
 
         // if upconverter is used, disable tracking filter

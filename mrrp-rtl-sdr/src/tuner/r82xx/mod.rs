@@ -354,7 +354,7 @@ impl<'a> Transaction<'a> {
 
         // when they set the vga gain in r82xx_freq they also always enable the ADC
         //
-        // todo: this this ADC even needed when we set the VGA gain via code? our
+        // todo: is this ADC even needed when we set the VGA gain via code? our
         // understanding is that this ADC reads the VAGC pin. if that is the case, move
         // this into `set_vga_gain`.
         self.registers.set_unk_adc_enable(false);
@@ -705,18 +705,18 @@ impl<'a> Transaction<'a> {
         // r82xx_set_vga_gain always sets it to 16.3 dB
         // rc = r82xx_write_reg_mask(priv, 0x0c, 0x08, 0x9f); // 16.3 dB
         //
-        // if this always set like this, we can also just do this in initialize.
-        // but we should test this.
+        // but when you toggle on tuner agc, it'll set vga to manual 0x0b. so librtlsdr
+        // will just change the vga gain when you change frequency? sounds like a bug.
         //
         // also code 0x8 is 16 dB, not 16.3 dB
-        assert_eq!(self.registers.vga_code(), 0x08);
+        //assert_eq!(self.registers.vga_code(), 0x08);
 
         //
         // this also turns on the ADC (unk_adc_enable=false). the reg init array has
-        // this true, so we set this to false in initialize
+        // this true, so we set this to false (enable) in initialize.
         //
         //self.registers.set_unk_adc_enable(false); // on,
-        assert!(!self.registers.unk_adc_enable());
+        //assert!(!self.registers.unk_adc_enable());
 
         self.set_pll(lo_frequency).await?;
 
@@ -772,16 +772,22 @@ impl<'a> Transaction<'a> {
                 self.set_vga_gain(VgaGain::from_code(0x0b).unwrap());
             }
             TunerGain::Manual(index) => {
-                let gain_setting = GAIN_SETTINGS
+                let preset = GAIN_SETTINGS
                     .get(index)
                     .ok_or_else(|| Error::InvalidGain { index })?;
-                tracing::debug!(?index, ?gain_setting, "setting combined gain");
 
-                self.set_lna_gain(gain_setting.lna);
-                self.set_mix_gain(gain_setting.mix);
+                tracing::debug!(
+                    ?index,
+                    ?preset,
+                    gain = preset.as_db(),
+                    "setting gain preset"
+                );
+
+                self.set_lna_gain(preset.lna);
+                self.set_mix_gain(preset.mix);
 
                 // these are all going to be 0x08 (for now)
-                self.set_vga_gain(gain_setting.vga);
+                self.set_vga_gain(preset.vga);
             }
         }
 
@@ -1141,7 +1147,7 @@ impl Tuner for R82xx {
     }
 
     fn gains(&self) -> &[f32] {
-        GAIN_VALUES
+        &GAIN_VALUES[..]
     }
 
     async fn set_gain<'a>(
