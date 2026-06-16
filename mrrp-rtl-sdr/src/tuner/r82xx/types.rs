@@ -49,12 +49,12 @@ pub struct TrackingFilterSetting {
 
     /// Tracking low-pass filter
     ///
-    /// See [`RegisterBuffer::tf_lp`].
+    /// See [`RegisterBuffer::tf_lp`](super::register::RegisterBuffer::tf_lp).
     pub tf_lp: u8,
 
     /// Tracking notch filter
     ///
-    /// See [`RegisterBuffer::tf_nch`].
+    /// See [`RegisterBuffer::tf_nch`](super::register::RegisterBuffer::tf_nch).
     pub tf_nch: u8,
 }
 
@@ -210,6 +210,10 @@ impl TryFrom<u8> for RfFilt {
     }
 }
 
+/// VGA gain
+///
+/// Can be pin-controlled, or created via [`from_code`][Self::from_code] from a
+/// number 4-bit number, or via [`from_db`](Self::from_db) from a dB gain value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum VgaGain {
     /// VGA is controlled by VAGC pin
@@ -265,9 +269,6 @@ impl From<Auto> for VgaGain {
 ///
 /// Can be created via [`from_code`][Self::from_code] from a number 4-bit
 /// number, or via [`from_db`](Self::from_db) from a dB gain value.
-///
-/// The code is linear in dB, with `0b0000` being -12 dB
-/// ([`MIN_DB`](Self::MIN_DB)) and `0b1111` being ([`MAX_DB`](Self::MAX_DB))
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Into)]
 pub struct VgaGainCode(u8);
 
@@ -327,6 +328,10 @@ pub struct InvalidVgaGainCode {
     pub code: u8,
 }
 
+/// LNA gain
+///
+/// Can be auto, or created via [`from_code`][Self::from_code] from a number
+/// 4-bit number, or via [`from_db`](Self::from_db) from a dB gain value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LnaGain {
     Auto,
@@ -368,6 +373,10 @@ impl From<Auto> for LnaGain {
     }
 }
 
+/// LNA gain code
+///
+/// Can be created via [`from_code`][Self::from_code] from a number 4-bit
+/// number, or via [`from_db`](Self::from_db) from a dB gain value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Into)]
 pub struct LnaGainCode(u8);
 
@@ -427,6 +436,10 @@ pub struct InvalidLnaGainCode {
     pub code: u8,
 }
 
+/// Mixer gain
+///
+/// Can be auto, or created via [`from_code`][Self::from_code] from a number
+/// 4-bit number, or via [`from_db`](Self::from_db) from a dB gain value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum MixGain {
     Auto,
@@ -468,6 +481,10 @@ impl From<Auto> for MixGain {
     }
 }
 
+/// Mixer gain code
+///
+/// Can be created via [`from_code`][Self::from_code] from a number 4-bit
+/// number, or via [`from_db`](Self::from_db) from a dB gain value.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, derive_more::Into)]
 pub struct MixGainCode(u8);
 

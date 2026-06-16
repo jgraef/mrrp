@@ -61,6 +61,18 @@ impl Default for Options {
     }
 }
 
+/// A RTL-SDR device.
+///
+/// This is most likely the object you want to work with. It represents the
+/// combination of a [`Rtl2832u`] and a tuner chip. This will automatically
+/// discover which tuner to use. It will also handle some specific
+/// configurations, like the RTL-SDR Blog.
+///
+/// The intended way to create a [`Device`] is with
+/// [`DeviceInfo::open`][crate::enumerate::DeviceInfo::open]. The
+/// [`DeviceInfo`] itself can be retrieved with
+/// [`enumerate_devices`](crate::enumerate::enumerate_devices). Refer to the
+/// [`crate level`](crate) documentation for examples.
 #[derive(Debug)]
 pub struct Device {
     device_info: DeviceInfo,
@@ -314,7 +326,7 @@ impl Device {
         Ok(())
     }
 
-    /// Enables or disables the [`Rtl2832U`]'s Digital Automatic Gain Control.
+    /// Enables or disables the [`Rtl2832u`]'s Digital Automatic Gain Control.
     pub async fn set_agc_mode(&mut self, enable: bool) -> Result<(), Error> {
         tracing::debug!(?enable, "enable DAGC mode");
         let Inner { rtl2832u, tuner: _ } = &mut *self.inner.lock().await;
@@ -383,7 +395,7 @@ impl Drop for Device {
 /// fails if the tokio runtime is shutdown immediately after. Try to avoid this
 /// by explicitely closing the reader via the [`close`](Self::close) method.
 /// Otherwise you can also disable this behavior via the
-/// [`disam_stop_on_drop`](Self::disarm_stop_on_drop) method.
+/// [`disarm_stop_on_drop`](Self::disarm_stop_on_drop) method.
 ///
 /// # TODO
 ///

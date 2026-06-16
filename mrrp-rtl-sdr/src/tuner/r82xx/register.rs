@@ -26,8 +26,10 @@ pub const INITIAL: &[u8] = &[
 /// Buffered register state of the R82xxx
 ///
 /// This doesn't perform any actual reads or writes, but caches data locally. To
-/// actually fetch registers from the tuner use [`Transaction::read`]. To write
-/// all changed registers to the tuner use [`Transaction::flush`].
+/// actually fetch registers from the tuner use
+/// [`Transaction::read`](super::Transaction::read). To write all changed
+/// registers to the tuner use
+/// [`Transaction::flush`](super::Transaction::flush).
 ///
 /// # Initialization
 ///
