@@ -18,19 +18,15 @@ name = "buffering"
 harness = false
 
 [dev-dependencies]
-anyhow = "1.0.102"
-clap = { version = "4.6.1", features = ["derive"] }
+anyhow.workspace = true
+clap.workspace = true
 criterion = "0.8.2"
-dotenvy = "0.15.7"
-futures-util = "0.3.32"
-num-complex = "0.4.6"
-num-traits = "0.2.19"
-pin-project-lite = "0.2.17"
-rand = "0.10.1"
-tokio = { version = "1.52.3", features = [
-    "rt-multi-thread",
-    "macros",
-    "signal",
-] }
-tracing = "0.1.44"
-tracing-subscriber = "0.3.23"
+dotenvy.workspace = true
+futures-util.workspace = true
+num-complex.workspace = true
+num-traits.workspace = true
+pin-project-lite.workspace = true
+rand.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true

@@ -51,7 +51,6 @@ overflow-checks = true
 
 
 [workspace.dependencies]
-mrrp = { path = "mrrp", default-features = false }
 mrrp-audio = { path = "mrrp-audio", default-features = false }
 mrrp-core = { path = "mrrp-core", default-features = false }
 mrrp-filter = { path = "mrrp-filter", default-features = false }
@@ -63,4 +62,29 @@ mrrp-widgets = { path = "mrrp-widgets", default-features = false }
 # todo: remote and use rtl-sdr-rs instead
 rtlsdr-async = { version = "0.1.0", git = "https://github.com/jgraef/rtlsdr-async.git" }
 
-# todo: add num-complex, num-traits, thiserror, pin-project-lite, futures-{core, util}, tokio, rand, bytemuck, bytes, derive_more, parking_lot, rustfft, tracing
+anyhow = "1.0.102"
+bytemuck = { version = "1.25.0", default-features = false }
+bytes = { version = "1.11.1", default-features = false }
+chrono = { version = "0.4.45", default-features = false }
+clap = { version = "4.6.1", features = ["derive"] }
+derive_more = { version = "2.1.1", default-features = false }
+dotenvy = { version = "0.15.7", default-features = false }
+egui = { version = "0.34.2", default-features = false }
+futures-core = { version = "0.3.32", default-features = false }
+futures-util = { version = "0.3.32", default-features = false }
+nalgebra = { version = "0.35.0", default-features = false }
+num-complex = { version = "0.4.6", default-features = false }
+num-traits = { version = "0.2.19", default-features = false }
+parking_lot = { version = "0.12.4", default-features = false }
+pin-project-lite = { version = "0.2.17", default-features = false }
+rand = { version = "0.10.1", default-features = false }
+rustfft = "6.4.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+serde_with = "3.21.0"
+thiserror = { version = "2.0.18", default-features = false }
+tokio = { version = "1.52.3", default-features = false }
+tokio-stream = { version = "0.1.18", default-features = false }
+tokio-util = { version = "0.7.18", default-features = false }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

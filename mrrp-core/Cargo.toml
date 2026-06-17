@@ -6,14 +6,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-bytemuck = "1.25.0"
-futures-util = { version = "0.3.32", features = ["sink"] }
-num-complex = { version = "0.4.6", features = ["bytemuck"] }
-pin-project-lite = "0.2.17"
-thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["time"] }
-tracing = "0.1.44"
+bytemuck.workspace = true
+futures-util = { workspace = true, features = ["sink"] }
+num-complex.workspace = true
+pin-project-lite.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true
 
 [dev-dependencies]
-futures-util = "0.3.32"
-tokio = { version = "1.52.3", features = ["rt"] }
+futures-util.workspace = true
+tokio = { workspace = true, features = ["rt"] }

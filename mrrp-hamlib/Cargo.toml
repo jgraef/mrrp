@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-derive_more = { version = "2.1.1", features = ["into"] }
-thiserror = "2.0.18"
-tokio = { version = "1.52.3", features = ["net"] }
-tracing = "0.1.44"
+derive_more = { workspace = true, features = ["into"] }
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net"] }
+tracing.workspace = true
