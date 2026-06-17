@@ -1,23 +1,23 @@
 [workspace]
 resolver = "3"
 members = [
-    "mrrp",
-    "mrrp-adsb",
-    "mrrp-audio",
-    "mrrp-cli",
-    "mrrp-core",
-    "mrrp-filter",
-    "mrrp-hamlib",
-    "mrrp-modem",
-    "mrrp-rtl-sdr",
-    "mrrp-rtl-sdr-test",
-    "mrrp-rtl-tcp",
-    "mrrp-sat",
-    "mrrp-sdr",
-    "mrrp-sstv",
-    "mrrp-util",
-    "mrrp-widgets",
-    "mrrp-xtask",
+    "crates/mrrp",
+    "crates/mrrp-adsb",
+    "crates/mrrp-audio",
+    "crates/mrrp-cli",
+    "crates/mrrp-core",
+    "crates/mrrp-filter",
+    "crates/mrrp-hamlib",
+    "crates/mrrp-modem",
+    "crates/mrrp-rtl-sdr",
+    "crates/mrrp-rtl-sdr-test",
+    "crates/mrrp-rtl-tcp",
+    "crates/mrrp-sat",
+    "crates/mrrp-sdr",
+    "crates/mrrp-sstv",
+    "crates/mrrp-util",
+    "crates/mrrp-widgets",
+    "crates/mrrp-xtask",
 ]
 
 [workspace.package]
@@ -49,15 +49,14 @@ opt-level = 3
 debug-assertions = true
 overflow-checks = true
 
-
 [workspace.dependencies]
-mrrp-audio = { path = "mrrp-audio", default-features = false }
-mrrp-core = { path = "mrrp-core", default-features = false }
-mrrp-filter = { path = "mrrp-filter", default-features = false }
-mrrp-modem = { path = "mrrp-modem", default-features = false }
-mrrp-rtl-sdr = { path = "mrrp-rtl-sdr", default-features = false }
-mrrp-util = { path = "mrrp-util", default-features = false }
-mrrp-widgets = { path = "mrrp-widgets", default-features = false }
+mrrp-audio = { path = "crates/mrrp-audio", default-features = false }
+mrrp-core = { path = "crates/mrrp-core", default-features = false }
+mrrp-filter = { path = "crates/mrrp-filter", default-features = false }
+mrrp-modem = { path = "crates/mrrp-modem", default-features = false }
+mrrp-rtl-sdr = { path = "crates/mrrp-rtl-sdr", default-features = false }
+mrrp-util = { path = "crates/mrrp-util", default-features = false }
+mrrp-widgets = { path = "crates/mrrp-widgets", default-features = false }
 
 # todo: remote and use rtl-sdr-rs instead
 rtlsdr-async = { version = "0.1.0", git = "https://github.com/jgraef/rtlsdr-async.git" }
