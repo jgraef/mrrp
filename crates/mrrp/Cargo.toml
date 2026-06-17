@@ -34,7 +34,7 @@ tracing-subscriber.workspace = true
 
 [features]
 default = ["full"]
-full = ["audio", "rtl_sdr"]
+full = ["audio", "filter", "modem", "rtl_sdr"]
 audio = ["dep:mrrp-audio"]
 filter = ["dep:mrrp-filter"]
 modem = ["dep:mrrp-modem"]

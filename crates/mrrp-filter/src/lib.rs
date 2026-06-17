@@ -188,10 +188,14 @@ pub trait AsyncReadSamplesFilterExt<S>: AsyncReadSamples<S> {
     /// This is a short-hand for:
     ///
     /// ```
-    /// # use mrrp_core::signal::{WithSampleRate, NullSource};
-    /// # let input: WithSampleRate<NullSource> = NullSource.with_sample_rate(100.0);
+    /// # use mrrp_core::signal::{combinators::WithSampleRate, Silence, silence, AsyncReadSamplesExt, GetSampleRate};
+    /// # use mrrp_filter::AsyncReadSamplesFilterExt;
+    /// # fn main() {
+    /// # let target_sample_rate = 10.0;
+    /// # let input: WithSampleRate<Silence<f32>> = silence().with_sample_rate(100.0);
     /// let sample_rate = input.sample_rate();
     /// let decimated = input.decimate((sample_rate / target_sample_rate).round() as usize);
+    /// # }
     /// ```
     ///
     /// # TODO
@@ -227,10 +231,14 @@ pub trait AsyncReadSamplesFilterExt<S>: AsyncReadSamples<S> {
     /// This is a short-hand for:
     ///
     /// ```
-    /// # use mrrp_core::signal::{WithSampleRate, NullSource};
-    /// # let input: WithSampleRate<NullSource> = NullSource.with_sample_rate(100.0);
+    /// # use mrrp_core::signal::{combinators::WithSampleRate, Silence, silence, AsyncReadSamplesExt, GetSampleRate};
+    /// # use mrrp_filter::AsyncReadSamplesFilterExt;
+    /// # fn main() {
+    /// # let target_sample_rate = 1000.0;
+    /// # let input: WithSampleRate<Silence<f32>> = silence().with_sample_rate(100.0);
     /// let sample_rate = input.sample_rate();
-    /// let interpolated = input.interpolate((sample_rate / target_sample_rate).round() as usize);
+    /// let interpolated = input.interpolate((target_sample_rate / sample_rate).round() as usize);
+    /// # }
     /// ```
     ///
     /// # TODO

@@ -58,7 +58,10 @@
 //!
 //! ```
 //! # async fn main_async() -> Result<(), Box<dyn std::error::Error>> {
-//! use mrrp_rtl_sdr::{open_any, OpenOptions};
+//! use mrrp_rtl_sdr::{
+//!     OpenOptions,
+//!     open_any,
+//! };
 //! use tokio::io::AsyncReadExt;
 //!
 //! let mut device = open_any(OpenOptions::default()).await?;
@@ -70,12 +73,7 @@
 //! device.set_center_frequency(7_000_000.0).await?;
 //!
 //! // Start sampling and acquire a Reader
-//! //
-//! // By default the RTL2832U sends packets of 512 bytes. A large buffer gives your program more time until it needs to read the data (or packets get lost).
-//! //
-//! // The Reader can also be configured for multiple concurrent transfers. Refer to its documentation for more information.
-//! let buffer_size = 64 * 1024;
-//! let mut reader = device.reader(buffer_size).await?;
+//! let mut reader = device.reader(Default::default()).await?;
 //!
 //! // read samples. these are interleaved IQ as pairs of u8, with the equilibrium at 128.
 //! loop {
