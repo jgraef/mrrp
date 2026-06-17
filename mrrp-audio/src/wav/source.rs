@@ -10,9 +10,8 @@ use std::{
     },
 };
 
-use mrrp::{
+use mrrp_core::{
     buf::SampleBufMut,
-    sample::Complex,
     signal::{
         AsyncReadSamples,
         FiniteStream,
@@ -22,6 +21,7 @@ use mrrp::{
         StreamLength,
     },
 };
+use num_complex::Complex;
 
 #[derive(Debug, thiserror::Error)]
 #[error("wav source error")]

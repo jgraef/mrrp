@@ -5,12 +5,16 @@ members = [
     "mrrp-adsb",
     "mrrp-audio",
     "mrrp-cli",
+    "mrrp-core",
+    "mrrp-filter",
     "mrrp-hamlib",
+    "mrrp-modem",
     "mrrp-rtl-sdr",
     "mrrp-rtl-sdr-test",
     "mrrp-rtl-tcp",
     "mrrp-sat",
     "mrrp-sdr",
+    "mrrp-util",
     "mrrp-widgets",
     "mrrp-xtask",
 ]
@@ -48,8 +52,14 @@ overflow-checks = true
 [workspace.dependencies]
 mrrp = { path = "mrrp", default-features = false }
 mrrp-audio = { path = "mrrp-audio", default-features = false }
-mrrp-widgets = { path = "mrrp-widgets", default-features = false }
+mrrp-core = { path = "mrrp-core", default-features = false }
+mrrp-filter = { path = "mrrp-filter", default-features = false }
+mrrp-modem = { path = "mrrp-modem", default-features = false }
 mrrp-rtl-sdr = { path = "mrrp-rtl-sdr", default-features = false }
+mrrp-util = { path = "mrrp-util", default-features = false }
+mrrp-widgets = { path = "mrrp-widgets", default-features = false }
 
 # todo: remote and use rtl-sdr-rs instead
 rtlsdr-async = { version = "0.1.0", git = "https://github.com/jgraef/rtlsdr-async.git" }
+
+# todo: add num-complex, num-traits, thiserror, pin-project-lite, futures-{core, util}, tokio, rand, bytemuck, bytes, derive_more, parking_lot, rustfft, tracing

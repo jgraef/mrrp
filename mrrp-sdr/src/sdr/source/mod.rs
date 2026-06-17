@@ -15,22 +15,20 @@ use std::{
 };
 
 use anyhow::Error;
-use mrrp::{
-    signal::{
-        AsyncReadSamples,
-        AsyncReadSamplesExt,
-        GetSampleRate,
-        ReadBuf,
-        Remaining,
-        StreamLength,
-        combinators::{
-            Converted,
-            Throttled,
-        },
-    },
-    source::Noise,
-};
 use mrrp_audio::WavSource;
+use mrrp_core::signal::{
+    AsyncReadSamples,
+    AsyncReadSamplesExt,
+    GetSampleRate,
+    ReadBuf,
+    Remaining,
+    StreamLength,
+    combinators::{
+        Converted,
+        Throttled,
+    },
+};
+use mrrp_util::noise::Noise;
 use num_complex::Complex;
 use num_traits::Float;
 use rand::{

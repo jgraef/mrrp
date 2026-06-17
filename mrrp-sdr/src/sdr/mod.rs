@@ -19,7 +19,7 @@ use std::{
     },
 };
 
-use mrrp::buf::{
+use mrrp_core::buf::{
     SampleBufMut,
     SamplesMut,
 };

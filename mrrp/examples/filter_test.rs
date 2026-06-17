@@ -1,11 +1,12 @@
 use std::path::PathBuf;
 
-use clap::Parser;
-use color_eyre::eyre::{
+use anyhow::{
     Error,
     bail,
 };
+use clap::Parser;
 use mrrp::{
+    audio::write_stream_to_wav,
     filter::{
         biquad,
         design::{
@@ -19,15 +20,12 @@ use mrrp::{
         },
         fir::FirFilter,
     },
+    rtl_tcp,
     signal::{
         AsyncReadSamplesExt,
         combinators::Scanner,
     },
-    sink::{
-        file::write_stream_to_wav,
-        rtl_tcp,
-    },
-    source::white_noise,
+    util::noise::white_noise,
 };
 use num_complex::Complex;
 use rand::rngs::SmallRng;
@@ -36,7 +34,6 @@ use tokio::net::TcpListener;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
-    color_eyre::install()?;
     tracing_subscriber::fmt::init();
     tracing::info!("FM modulator example");
 

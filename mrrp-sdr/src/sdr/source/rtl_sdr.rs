@@ -7,7 +7,7 @@ use std::{
 };
 
 use anyhow::Error;
-use mrrp::{
+use mrrp_core::{
     buf::SampleBufMut,
     sample::Sample,
     signal::{

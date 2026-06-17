@@ -7,7 +7,16 @@ repository.workspace = true
 
 [dependencies]
 derive_more = { version = "2.1.1", features = ["debug"] }
-hound = "3.5.1"
-mrrp.workspace = true
-rodio = "0.22.2"
+hound = { version = "3.5.1", optional = true }
+mrrp-core.workspace = true
+num-complex = "0.4.6"
+parking_lot = { version = "0.12.5", optional = true }
+rodio = { version = "0.22.2", optional = true }
 thiserror = "2.0.18"
+tokio = { version = "1.52.3", features = ["rt", "sync"], optional = true }
+
+[features]
+default = ["full"]
+full = ["wav", "rodio"]
+wav = ["dep:hound"]
+rodio = ["dep:rodio", "dep:parking_lot", "dep:tokio"]

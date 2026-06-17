@@ -14,16 +14,14 @@ use std::{
     },
 };
 
-use mrrp::{
-    sample::Complex,
-    signal::{
-        AsyncReadSamples,
-        AsyncReadSamplesExt,
-        AsyncWriteSamples,
-        ForwardError,
-        GetSampleRate,
-    },
+use mrrp_core::signal::{
+    AsyncReadSamples,
+    AsyncReadSamplesExt,
+    AsyncWriteSamples,
+    ForwardError,
+    GetSampleRate,
 };
+use num_complex::Complex;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

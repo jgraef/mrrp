@@ -14,15 +14,13 @@ use std::{
 };
 
 use futures_util::Stream;
-use mrrp::{
-    sample::Complex,
-    signal::{
-        AsyncReadSamples,
-        AsyncReadSamplesExt,
-        ReadBuf,
-        combinators::MapInPlacePod,
-    },
+use mrrp_core::signal::{
+    AsyncReadSamples,
+    AsyncReadSamplesExt,
+    ReadBuf,
+    combinators::MapInPlacePod,
 };
+use num_complex::Complex;
 use pin_project_lite::pin_project;
 
 /// Preamble: 8 µs / 16 samples

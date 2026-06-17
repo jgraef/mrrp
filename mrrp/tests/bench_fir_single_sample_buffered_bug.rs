@@ -9,13 +9,8 @@ use std::{
 };
 
 use futures_util::FutureExt;
-use mrrp::{
+use mrrp_core::{
     buf::SampleBufMut,
-    filter::design::{
-        FilterDesign,
-        Lowpass,
-        pm_remez::pm_remez,
-    },
     signal::{
         AsyncReadSamples,
         AsyncReadSamplesExt,
@@ -25,8 +20,13 @@ use mrrp::{
         Remaining,
         StreamLength,
     },
-    source::white_noise,
 };
+use mrrp_filter::design::{
+    FilterDesign,
+    Lowpass,
+    pm_remez::pm_remez,
+};
+use mrrp_util::noise::white_noise;
 use num_complex::Complex;
 use pin_project_lite::pin_project;
 use rand::rngs::SmallRng;

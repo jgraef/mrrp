@@ -1,5 +1,5 @@
+use anyhow::Error;
 use clap::Parser;
-use color_eyre::eyre::Error;
 use mrrp::{
     audio::play_audio,
     filter::{

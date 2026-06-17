@@ -9,8 +9,8 @@ use std::{
     time::Duration,
 };
 
+use anyhow::Error;
 use clap::Parser;
-use color_eyre::eyre::Error;
 use futures_util::pin_mut;
 use mrrp::{
     audio::play_audio,
@@ -26,7 +26,6 @@ use tokio::signal::ctrl_c;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
-    color_eyre::install()?;
     tracing_subscriber::fmt::init();
     tracing::info!("AM receiver example");
 

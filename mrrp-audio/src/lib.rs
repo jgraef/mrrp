@@ -14,9 +14,19 @@
 //! is another great crate that offers support for many container formats and
 //! codecs, but it lacks encoding support.
 
+#[cfg(feature = "rodio")]
+pub mod rodio;
+#[cfg(feature = "wav")]
 pub mod wav;
 
+#[cfg(feature = "rodio")]
+pub use rodio::play_audio;
+
+#[cfg(feature = "wav")]
 pub use crate::wav::{
-    sink::WavSink,
+    sink::{
+        WavSink,
+        write_stream_to_wav,
+    },
     source::WavSource,
 };

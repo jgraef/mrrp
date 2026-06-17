@@ -6,55 +6,31 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-argmin = "0.11.0"
-argmin-math = { version = "0.5.1", features = ["nalgebra_latest"] }
-arraydeque = "0.5.1"
-arrayvec = "0.7.6"
-biquad = "0.6.0"
-bytemuck = { version = "1.23.1", features = ["derive"] }
-bytes = "1.10.1"
-derive_more = { version = "2.0.1", features = ["debug"] }
-futures-util = { version = "0.3.31", features = ["sink"] }
-image = { version = "0.25.6", default-features = false }
-num-complex = { version = "0.4.6", features = ["bytemuck"] }
-num-traits = "0.2.19"
-parking_lot = "0.12.4"
-pin-project-lite = "0.2.16"
-pm-remez = { version = "0.3.2", default-features = false, features = [
-    "nalgebra-backend",
-] }
-rand = { version = "0.10.1", default-features = false, features = [
-    "std",
-    "std_rng",
-    "sys_rng",
-] }
-rtlsdr-async = { workspace = true, optional = true, features = ["tcp"] }
-rustfft = "6.4.1"
-thiserror = "2.0.12"
-tokio = { version = "1.46.1", default-features = false, features = ["time"] }
-tracing = "0.1.41"
+mrrp-audio = { workspace = true, features = ["full"] }
+mrrp-core.workspace = true
+mrrp-filter = { workspace = true, features = ["full"] }
+mrrp-modem.workspace = true
+mrrp-util.workspace = true
 
-[dev-dependencies]
-approx = "0.5.1"
-clap = { version = "4.5.41", features = ["derive"] }
-color-eyre = "0.6.5"
-criterion = "0.8.2"
-dotenvy = "0.15.7"
-image = "0.25.6"
-plotters = "0.3.7"
-rodio = { version = "0.22.2", default-features = false, features = [
-    "playback",
-] }
-tokio = { version = "1.46.1", features = [
-    "rt-multi-thread",
-    "macros",
-    "signal",
-    "time",
-    "net",
-] }
-tracing = "0.1.41"
-tracing-subscriber = "0.3.19"
 
 [[bench]]
 name = "buffering"
 harness = false
+
+[dev-dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+criterion = "0.8.2"
+dotenvy = "0.15.7"
+futures-util = "0.3.32"
+num-complex = "0.4.6"
+num-traits = "0.2.19"
+pin-project-lite = "0.2.17"
+rand = "0.10.1"
+tokio = { version = "1.52.3", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+] }
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"

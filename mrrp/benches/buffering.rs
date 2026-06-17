@@ -11,24 +11,22 @@ use criterion::{
     criterion_main,
 };
 use futures_util::FutureExt;
-use mrrp::{
-    filter::design::{
-        FilterDesign,
-        Lowpass,
-        pm_remez::pm_remez,
+use mrrp_core::signal::{
+    AsyncReadSamples,
+    AsyncReadSamplesExt,
+    Cursor,
+    FiniteStream,
+    test::{
+        BlackBoxStream,
+        SingleSampleStream,
     },
-    signal::{
-        AsyncReadSamples,
-        AsyncReadSamplesExt,
-        Cursor,
-        FiniteStream,
-        test::{
-            BlackBoxStream,
-            SingleSampleStream,
-        },
-    },
-    source::white_noise,
 };
+use mrrp_filter::design::{
+    FilterDesign,
+    Lowpass,
+    pm_remez::pm_remez,
+};
+use mrrp_util::noise::white_noise;
 use num_complex::Complex;
 use rand::rngs::SmallRng;
 

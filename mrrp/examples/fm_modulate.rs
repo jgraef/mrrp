@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
+use anyhow::Error;
 use clap::Parser;
-use color_eyre::eyre::Error;
 use mrrp::{
     filter::{
         biquad,
