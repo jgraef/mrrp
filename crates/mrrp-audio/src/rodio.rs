@@ -2,8 +2,9 @@
 //!
 //! # TODO
 //!
-//! A proper [`Sink`](crate::sink::Sink) would be nice, but rodio's interface
-//! doesn't play along nicely (maybe it does now?).
+//! A proper [`AsyncWriteSamples`](mrrp_core::signal::AsyncWriteSamples) would
+//! be nice, but rodio's interface doesn't play along nicely (maybe it does
+//! now?).
 
 use std::{
     num::NonZero,

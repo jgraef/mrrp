@@ -1,6 +1,7 @@
 //! Chunked signals
 //!
-//! This turns an [`AsyncReadSamples`] into a [`Stream`] of [`SampleMut`]s.
+//! This turns an [`AsyncReadSamples`] into a [`Stream`] of
+//! [`SampleMut`s](crate::buf::SamplesMut).
 
 use std::{
     marker::PhantomData,

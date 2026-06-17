@@ -1114,7 +1114,7 @@ pub mod demod {
             ///
             /// librtlsdr sets this to 0 when setting the frequency correction.
             ///
-            /// See [`Device::set_sample_rate`] for the issue this causes.
+            /// See [`Device::set_sample_rate`](crate::Device::set_sample_rate) for the issue this causes.
             pub u8, unk_0, set_unk0: 15, 14;
             /// Sample frequency correction
             ///
