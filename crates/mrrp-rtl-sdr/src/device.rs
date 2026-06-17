@@ -520,13 +520,14 @@ impl Drop for Reader {
 }
 
 #[cfg(feature = "mrrp")]
-impl mrrp_core::signal::AsyncReadSamples<num_complex::Complex<u8>> for Reader {
+impl mrrp_core::signal::AsyncReadSamples for Reader {
+    type Sample = num_complex::Complex<u8>;
     type Error = std::io::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut mrrp_core::signal::ReadBuf<num_complex::Complex<u8>>,
+        buffer: &mut mrrp_core::signal::ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.get_mut();
         match Pin::new(&mut this.epa_reader).poll_fill_buf(cx) {

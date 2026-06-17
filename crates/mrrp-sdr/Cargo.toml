@@ -24,7 +24,7 @@ futures-util.workspace = true
 indexmap = { version = "2.14.0", features = ["serde"] }
 mrrp-core.workspace = true
 mrrp-audio = { workspace = true, features = ["wav", "rodio"] }
-mrrp-rtl-sdr.workspace = true
+mrrp-rtl-sdr = { workspace = true, features = ["mrrp"] }
 mrrp-widgets = { workspace = true, features = ["colorgrad", "serde"] }
 num-complex = { workspace = true, features = ["bytemuck"] }
 num-traits.workspace = true

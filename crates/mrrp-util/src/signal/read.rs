@@ -1,5 +1,6 @@
 use std::{
     convert::Infallible,
+    fmt::Debug,
     marker::PhantomData,
     mem::MaybeUninit,
     pin::Pin,
@@ -61,16 +62,15 @@ use crate::signal::{
 };
 
 /// Extension trait for [`AsyncReadSamples`] with some useful methods.
-pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
+pub trait AsyncReadSamplesExt: AsyncReadSamples {
     /// Read a single sample
     #[inline]
-    fn read_sample(&mut self) -> ReadSample<'_, Self, S>
+    fn read_sample(&mut self) -> ReadSample<'_, Self>
     where
         Self: Unpin,
     {
         ReadSample {
             read_samples: Pin::new(self),
-            _phantom: PhantomData,
         }
     }
 
@@ -80,7 +80,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     /// [`poll_read_samples`][AsyncReadSamples::poll_read_samples] exactly once,
     /// and return the number of bytes read. This is cancellation-safe.
     #[inline]
-    fn read_samples<'a>(&'a mut self, buffer: &'a mut [S]) -> ReadSamples<'a, Self, S>
+    fn read_samples<'a>(&'a mut self, buffer: &'a mut [Self::Sample]) -> ReadSamples<'a, Self>
     where
         Self: Unpin,
     {
@@ -96,7 +96,10 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     /// [`poll_read_samples`][AsyncReadSamples::poll_read_samples] multiple
     /// times, and thus is not cancellation-safe.
     #[inline]
-    fn read_samples_exact<'a>(&'a mut self, buffer: &'a mut [S]) -> ReadSamplesExact<'a, Self, S>
+    fn read_samples_exact<'a>(
+        &'a mut self,
+        buffer: &'a mut [Self::Sample],
+    ) -> ReadSamplesExact<'a, Self>
     where
         Self: Unpin,
     {
@@ -108,7 +111,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
 
     // todo: remove this in favor of read_into_buf
     #[inline]
-    fn read_to_end<'a>(&'a mut self, buffer: &'a mut Vec<S>) -> ReadToEnd<'a, Self, S>
+    fn read_to_end<'a>(&'a mut self, buffer: &'a mut Vec<Self::Sample>) -> ReadToEnd<'a, Self>
     where
         Self: Unpin,
     {
@@ -119,14 +122,14 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     }
 
     #[inline]
-    fn read_into_buf<'a, B>(&'a mut self, buffer: &'a mut B) -> ReadIntoBuf<'a, Self, B, S>
+    fn read_into_buf<'a, B>(&'a mut self, buffer: &'a mut B) -> ReadIntoBuf<'a, Self, B>
     where
         Self: Unpin,
+        B: SampleBufMut<Self::Sample>,
     {
         ReadIntoBuf {
             read_samples: Pin::new(self),
             buffer,
-            _phantom: PhantomData,
         }
     }
 
@@ -142,9 +145,9 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     }
 
     #[inline]
-    fn scan_with<Sc>(self, scanner: Sc) -> ScanWith<Self, S, Sc>
+    fn scan_with<Sc>(self, scanner: Sc) -> ScanWith<Self, Sc>
     where
-        Sc: Scanner<S>,
+        Sc: Scanner<Self::Sample>,
         Self: Sized,
     {
         ScanWith::new(self, scanner)
@@ -153,16 +156,16 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     #[inline]
     fn scan_in_place_with<Sc>(self, scanner: Sc) -> ScanInPlaceWith<Self, Sc>
     where
-        Sc: Scanner<S, Output = S>,
+        Sc: Scanner<Self::Sample, Output = Self::Sample>,
         Self: Sized,
     {
         ScanInPlaceWith::new(self, scanner)
     }
 
     #[inline]
-    fn map<Q, F>(self, f: F) -> Map<Self, S, F>
+    fn map<Q, F>(self, f: F) -> Map<Self, F>
     where
-        F: FnMut(S) -> Q,
+        F: FnMut(Self::Sample) -> Q,
         Self: Sized,
     {
         Map::new(self, f)
@@ -171,7 +174,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     #[inline]
     fn map_in_place<F>(self, f: F) -> MapInPlace<Self, F>
     where
-        F: FnMut(S) -> S,
+        F: FnMut(Self::Sample) -> Self::Sample,
         Self: Sized,
     {
         MapInPlace::new(self, f)
@@ -192,11 +195,11 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     ///
     /// - scan_in_place_pod_with which then can be used to implement this
     #[inline]
-    fn map_in_place_pod<Q, F>(self, f: F) -> MapInPlacePod<Self, S, F>
+    fn map_in_place_pod<Q, F>(self, f: F) -> MapInPlacePod<Self, F>
     where
-        S: Pod,
+        Self::Sample: Pod,
         Q: Pod,
-        F: FnMut(S) -> Q,
+        F: FnMut(Self::Sample) -> Q,
         Self: Sized,
     {
         MapInPlacePod::new(self, f)
@@ -213,14 +216,14 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     #[inline]
     fn inspect<F>(self, f: F) -> Inspect<Self, F>
     where
-        F: FnMut(&[S]),
+        F: FnMut(&[Self::Sample]),
         Self: Sized,
     {
         Inspect::new(self, f)
     }
 
     #[inline]
-    fn buffered(self, buffer_size: usize) -> Buffered<Self, S>
+    fn buffered(self, buffer_size: usize) -> Buffered<Self>
     where
         Self: Sized,
     {
@@ -228,10 +231,10 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     }
 
     #[inline]
-    fn forward<W>(self, sink: W, buffer_size: usize) -> Forward<Self, W, S>
+    fn forward<W>(self, sink: W, buffer_size: usize) -> Forward<Self, W>
     where
         Self: Sized,
-        W: AsyncWriteSamples<S>,
+        W: AsyncWriteSamples<Self::Sample>,
     {
         Forward::new(self, sink, buffer_size)
     }
@@ -270,10 +273,10 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     }
 
     #[inline]
-    fn convert<Q>(self) -> Converted<Self, S, Q>
+    fn convert<Q>(self) -> Converted<Self, Q>
     where
         Self: Sized,
-        Q: FromSample<S>,
+        Q: FromSample<Self::Sample>,
     {
         Converted::new(self)
     }
@@ -282,7 +285,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     fn chain<T>(self, other: T) -> Chained<Self, T>
     where
         Self: Sized,
-        T: Sized + AsyncReadSamples<S>,
+        T: Sized + AsyncReadSamples<Sample = Self::Sample>,
     {
         Chained::new(self, other)
     }
@@ -305,11 +308,11 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     }
 
     #[inline]
-    fn zip_with<R, T, Sc>(self, other: R, scanner: Sc) -> ZipWith<Self, R, S, T, Sc>
+    fn zip_with<R, Sc>(self, other: R, scanner: Sc) -> ZipWith<Self, R, Sc>
     where
         Self: Sized,
-        R: AsyncReadSamples<T> + Sized,
-        Sc: Scanner<(S, T)>,
+        R: AsyncReadSamples + Sized,
+        Sc: Scanner<(Self::Sample, R::Sample)>,
     {
         ZipWith::new(self, other, scanner)
     }
@@ -322,7 +325,7 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     /// streams. You can work around this by creating the [`Repeated`] yourself
     /// though.
     #[inline]
-    fn repeat(self) -> Repeated<Self, S>
+    fn repeat(self) -> Repeated<Self>
     where
         Self: Sized + FiniteStream,
     {
@@ -330,41 +333,40 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
     }
 
     #[inline]
-    fn add<R, T>(self, other: R) -> Summed<Self, R, S, T>
+    fn add<R, T>(self, other: R) -> Summed<Self, R>
     where
         Self: Sized,
-        R: AsyncReadSamples<R> + Sized,
+        R: AsyncReadSamples + Sized,
     {
         Summed::new(self, other)
     }
 
     #[inline]
-    fn mul<R, T>(self, other: R) -> Multiplied<Self, R, S, T>
+    fn mul<R, T>(self, other: R) -> Multiplied<Self, R>
     where
         Self: Sized,
-        R: AsyncReadSamples<R> + Sized,
+        R: AsyncReadSamples + Sized,
     {
         Multiplied::new(self, other)
     }
 }
 
-impl<R, S> AsyncReadSamplesExt<S> for R where R: AsyncReadSamples<S> + ?Sized {}
+impl<R> AsyncReadSamplesExt for R where R: AsyncReadSamples + ?Sized {}
 
 #[derive(Debug)]
 #[must_use]
-pub struct ReadSample<'a, R, S>
+pub struct ReadSample<'a, R>
 where
     R: ?Sized,
 {
     read_samples: Pin<&'a mut R>,
-    _phantom: PhantomData<fn() -> S>,
 }
 
-impl<'a, R, S> Future for ReadSample<'a, R, S>
+impl<'a, R> Future for ReadSample<'a, R>
 where
-    R: AsyncReadSamples<S> + ?Sized,
+    R: AsyncReadSamples + ?Sized,
 {
-    type Output = Result<S, EofError<R::Error>>;
+    type Output = Result<R::Sample, EofError<R::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut buffer = [MaybeUninit::uninit(); 1];
@@ -400,17 +402,17 @@ where
 /// Future that reads samples into a buffer.
 #[derive(Debug)]
 #[must_use]
-pub struct ReadSamples<'a, R, S>
+pub struct ReadSamples<'a, R>
 where
-    R: ?Sized,
+    R: AsyncReadSamples + ?Sized,
 {
     read_samples: Pin<&'a mut R>,
-    buffer: ReadBuf<'a, S>,
+    buffer: ReadBuf<'a, R::Sample>,
 }
 
-impl<'a, 'b, R, S> Future for ReadSamples<'a, R, S>
+impl<'a, 'b, R> Future for ReadSamples<'a, R>
 where
-    R: AsyncReadSamples<S> + ?Sized,
+    R: AsyncReadSamples + ?Sized,
 {
     type Output = Result<usize, R::Error>;
 
@@ -426,17 +428,17 @@ where
 /// Future that tries to read an exact amount of samples.
 #[derive(Debug)]
 #[must_use]
-pub struct ReadSamplesExact<'a, R, S>
+pub struct ReadSamplesExact<'a, R>
 where
-    R: ?Sized,
+    R: AsyncReadSamples + ?Sized,
 {
     read_samples: Pin<&'a mut R>,
-    buffer: ReadBuf<'a, S>,
+    buffer: ReadBuf<'a, R::Sample>,
 }
 
-impl<'a, 'b, R, S> Future for ReadSamplesExact<'a, R, S>
+impl<'a, 'b, R> Future for ReadSamplesExact<'a, R>
 where
-    R: AsyncReadSamples<S> + Unpin + ?Sized,
+    R: AsyncReadSamples + Unpin + ?Sized,
 {
     type Output = Result<(), EofError<R::Error>>;
 
@@ -477,17 +479,17 @@ where
 
 #[derive(Debug)]
 #[must_use]
-pub struct ReadToEnd<'a, R, S>
+pub struct ReadToEnd<'a, R>
 where
-    R: ?Sized,
+    R: AsyncReadSamples + ?Sized,
 {
     read_samples: Pin<&'a mut R>,
-    buffer: &'a mut Vec<S>,
+    buffer: &'a mut Vec<R::Sample>,
 }
 
-impl<'a, 'b, R, S> Future for ReadToEnd<'a, R, S>
+impl<'a, 'b, R> Future for ReadToEnd<'a, R>
 where
-    R: AsyncReadSamples<S> + ?Sized,
+    R: AsyncReadSamples + ?Sized,
 {
     type Output = Result<(), R::Error>;
 
@@ -519,19 +521,19 @@ where
 
 #[derive(Debug)]
 #[must_use]
-pub struct ReadIntoBuf<'a, R, B, S>
+pub struct ReadIntoBuf<'a, R, B>
 where
-    R: ?Sized,
+    R: AsyncReadSamples + ?Sized,
+    B: SampleBufMut<R::Sample>,
 {
     read_samples: Pin<&'a mut R>,
     buffer: &'a mut B,
-    _phantom: PhantomData<fn() -> S>,
 }
 
-impl<'a, 'b, R, B, S> Future for ReadIntoBuf<'a, R, B, S>
+impl<'a, 'b, R, B> Future for ReadIntoBuf<'a, R, B>
 where
-    R: AsyncReadSamples<S> + ?Sized,
-    B: SampleBufMut<S>,
+    R: AsyncReadSamples + ?Sized,
+    B: SampleBufMut<R::Sample>,
 {
     type Output = Result<(), R::Error>;
 
@@ -571,10 +573,11 @@ pub struct Repeat<S> {
     pub sample: S,
 }
 
-impl<S> AsyncReadSamples<S> for Repeat<S>
+impl<S> AsyncReadSamples for Repeat<S>
 where
     S: Clone,
 {
+    type Sample = S;
     type Error = Infallible;
 
     fn poll_read_samples(
@@ -599,10 +602,12 @@ pub fn repeat<S>(sample: S) -> Repeat<S> {
     Repeat { sample }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NullSource;
+pub struct PendingSource<S> {
+    _marker: PhantomData<fn() -> S>,
+}
 
-impl<S> AsyncReadSamples<S> for NullSource {
+impl<S> AsyncReadSamples for PendingSource<S> {
+    type Sample = S;
     type Error = Infallible;
 
     fn poll_read_samples(
@@ -614,16 +619,34 @@ impl<S> AsyncReadSamples<S> for NullSource {
     }
 }
 
-impl StreamLength for NullSource {
+impl<S> StreamLength for PendingSource<S> {
     #[inline]
     fn remaining(&self) -> Remaining {
         Remaining::Finite { num_samples: 0 }
     }
 }
 
+impl<S> Clone for PendingSource<S> {
+    fn clone(&self) -> Self {
+        Self {
+            _marker: self._marker,
+        }
+    }
+}
+
+impl<S> Copy for PendingSource<S> {}
+
+impl<S> Debug for PendingSource<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NullSource").finish_non_exhaustive()
+    }
+}
+
 #[inline]
-pub fn null_source() -> NullSource {
-    NullSource
+pub fn pending<S>() -> PendingSource<S> {
+    PendingSource::<S> {
+        _marker: PhantomData,
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -631,10 +654,11 @@ pub struct Silence<S> {
     _phantom: PhantomData<fn() -> S>,
 }
 
-impl<S> AsyncReadSamples<S> for Silence<S>
+impl<S> AsyncReadSamples for Silence<S>
 where
     S: Sample,
 {
+    type Sample = S;
     type Error = Infallible;
 
     fn poll_read_samples(
@@ -700,11 +724,12 @@ where
     }
 }
 
-impl<B, S> AsyncReadSamples<S> for Cursor<B, S>
+impl<B, S> AsyncReadSamples for Cursor<B, S>
 where
     B: AsRef<[S]> + Unpin,
     S: Clone,
 {
+    type Sample = S;
     type Error = Infallible;
 
     fn poll_read_samples(
@@ -752,11 +777,12 @@ where
     }
 }
 
-impl<B, S> AsyncReadSamples<S> for BufSource<B, S>
+impl<B, S> AsyncReadSamples for BufSource<B, S>
 where
     B: SampleBuf<S> + Unpin,
     S: Clone,
 {
+    type Sample = S;
     type Error = Infallible;
 
     fn poll_read_samples(

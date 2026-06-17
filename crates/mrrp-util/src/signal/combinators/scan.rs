@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     marker::PhantomData,
     ops::{
         Add,
@@ -32,18 +33,23 @@ use crate::signal::{
 pin_project! {
     /// Stream wrapper that maps the samples using an intermediate buffer.
     #[derive(Clone, Debug)]
-    pub struct ScanWith<R, S, Sc> {
+    pub struct ScanWith<R, Sc>
+    where R: AsyncReadSamples
+     {
         #[pin]
         inner: R,
         scanner: Sc,
         // would be nicer to use SamplesMut, but we need a SamplesMut::drain for that
         // we use super::Buffer here, because it is Clone, we don't need the pointers it keeps track of.
-        intermediate_buffer: ScratchBuffer<S>,
+        intermediate_buffer: ScratchBuffer<R::Sample>,
         max_buffer_size: usize,
     }
 }
 
-impl<R, S, Sc> ScanWith<R, S, Sc> {
+impl<R, Sc> ScanWith<R, Sc>
+where
+    R: AsyncReadSamples,
+{
     #[inline]
     pub fn new(inner: R, scanner: Sc) -> Self {
         Self {
@@ -69,17 +75,18 @@ impl<R, S, Sc> ScanWith<R, S, Sc> {
     }
 }
 
-impl<R, S, Sc> AsyncReadSamples<Sc::Output> for ScanWith<R, S, Sc>
+impl<R, Sc> AsyncReadSamples for ScanWith<R, Sc>
 where
-    R: AsyncReadSamples<S>,
-    Sc: Scanner<S>,
+    R: AsyncReadSamples,
+    Sc: Scanner<R::Sample>,
 {
+    type Sample = Sc::Output;
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<Sc::Output>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
 
@@ -107,9 +114,9 @@ where
     }
 }
 
-impl<R, S, Sc> GetSampleRate for ScanWith<R, S, Sc>
+impl<R, Sc> GetSampleRate for ScanWith<R, Sc>
 where
-    R: GetSampleRate,
+    R: AsyncReadSamples + GetSampleRate,
 {
     #[inline]
     fn sample_rate(&self) -> f32 {
@@ -117,9 +124,9 @@ where
     }
 }
 
-impl<R, S, Sc> StreamLength for ScanWith<R, S, Sc>
+impl<R, Sc> StreamLength for ScanWith<R, Sc>
 where
-    R: StreamLength,
+    R: AsyncReadSamples,
 {
     #[inline]
     fn remaining(&self) -> Remaining {
@@ -127,7 +134,7 @@ where
     }
 }
 
-impl<R, S, Sc> FiniteStream for ScanWith<R, S, Sc> where R: FiniteStream {}
+impl<R, Sc> FiniteStream for ScanWith<R, Sc> where R: AsyncReadSamples + FiniteStream {}
 
 pin_project! {
     #[derive(Clone, Copy, Debug)]
@@ -145,17 +152,18 @@ impl<R, Sc> ScanInPlaceWith<R, Sc> {
     }
 }
 
-impl<R, S, Sc> AsyncReadSamples<S> for ScanInPlaceWith<R, Sc>
+impl<R, Sc> AsyncReadSamples for ScanInPlaceWith<R, Sc>
 where
-    R: AsyncReadSamples<S>,
-    Sc: Scanner<S, Output = S>,
+    R: AsyncReadSamples,
+    Sc: Scanner<R::Sample, Output = R::Sample>,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
 
@@ -324,7 +332,6 @@ where
     }
 }
 
-#[derive(Clone, Copy, Debug)]
 pub struct ConvertScanner<Q> {
     _phantom: PhantomData<fn() -> Q>,
 }
@@ -349,6 +356,22 @@ where
         Q::from_sample(sample)
     }
 }
+
+impl<Q> Debug for ConvertScanner<Q> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ConvertScanner").finish_non_exhaustive()
+    }
+}
+
+impl<Q> Clone for ConvertScanner<Q> {
+    fn clone(&self) -> Self {
+        Self {
+            _phantom: self._phantom,
+        }
+    }
+}
+
+impl<Q> Copy for ConvertScanner<Q> {}
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SumScanner;

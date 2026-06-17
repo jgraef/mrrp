@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 bytemuck.workspace = true
 bytes.workspace = true
+derive_more = { workspace = true, features = ["debug"] }
 futures-core.workspace = true
 futures-util.workspace = true
 mrrp-core.workspace = true

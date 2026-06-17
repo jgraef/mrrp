@@ -53,18 +53,19 @@ impl<T, C, S, E> ChunkStreamReadSamples<T, C, S, E> {
     }
 }
 
-impl<T, C, S, E> AsyncReadSamples<S> for ChunkStreamReadSamples<T, C, S, E>
+impl<T, C, S, E> AsyncReadSamples for ChunkStreamReadSamples<T, C, S, E>
 where
     T: Stream<Item = Result<C, E>> + Unpin,
     C: SampleBuf<S> + Unpin,
     S: Clone,
 {
+    type Sample = S;
     type Error = E;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         loop {
             let this = &mut *self;
@@ -127,28 +128,26 @@ impl<T, C, S, E> StreamLength for ChunkStreamReadSamples<T, C, S, E> {
 }
 
 #[derive(Clone, Debug)]
-pub struct ReadSamplesChunkStream<R, S> {
+pub struct ReadSamplesChunkStream<R> {
     pub read_samples: R,
     pub chunk_size: usize,
-    _phantom: PhantomData<fn() -> SamplesMut<S>>,
 }
 
-impl<R, S> ReadSamplesChunkStream<R, S> {
+impl<R> ReadSamplesChunkStream<R> {
     #[inline]
     pub fn new(read_samples: R, chunk_size: usize) -> Self {
         Self {
             read_samples,
             chunk_size,
-            _phantom: PhantomData,
         }
     }
 }
 
-impl<R, S> Stream for ReadSamplesChunkStream<R, S>
+impl<R> Stream for ReadSamplesChunkStream<R>
 where
-    R: AsyncReadSamples<S> + Unpin,
+    R: AsyncReadSamples + Unpin,
 {
-    type Item = Result<SamplesMut<S>, R::Error>;
+    type Item = Result<SamplesMut<R::Sample>, R::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut buffer = SamplesMut::with_capacity(self.chunk_size);
@@ -170,7 +169,7 @@ where
     }
 }
 
-impl<R, S> GetSampleRate for ReadSamplesChunkStream<R, S>
+impl<R> GetSampleRate for ReadSamplesChunkStream<R>
 where
     R: GetSampleRate,
 {

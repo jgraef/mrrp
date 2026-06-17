@@ -49,7 +49,7 @@ pub trait IntoSource {
     fn into_source(self) -> Self::Source;
 }
 
-pub trait Source: AsyncReadSamples<Iq, Error = Error> {
+pub trait Source: AsyncReadSamples<Sample = Iq, Error = Error> {
     fn name(&self) -> &str;
     fn center_frequency(&self) -> f32;
     fn sample_rate(&self) -> f32;
@@ -80,7 +80,7 @@ where
 
 #[derive(Clone, Debug)]
 pub struct MockSource {
-    noise: Throttled<Noise<SmallRng, PolarDistribution<Normal<f32>, Uniform<f32>>>>,
+    noise: Throttled<Noise<SmallRng, PolarDistribution<Normal<f32>, Uniform<f32>>, Iq>>,
     center_frequency: f32,
     sample_rate: f32,
     active: bool,
@@ -104,7 +104,8 @@ impl MockSource {
     }
 }
 
-impl AsyncReadSamples<Iq> for MockSource {
+impl AsyncReadSamples for MockSource {
+    type Sample = Iq;
     type Error = Error;
 
     fn poll_read_samples(
@@ -181,8 +182,7 @@ where
 
 #[derive(Debug)]
 pub struct LoopedFileSource {
-    inner:
-        Throttled<Converted<WavSource<BufReader<File>, Complex<i16>>, Complex<i16>, Complex<f32>>>,
+    inner: Throttled<Converted<WavSource<BufReader<File>, Complex<i16>>, Complex<f32>>>,
     center_frequency: f32,
     name: Cow<'static, str>,
     active: bool,
@@ -219,7 +219,8 @@ impl LoopedFileSource {
     }
 }
 
-impl AsyncReadSamples<Iq> for LoopedFileSource {
+impl AsyncReadSamples for LoopedFileSource {
+    type Sample = Iq;
     type Error = Error;
 
     fn poll_read_samples(

@@ -1,4 +1,5 @@
 use std::{
+    fmt::Debug,
     pin::Pin,
     task::{
         Context,
@@ -27,14 +28,33 @@ use crate::signal::{
 };
 
 pin_project! {
-    #[derive(Clone, Debug)]
-    pub struct Converted<R, S, Q> {
+    #[derive(derive_more::Debug)]
+    #[debug(bound(R: AsyncReadSamples + Debug, R::Sample: Debug))]
+    pub struct Converted<R, Q>
+    where
+        R: AsyncReadSamples,
+    {
         #[pin]
-        inner: ScanWith<R, S, ConvertScanner<Q>>,
+        inner: ScanWith<R, ConvertScanner<Q>>,
     }
 }
 
-impl<R, S, Q> Converted<R, S, Q> {
+impl<R, Q> Clone for Converted<R, Q>
+where
+    R: AsyncReadSamples + Clone,
+    R::Sample: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<R, Q> Converted<R, Q>
+where
+    R: AsyncReadSamples,
+{
     #[inline]
     pub fn new(inner: R) -> Self {
         Self {
@@ -51,11 +71,12 @@ impl<R, S, Q> Converted<R, S, Q> {
     }
 }
 
-impl<R, S, Q> AsyncReadSamples<Q> for Converted<R, S, Q>
+impl<R, Q> AsyncReadSamples for Converted<R, Q>
 where
-    R: AsyncReadSamples<S>,
-    Q: FromSample<S>,
+    R: AsyncReadSamples,
+    Q: FromSample<R::Sample>,
 {
+    type Sample = Q;
     type Error = R::Error;
 
     fn poll_read_samples(
@@ -67,9 +88,9 @@ where
     }
 }
 
-impl<R, S, Q> GetSampleRate for Converted<R, S, Q>
+impl<R, Q> GetSampleRate for Converted<R, Q>
 where
-    R: GetSampleRate,
+    R: AsyncReadSamples + GetSampleRate,
 {
     #[inline]
     fn sample_rate(&self) -> f32 {
@@ -77,9 +98,9 @@ where
     }
 }
 
-impl<R, S, Q> StreamLength for Converted<R, S, Q>
+impl<R, Q> StreamLength for Converted<R, Q>
 where
-    R: StreamLength,
+    R: AsyncReadSamples + StreamLength,
 {
     #[inline]
     fn remaining(&self) -> Remaining {
@@ -87,4 +108,4 @@ where
     }
 }
 
-impl<R, S, Q> FiniteStream for Converted<R, S, Q> where R: FiniteStream {}
+impl<R, Q> FiniteStream for Converted<R, Q> where R: AsyncReadSamples + FiniteStream {}

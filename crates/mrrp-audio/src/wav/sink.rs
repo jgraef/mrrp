@@ -194,16 +194,16 @@ impl_into_wav_samples! {
     (f32, 32, hound::SampleFormat::Float);
 }
 
-pub async fn write_stream_to_wav<R, S>(
+pub async fn write_stream_to_wav<R>(
     path: impl AsRef<Path>,
     source: R,
 ) -> Result<(), ForwardError<R::Error, Error>>
 where
-    R: AsyncReadSamples<S> + GetSampleRate,
-    S: IntoWavSamples,
+    R: AsyncReadSamples + GetSampleRate,
+    R::Sample: IntoWavSamples,
 {
-    let sink =
-        WavSink::<_, S>::from_path(path, source.sample_rate()).map_err(ForwardError::Sink)?;
+    let sink = WavSink::<_, R::Sample>::from_path(path, source.sample_rate())
+        .map_err(ForwardError::Sink)?;
     source.forward(sink, 0x4000).await?;
     Ok(())
 }

@@ -23,14 +23,20 @@ use crate::signal::{
 
 pin_project! {
     #[derive(Clone, Debug)]
-    pub struct Buffered<R, S> {
+    pub struct Buffered<R>
+    where
+        R: AsyncReadSamples
+    {
         #[pin]
         inner: R,
-        buffer: Buffer<S>,
+        buffer: Buffer<R::Sample>,
     }
 }
 
-impl<R, S> Buffered<R, S> {
+impl<R> Buffered<R>
+where
+    R: AsyncReadSamples,
+{
     #[inline]
     pub fn new(inner: R, buffer_size: usize) -> Self {
         Self {
@@ -40,16 +46,17 @@ impl<R, S> Buffered<R, S> {
     }
 }
 
-impl<R, S> AsyncReadSamples<S> for Buffered<R, S>
+impl<R> AsyncReadSamples for Buffered<R>
 where
-    R: AsyncReadSamples<S>,
+    R: AsyncReadSamples,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<R::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let mut inner_is_pending = false;
         let mut have_filled_buf = false;
@@ -125,9 +132,9 @@ where
     }
 }
 
-impl<R, S> GetSampleRate for Buffered<R, S>
+impl<R> GetSampleRate for Buffered<R>
 where
-    R: GetSampleRate,
+    R: AsyncReadSamples + GetSampleRate,
 {
     #[inline]
     fn sample_rate(&self) -> f32 {
@@ -135,9 +142,9 @@ where
     }
 }
 
-impl<R, S> StreamLength for Buffered<R, S>
+impl<R> StreamLength for Buffered<R>
 where
-    R: StreamLength,
+    R: AsyncReadSamples + StreamLength,
 {
     #[inline]
     fn remaining(&self) -> Remaining {
@@ -150,7 +157,7 @@ where
     }
 }
 
-impl<R, S> FiniteStream for Buffered<R, S> where R: FiniteStream {}
+impl<R> FiniteStream for Buffered<R> where R: AsyncReadSamples + FiniteStream {}
 
 #[cfg(test)]
 mod tests {

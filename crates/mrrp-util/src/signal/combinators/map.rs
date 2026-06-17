@@ -1,5 +1,5 @@
 use std::{
-    marker::PhantomData,
+    fmt::Debug,
     pin::Pin,
     task::{
         Context,
@@ -7,7 +7,10 @@ use std::{
     },
 };
 
-use bytemuck::Pod;
+use bytemuck::{
+    Pod,
+    Zeroable,
+};
 use mrrp_core::signal::{
     FiniteStream,
     GetSampleRate,
@@ -28,14 +31,33 @@ use crate::signal::{
 
 pin_project! {
     /// Stream wrapper that maps the samples using an intermediate buffer.
-    #[derive(Clone, Debug)]
-    pub struct Map<R, S, F> {
+    #[derive(derive_more::Debug)]
+    #[debug(bound(R: AsyncReadSamples, R::Sample: Debug))]
+    pub struct Map<R, F>
+    where R: AsyncReadSamples
+    {
         #[pin]
-        inner: ScanWith<R, S, FuncScanner<F>>,
+        inner: ScanWith<R, FuncScanner<F>>,
     }
 }
 
-impl<R, S, F> Map<R, S, F> {
+impl<R, F> Clone for Map<R, F>
+where
+    R: AsyncReadSamples + Clone,
+    F: Clone,
+    R::Sample: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<R, F> Map<R, F>
+where
+    R: AsyncReadSamples,
+{
     #[inline]
     pub fn new(inner: R, f: F) -> Self {
         Self {
@@ -51,11 +73,12 @@ impl<R, S, F> Map<R, S, F> {
     }
 }
 
-impl<R, S, Q, F> AsyncReadSamples<Q> for Map<R, S, F>
+impl<R, Q, F> AsyncReadSamples for Map<R, F>
 where
-    R: AsyncReadSamples<S>,
-    F: FnMut(S) -> Q,
+    R: AsyncReadSamples,
+    F: FnMut(R::Sample) -> Q,
 {
+    type Sample = Q;
     type Error = R::Error;
 
     #[inline]
@@ -68,9 +91,9 @@ where
     }
 }
 
-impl<R, S, F> GetSampleRate for Map<R, S, F>
+impl<R, F> GetSampleRate for Map<R, F>
 where
-    R: GetSampleRate,
+    R: AsyncReadSamples + GetSampleRate,
 {
     #[inline]
     fn sample_rate(&self) -> f32 {
@@ -78,9 +101,9 @@ where
     }
 }
 
-impl<R, S, F> StreamLength for Map<R, S, F>
+impl<R, F> StreamLength for Map<R, F>
 where
-    R: StreamLength,
+    R: AsyncReadSamples + StreamLength,
 {
     #[inline]
     fn remaining(&self) -> Remaining {
@@ -88,7 +111,7 @@ where
     }
 }
 
-impl<R, S, F> FiniteStream for Map<R, S, F> where R: FiniteStream {}
+impl<R, F> FiniteStream for Map<R, F> where R: AsyncReadSamples + FiniteStream {}
 
 pin_project! {
     /// Stream wrapper that maps the samples using an intermediate buffer.
@@ -108,18 +131,19 @@ impl<R, F> MapInPlace<R, F> {
     }
 }
 
-impl<R, S, F> AsyncReadSamples<S> for MapInPlace<R, F>
+impl<R, F> AsyncReadSamples for MapInPlace<R, F>
 where
-    R: AsyncReadSamples<S>,
-    F: FnMut(S) -> S,
+    R: AsyncReadSamples,
+    F: FnMut(R::Sample) -> R::Sample,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_read_samples(cx, buffer)
     }
@@ -149,32 +173,28 @@ impl<R, F> FiniteStream for MapInPlace<R, F> where R: FiniteStream {}
 
 pin_project! {
     #[derive(Clone, Copy, Debug)]
-    pub struct MapInPlacePod<R, S, F> {
+    pub struct MapInPlacePod<R, F> {
         #[pin]
         inner: R,
         map: F,
-        _phantom: PhantomData<fn(S)>,
     }
 }
 
-impl<R, S, F> MapInPlacePod<R, S, F> {
+impl<R, F> MapInPlacePod<R, F> {
     #[inline]
     pub fn new(inner: R, map: F) -> Self {
-        Self {
-            inner,
-            map,
-            _phantom: PhantomData,
-        }
+        Self { inner, map }
     }
 }
 
-impl<R, S, Q, F> AsyncReadSamples<Q> for MapInPlacePod<R, S, F>
+impl<R, Q, F> AsyncReadSamples for MapInPlacePod<R, F>
 where
-    S: Pod,
+    R::Sample: Pod,
     Q: Pod,
-    R: AsyncReadSamples<S>,
-    F: FnMut(S) -> Q,
+    R: AsyncReadSamples,
+    F: FnMut(R::Sample) -> Q,
 {
+    type Sample = Q;
     type Error = R::Error;
 
     fn poll_read_samples(
@@ -199,7 +219,7 @@ where
             //
             // and furthermore MIN_BUFFER should not be constant, as this edge case really
             // depends on the size difference and alignment. so this needs fixing someway.
-            let mut intermediate_buffer = [S::zeroed(); MIN_BUFFER];
+            let mut intermediate_buffer = [<R::Sample as Zeroable>::zeroed(); MIN_BUFFER];
             let mut read_buf = ReadBuf::new(&mut intermediate_buffer[..num_samples_out]);
 
             match this.inner.poll_read_samples(cx, &mut read_buf) {
@@ -224,7 +244,7 @@ where
         }
         else {
             let buffer_initialized = buffer.initialize_unfilled(|| Q::zeroed());
-            let (_, buffer_in, _) = bytemuck::pod_align_to_mut::<Q, S>(buffer_initialized);
+            let (_, buffer_in, _) = bytemuck::pod_align_to_mut::<Q, R::Sample>(buffer_initialized);
 
             let num_samples_in = buffer_in.len();
             let num_samples = num_samples_out.min(num_samples_in);
@@ -249,7 +269,7 @@ where
                         // map reverse
                         for i in (0..num_samples_read_in).rev() {
                             let (_, buffer_in, _) =
-                                bytemuck::pod_align_to::<Q, S>(buffer_initialized);
+                                bytemuck::pod_align_to::<Q, R::Sample>(buffer_initialized);
                             let sample = buffer_in[i];
                             buffer_initialized[i] = (this.map)(sample);
                         }
@@ -260,7 +280,7 @@ where
                         // map forward
                         for i in 0..num_samples_read_in {
                             let (_, buffer_in, _) =
-                                bytemuck::pod_align_to::<Q, S>(buffer_initialized);
+                                bytemuck::pod_align_to::<Q, R::Sample>(buffer_initialized);
                             let sample = buffer_in[i];
                             buffer_initialized[i] = (this.map)(sample);
                         }
@@ -275,7 +295,7 @@ where
     }
 }
 
-impl<R, S, F> GetSampleRate for MapInPlacePod<R, S, F>
+impl<R, F> GetSampleRate for MapInPlacePod<R, F>
 where
     R: GetSampleRate,
 {
@@ -285,7 +305,7 @@ where
     }
 }
 
-impl<R, S, F> StreamLength for MapInPlacePod<R, S, F>
+impl<R, F> StreamLength for MapInPlacePod<R, F>
 where
     R: StreamLength,
 {
@@ -295,4 +315,4 @@ where
     }
 }
 
-impl<R, S, F> FiniteStream for MapInPlacePod<R, S, F> where R: FiniteStream {}
+impl<R, F> FiniteStream for MapInPlacePod<R, F> where R: FiniteStream {}

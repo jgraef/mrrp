@@ -29,16 +29,23 @@ pin_project! {
     /// order to repeat them. If the input stream is not limited in length this will
     /// exhaust your memory.
     #[derive(Clone, Debug)]
-    pub struct Repeated<R, S> {
+    pub struct Repeated<R>
+    where
+        R: AsyncReadSamples,
+    {
         #[pin]
         inner: R,
         inner_exhausted: bool,
-        buffer: Vec<S>,
+        // todo: use SamplesMut for buffer
+        buffer: Vec<R::Sample>,
         read_pos: usize,
     }
 }
 
-impl<R, S> Repeated<R, S> {
+impl<R> Repeated<R>
+where
+    R: AsyncReadSamples,
+{
     #[inline]
     pub fn new(inner: R) -> Self {
         Self {
@@ -52,7 +59,7 @@ impl<R, S> Repeated<R, S> {
     #[inline]
     pub async fn prefetch(&mut self) -> Result<(), R::Error>
     where
-        R: AsyncReadSamples<S> + FiniteStream + Unpin,
+        R: AsyncReadSamples + FiniteStream + Unpin,
     {
         self.inner.read_to_end(&mut self.buffer).await
     }
@@ -60,24 +67,25 @@ impl<R, S> Repeated<R, S> {
     #[inline]
     pub async fn prefetched(mut self) -> Result<Self, R::Error>
     where
-        R: AsyncReadSamples<S> + FiniteStream + Unpin,
+        R: AsyncReadSamples + FiniteStream + Unpin,
     {
         self.prefetch().await?;
         Ok(self)
     }
 }
 
-impl<R, S> AsyncReadSamples<S> for Repeated<R, S>
+impl<R> AsyncReadSamples for Repeated<R>
 where
-    S: Clone,
-    R: AsyncReadSamples<S>,
+    R::Sample: Clone,
+    R: AsyncReadSamples,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         loop {
             let this = self.as_mut().project();
@@ -123,7 +131,10 @@ where
     }
 }
 
-impl<R, S> StreamLength for Repeated<R, S> {
+impl<R> StreamLength for Repeated<R>
+where
+    R: AsyncReadSamples,
+{
     #[inline]
     fn remaining(&self) -> Remaining {
         Remaining::Infinite

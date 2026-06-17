@@ -113,10 +113,11 @@ impl<G> SignalGeneratorReadSamples<G> {
     }
 }
 
-impl<G> AsyncReadSamples<G::Sample> for SignalGeneratorReadSamples<G>
+impl<G> AsyncReadSamples for SignalGeneratorReadSamples<G>
 where
     G: SignalGenerator + Unpin,
 {
+    type Sample = G::Sample;
     type Error = Infallible;
 
     #[inline]

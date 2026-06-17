@@ -167,7 +167,7 @@ where
     }
 }
 
-pub trait AsyncReadSamplesFilterExt<S>: AsyncReadSamples<S> {
+pub trait AsyncReadSamplesFilterExt: AsyncReadSamples {
     /// Decimate the input stream
     ///
     /// The returned stream will only return one out of `factor` samples and
@@ -257,4 +257,4 @@ pub trait AsyncReadSamplesFilterExt<S>: AsyncReadSamples<S> {
     }
 }
 
-impl<R, S> AsyncReadSamplesFilterExt<S> for R where R: AsyncReadSamples<S> + ?Sized {}
+impl<R> AsyncReadSamplesFilterExt for R where R: AsyncReadSamples + ?Sized {}

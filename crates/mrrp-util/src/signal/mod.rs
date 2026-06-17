@@ -7,6 +7,7 @@ mod sine;
 pub mod test;
 
 use std::{
+    fmt::Debug,
     pin::Pin,
     task::{
         Context,
@@ -36,17 +37,25 @@ pub use crate::signal::{
 pin_project! {
     #[derive(Debug)]
     #[must_use]
-    pub struct Forward<R, W, S> {
+    pub struct Forward<R, W>
+    where
+        R: AsyncReadSamples,
+        W: AsyncWriteSamples<R::Sample>,
+    {
         #[pin]
         source: R,
         #[pin]
         sink: W,
-        buffer: Buffer<S>,
+        buffer: Buffer<R::Sample>,
         num_samples_written: usize,
     }
 }
 
-impl<R, W, S> Forward<R, W, S> {
+impl<R, W> Forward<R, W>
+where
+    R: AsyncReadSamples,
+    W: AsyncWriteSamples<R::Sample>,
+{
     pub fn new(source: R, sink: W, buffer_size: usize) -> Self {
         Self {
             source,
@@ -57,10 +66,10 @@ impl<R, W, S> Forward<R, W, S> {
     }
 }
 
-impl<R, W, S> Future for Forward<R, W, S>
+impl<R, W> Future for Forward<R, W>
 where
-    R: AsyncReadSamples<S>,
-    W: AsyncWriteSamples<S>,
+    R: AsyncReadSamples,
+    W: AsyncWriteSamples<R::Sample>,
 {
     type Output = Result<usize, ForwardError<R::Error, W::Error>>;
 
@@ -132,7 +141,6 @@ pub enum ForwardError<R, W> {
 
 /// The buffer used for [`Buffered`] and [`Forward`]. Ideally this would just be
 /// a SamplesMut, or at least have a proper API
-#[derive(Debug)]
 struct Buffer<S> {
     buffer: Box<UninitSlice<S>>,
     read_pos: usize,
@@ -210,7 +218,7 @@ impl<S> Buffer<S> {
         stream: Pin<&mut R>,
     ) -> Poll<Result<usize, R::Error>>
     where
-        R: AsyncReadSamples<S>,
+        R: AsyncReadSamples<Sample = S>,
     {
         if self.read_pos == 0 && self.write_pos == 0 {
             let mut read_buf = ReadBuf::uninit(&mut self.buffer);
@@ -258,6 +266,15 @@ where
             read_pos: self.read_pos,
             write_pos: self.write_pos,
         }
+    }
+}
+
+impl<S> Debug for Buffer<S> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Buffer")
+            .field("read_pos", &self.read_pos)
+            .field("write_pos", &self.write_pos)
+            .finish_non_exhaustive()
     }
 }
 

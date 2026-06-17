@@ -45,17 +45,18 @@ impl<H, T> Chained<H, T> {
     }
 }
 
-impl<H, T, S> AsyncReadSamples<S> for Chained<H, T>
+impl<H, T> AsyncReadSamples for Chained<H, T>
 where
-    H: AsyncReadSamples<S>,
-    T: AsyncReadSamples<S>,
+    H: AsyncReadSamples,
+    T: AsyncReadSamples<Sample = H::Sample>,
 {
+    type Sample = H::Sample;
     type Error = ChainedError<H::Error, T::Error>;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         if !buffer.has_remaining_mut() {
             return Poll::Ready(Ok(()));

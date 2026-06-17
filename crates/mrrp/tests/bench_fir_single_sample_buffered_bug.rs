@@ -69,9 +69,9 @@ fn bench_fir_single_sample_buffered_bug() {
     read_stream(filtered_single_samples.clone().buffered(0x4000));
 }
 
-fn read_stream<R, S>(mut stream: R)
+fn read_stream<R>(mut stream: R)
 where
-    R: AsyncReadSamples<S> + Unpin + FiniteStream,
+    R: AsyncReadSamples + Unpin + FiniteStream,
     R::Error: Debug,
 {
     let mut output = vec![];
@@ -97,16 +97,17 @@ impl<R> SingleSampleStream<R> {
     }
 }
 
-impl<R, S> AsyncReadSamples<S> for SingleSampleStream<R>
+impl<R> AsyncReadSamples for SingleSampleStream<R>
 where
-    R: AsyncReadSamples<S>,
+    R: AsyncReadSamples,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         if buffer.has_remaining_mut() {
             let mut read_buf = buffer.take(1);

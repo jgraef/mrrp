@@ -1,5 +1,6 @@
 use std::{
     convert::Infallible,
+    marker::PhantomData,
     pin::Pin,
     task::{
         Context,
@@ -28,24 +29,30 @@ use rand::{
 
 pin_project! {
     #[derive(Clone, Debug, Default)]
-    pub struct Noise<R, D> {
+    pub struct Noise<R, D, S> {
         rng: R,
         distribution: D,
+        _marker: PhantomData<fn () -> S>,
     }
 }
 
-impl<R, D> Noise<R, D> {
+impl<R, D, S> Noise<R, D, S> {
     #[inline]
     pub fn new(rng: R, distribution: D) -> Self {
-        Self { rng, distribution }
+        Self {
+            rng,
+            distribution,
+            _marker: PhantomData,
+        }
     }
 }
 
-impl<R, D, S> AsyncReadSamples<S> for Noise<R, D>
+impl<R, D, S> AsyncReadSamples for Noise<R, D, S>
 where
     R: Rng,
     D: Distribution<S>,
 {
+    type Sample = S;
     type Error = Infallible;
 
     #[inline]
@@ -60,14 +67,14 @@ where
     }
 }
 
-impl<R, D> StreamLength for Noise<R, D> {
+impl<R, D, S> StreamLength for Noise<R, D, S> {
     #[inline]
     fn remaining(&self) -> Remaining {
         Remaining::Infinite
     }
 }
 
-pub fn white_noise<R, S>(rng: R) -> Noise<R, S::Distribution>
+pub fn white_noise<R, S>(rng: R) -> Noise<R, <S as WhiteNoise>::Distribution, S>
 where
     R: Rng,
     S: WhiteNoise,

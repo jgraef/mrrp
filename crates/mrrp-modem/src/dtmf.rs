@@ -63,11 +63,12 @@ impl<S> DtmfEncoder<S> {
     }
 }
 
-impl<S, E> AsyncReadSamples<Complex<f32>> for DtmfEncoder<S>
+impl<S, E> AsyncReadSamples for DtmfEncoder<S>
 where
     S: Stream<Item = Result<DtmfSymbol, E>>,
     E: std::error::Error,
 {
+    type Sample = Complex<f32>;
     type Error = E;
 
     fn poll_read_samples(
@@ -359,7 +360,7 @@ mod tests {
 
     async fn count_stream<R>(mut stream: R) -> usize
     where
-        R: AsyncReadSamples<f32> + Unpin,
+        R: AsyncReadSamples + Unpin,
         R::Error: Display,
     {
         let mut num_samples = 0;

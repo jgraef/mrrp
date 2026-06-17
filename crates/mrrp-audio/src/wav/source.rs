@@ -98,11 +98,12 @@ where
     }
 }
 
-impl<R, S> AsyncReadSamples<S> for WavSource<R, S>
+impl<R, S> AsyncReadSamples for WavSource<R, S>
 where
     R: std::io::Read + Unpin,
     S: FromWavSamples,
 {
+    type Sample = S;
     type Error = Error;
 
     fn poll_read_samples(

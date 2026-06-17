@@ -183,7 +183,8 @@ impl<'a, S> SampleBufMut<S> for ReadBuf<'a, S> {
 /// except it works with arbitrary sample types instead of single bytes.
 ///
 /// [1]: https://docs.rs/futures/latest/futures/io/trait.AsyncRead.html
-pub trait AsyncReadSamples<S>: StreamLength {
+pub trait AsyncReadSamples: StreamLength {
+    type Sample;
     /// Error that might occur when reading the IQ stream.
     type Error;
 
@@ -191,21 +192,22 @@ pub trait AsyncReadSamples<S>: StreamLength {
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>>;
 }
 
-impl<R, S> AsyncReadSamples<S> for &mut R
+impl<R> AsyncReadSamples for &mut R
 where
-    R: AsyncReadSamples<S> + Unpin + ?Sized,
+    R: AsyncReadSamples + Unpin + ?Sized,
 {
-    type Error = <R as AsyncReadSamples<S>>::Error;
+    type Sample = <R as AsyncReadSamples>::Sample;
+    type Error = <R as AsyncReadSamples>::Error;
 
     #[inline]
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         Pin::new(&mut **self).poll_read_samples(cx, buffer)
     }

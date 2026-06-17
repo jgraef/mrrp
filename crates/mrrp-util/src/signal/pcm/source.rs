@@ -43,11 +43,12 @@ pin_project! {
     }
 }
 
-impl<R, S> AsyncReadSamples<S> for PcmSource<R, S>
+impl<R, S> AsyncReadSamples for PcmSource<R, S>
 where
     R: tokio::io::AsyncRead,
     S: DecodeSample,
 {
+    type Sample = S;
     type Error = std::io::Error;
 
     fn poll_read_samples(

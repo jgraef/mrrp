@@ -44,11 +44,16 @@ use tokio::{
     sync::oneshot,
 };
 
+/// Wraps a [`AsyncReadSamples`] to make it a [`rodio::Source`]
+///
+/// # TODO
+///
+/// This should be renamed. My first instinct here would be that this is a
+/// [`AsyncReadSamples`] taking data from rodio.
 #[derive(Debug)]
-#[non_exhaustive]
 pub struct RodioSource<R>
 where
-    R: AsyncReadSamples<f32>,
+    R: AsyncReadSamples<Sample = f32>,
 {
     /// the actual stream that we'll poll for samples
     read_samples: R,
@@ -77,7 +82,7 @@ where
 
 impl<R> RodioSource<R>
 where
-    R: AsyncReadSamples<f32> + GetSampleRate,
+    R: AsyncReadSamples<Sample = f32> + GetSampleRate,
 {
     pub fn new(read_samples: R) -> Self {
         let is_pending = Arc::new(IsPending::default());
@@ -114,7 +119,7 @@ where
 
 impl<R> rodio::Source for RodioSource<R>
 where
-    R: AsyncReadSamples<f32> + GetSampleRate + Unpin,
+    R: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
 {
     #[inline]
     fn current_span_len(&self) -> Option<usize> {
@@ -142,7 +147,7 @@ where
 
 impl<R> Iterator for RodioSource<R>
 where
-    R: AsyncReadSamples<f32> + Unpin,
+    R: AsyncReadSamples<Sample = f32> + Unpin,
 {
     type Item = f32;
 
@@ -214,7 +219,7 @@ pub enum Error<S> {
 
 pub async fn play_audio<S>(signal: S, volume: f32) -> Result<(), Error<S::Error>>
 where
-    S: AsyncReadSamples<f32> + GetSampleRate + Unpin + Send + 'static,
+    S: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin + Send + 'static,
     S::Error: Send,
 {
     let (result_sender, done_receiver) = oneshot::channel();

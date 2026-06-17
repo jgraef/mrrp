@@ -55,17 +55,18 @@ where
 
 impl<T> FiniteStream for WithSampleRate<T> where T: FiniteStream {}
 
-impl<T, S> AsyncReadSamples<S> for WithSampleRate<T>
+impl<T> AsyncReadSamples for WithSampleRate<T>
 where
-    T: AsyncReadSamples<S>,
+    T: AsyncReadSamples,
 {
+    type Sample = T::Sample;
     type Error = T::Error;
 
     #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_read_samples(cx, buffer)
     }

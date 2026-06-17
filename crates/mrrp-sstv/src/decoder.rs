@@ -245,7 +245,7 @@ where
 
 impl<R, F, M> Future for SstvDecoder<R, F, M>
 where
-    R: AsyncReadSamples<Complex<f32>>,
+    R: AsyncReadSamples<Sample = Complex<f32>>,
     F: FrameBufferMut,
     M: SelectMode,
 {

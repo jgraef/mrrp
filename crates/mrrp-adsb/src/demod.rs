@@ -287,7 +287,7 @@ pin_project! {
     #[derive(Debug)]
     pub struct DemodulateStream<T> {
         #[pin]
-        stream: MapInPlacePod<T, Complex<f32>, fn(Complex<f32>) -> f32>,
+        stream: MapInPlacePod<T, fn(Complex<f32>) -> f32>,
         demodulator: Demodulator,
         buffer: Vec<f32>,
         read_pos: usize,
@@ -296,7 +296,10 @@ pin_project! {
     }
 }
 
-impl<T: AsyncReadSamples<Complex<f32>>> DemodulateStream<T> {
+impl<T> DemodulateStream<T>
+where
+    T: AsyncReadSamples<Sample = Complex<f32>>,
+{
     pub fn new(stream: T, demodulator: Demodulator, buffer_size: usize) -> Self {
         Self {
             stream: stream.map_in_place_pod(|sample| sample.re * sample.re + sample.im * sample.im),
@@ -309,7 +312,10 @@ impl<T: AsyncReadSamples<Complex<f32>>> DemodulateStream<T> {
     }
 }
 
-impl<T: AsyncReadSamples<Complex<f32>>> Stream for DemodulateStream<T> {
+impl<T> Stream for DemodulateStream<T>
+where
+    T: AsyncReadSamples<Sample = Complex<f32>>,
+{
     type Item = Result<RawFrame, T::Error>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {

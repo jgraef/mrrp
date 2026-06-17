@@ -72,16 +72,17 @@ where
     }
 }
 
-impl<R, S> AsyncReadSamples<S> for Throttled<R>
+impl<R> AsyncReadSamples for Throttled<R>
 where
-    R: AsyncReadSamples<S>,
+    R: AsyncReadSamples,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
 

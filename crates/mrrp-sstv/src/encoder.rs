@@ -72,10 +72,11 @@ where
     }
 }
 
-impl<F> AsyncReadSamples<Complex<f32>> for SstvEncoder<F>
+impl<F> AsyncReadSamples for SstvEncoder<F>
 where
     F: FrameBuffer + Unpin,
 {
+    type Sample = Complex<f32>;
     type Error = Infallible;
 
     fn poll_read_samples(

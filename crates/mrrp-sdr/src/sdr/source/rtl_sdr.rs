@@ -7,18 +7,16 @@ use std::{
 };
 
 use anyhow::Error;
-use mrrp_core::{
-    buf::SampleBufMut,
-    sample::Sample,
-    signal::{
-        AsyncReadSamples,
-        ReadBuf,
-        Remaining,
-        StreamLength,
-    },
+use mrrp_core::signal::{
+    AsyncReadSamples,
+    ReadBuf,
+    Remaining,
+    StreamLength,
 };
-use num_complex::Complex;
-use tokio::io::AsyncBufRead;
+use mrrp_util::signal::{
+    AsyncReadSamplesExt,
+    Converted,
+};
 
 use crate::sdr::{
     Iq,
@@ -38,7 +36,11 @@ impl IntoSource for mrrp_rtl_sdr::Device {
 
 pub struct RtlSdrSource {
     device: mrrp_rtl_sdr::Device,
-    reader: Option<mrrp_rtl_sdr::Reader>,
+    // todo: `Converted` buffers internally, but it could read directly from the Reader buffer
+    // instread, if we had AsyncBufReadSamples. Alternatively we could implement
+    // AsyncReadSamples<Sample = Complex<f32>> direclty on the Reader, since it's such a common use
+    // case.
+    reader: Option<Converted<mrrp_rtl_sdr::Reader, Iq>>,
     name: String,
 }
 
@@ -72,7 +74,8 @@ impl Source for RtlSdrSource {
     fn start(&mut self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
         Box::pin(async {
             if self.reader.is_none() {
-                self.reader = Some(self.device.reader(Default::default()).await?);
+                let reader = self.device.reader(Default::default()).await?;
+                self.reader = Some(reader.convert());
             }
             Ok(())
         })
@@ -86,39 +89,22 @@ impl Source for RtlSdrSource {
     }
 }
 
-// todo: obsolute. use mrrp feature in mrrp_rtl_sdr
-impl AsyncReadSamples<Iq> for RtlSdrSource {
+// todo: obsolete. use mrrp feature in mrrp_rtl_sdr
+impl AsyncReadSamples for RtlSdrSource {
+    type Sample = Iq;
     type Error = Error;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        read_buf: &mut ReadBuf<Iq>,
+        buffer: &mut ReadBuf<Iq>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = &mut *self;
 
         if let Some(reader) = &mut this.reader {
-            match Pin::new(&mut *reader).poll_fill_buf(cx) {
-                Poll::Pending => Poll::Pending,
-                Poll::Ready(Err(error)) => Poll::Ready(Err(error.into())),
-                Poll::Ready(Ok(buffer)) => {
-                    // ignore last byte if it's odd-numbered
-                    let n = buffer.len() & !1;
-                    assert_ne!(n, 0);
-
-                    let samples = bytemuck::cast_slice::<_, Complex<u8>>(&buffer[..n]);
-
-                    let mut i = 0;
-                    while read_buf.has_remaining_mut() && i < n {
-                        read_buf.put_sample(samples[i].into_float());
-                        i += 1;
-                    }
-
-                    Pin::new(reader).consume(i * size_of::<Complex<u8>>());
-
-                    Poll::Ready(Ok(()))
-                }
-            }
+            Pin::new(reader)
+                .poll_read_samples(cx, buffer)
+                .map_err(Into::into)
         }
         else {
             Poll::Ready(Ok(()))

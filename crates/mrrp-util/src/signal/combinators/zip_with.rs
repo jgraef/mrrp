@@ -1,5 +1,5 @@
 use std::{
-    marker::PhantomData,
+    fmt::Debug,
     ops::{
         Add,
         Mul,
@@ -39,20 +39,26 @@ use crate::signal::{
 
 pin_project! {
     // note: the left stream is authorative on sample rate and finitness. this is not ideal
-    #[derive(Clone, Debug)]
-    pub struct ZipWith<L, R, S, T, Sc> {
+    pub struct ZipWith<L, R, Sc>
+    where
+        L: AsyncReadSamples,
+        R: AsyncReadSamples,
+    {
         #[pin]
         left_stream: L,
-        left_buffer: Buffer<S>,
+        left_buffer: Buffer<L::Sample>,
         #[pin]
         right_stream: R,
-        right_buffer: Buffer<T>,
+        right_buffer: Buffer<R::Sample>,
         scanner: Sc,
-        _phantom: PhantomData<fn(S, T)>
     }
 }
 
-impl<L, R, S, T, Sc> ZipWith<L, R, S, T, Sc> {
+impl<L, R, Sc> ZipWith<L, R, Sc>
+where
+    L: AsyncReadSamples,
+    R: AsyncReadSamples,
+{
     #[inline]
     pub fn new(left: L, right: R, scanner: Sc) -> Self {
         Self {
@@ -61,23 +67,23 @@ impl<L, R, S, T, Sc> ZipWith<L, R, S, T, Sc> {
             right_stream: right,
             right_buffer: Buffer::default(),
             scanner,
-            _phantom: PhantomData,
         }
     }
 }
 
-impl<L, R, S, T, Sc> AsyncReadSamples<Sc::Output> for ZipWith<L, R, S, T, Sc>
+impl<L, R, Sc> AsyncReadSamples for ZipWith<L, R, Sc>
 where
-    L: AsyncReadSamples<S>,
-    R: AsyncReadSamples<T>,
-    Sc: Scanner<(S, T)>,
+    L: AsyncReadSamples,
+    R: AsyncReadSamples,
+    Sc: Scanner<(L::Sample, R::Sample)>,
 {
+    type Sample = Sc::Output;
     type Error = ZipError<L::Error, R::Error>;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<Sc::Output>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
 
@@ -109,9 +115,11 @@ where
     }
 }
 
-impl<L, R, S, T, Sc> GetSampleRate for ZipWith<L, R, S, T, Sc>
+// todo: should we keep this?
+impl<L, R, Sc> GetSampleRate for ZipWith<L, R, Sc>
 where
-    L: GetSampleRate,
+    L: AsyncReadSamples + GetSampleRate,
+    R: AsyncReadSamples,
 {
     #[inline]
     fn sample_rate(&self) -> f32 {
@@ -119,10 +127,10 @@ where
     }
 }
 
-impl<L, R, S, T, Sc> StreamLength for ZipWith<L, R, S, T, Sc>
+impl<L, R, Sc> StreamLength for ZipWith<L, R, Sc>
 where
-    L: StreamLength,
-    R: StreamLength,
+    L: AsyncReadSamples + StreamLength,
+    R: AsyncReadSamples + StreamLength,
 {
     #[inline]
     fn remaining(&self) -> Remaining {
@@ -139,11 +147,47 @@ where
     }
 }
 
-impl<L, R, S, T, Sc> FiniteStream for ZipWith<L, R, S, T, Sc>
+impl<L, R, Sc> FiniteStream for ZipWith<L, R, Sc>
 where
-    L: FiniteStream,
-    R: FiniteStream,
+    L: AsyncReadSamples + FiniteStream,
+    R: AsyncReadSamples + FiniteStream,
 {
+}
+
+impl<L, R, Sc> Clone for ZipWith<L, R, Sc>
+where
+    L: AsyncReadSamples + Clone,
+    R: AsyncReadSamples + Clone,
+    Sc: Clone,
+    L::Sample: Clone,
+    R::Sample: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            left_stream: self.left_stream.clone(),
+            left_buffer: self.left_buffer.clone(),
+            right_stream: self.right_stream.clone(),
+            right_buffer: self.right_buffer.clone(),
+            scanner: self.scanner.clone(),
+        }
+    }
+}
+
+impl<L, R, Sc> Debug for ZipWith<L, R, Sc>
+where
+    L: AsyncReadSamples + Debug,
+    R: AsyncReadSamples + Debug,
+    Sc: Debug,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ZipWith")
+            .field("left_stream", &self.left_stream)
+            .field("left_buffer", &self.left_buffer)
+            .field("right_stream", &self.right_stream)
+            .field("right_buffer", &self.right_buffer)
+            .field("scanner", &self.scanner)
+            .finish()
+    }
 }
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
@@ -155,14 +199,22 @@ pub enum ZipError<L, R> {
 
 pin_project! {
     // todo: rename to Superposition?
-    #[derive(Clone, Debug)]
-    pub struct Summed<L, R, S, T> {
+    #[derive(Debug)]
+    pub struct Summed<L, R>
+    where
+        L: AsyncReadSamples,
+        R: AsyncReadSamples,
+    {
         #[pin]
-        inner: ZipWith<L, R, S, T, SumScanner>,
+        inner: ZipWith<L, R, SumScanner>,
     }
 }
 
-impl<L, R, S, T> Summed<L, R, S, T> {
+impl<L, R> Summed<L, R>
+where
+    L: AsyncReadSamples,
+    R: AsyncReadSamples,
+{
     #[inline]
     pub fn new(left: L, right: R) -> Self {
         Self {
@@ -171,27 +223,29 @@ impl<L, R, S, T> Summed<L, R, S, T> {
     }
 }
 
-impl<L, R, S, T> AsyncReadSamples<<S as Add<T>>::Output> for Summed<L, R, S, T>
+impl<L, R> AsyncReadSamples for Summed<L, R>
 where
-    S: Add<T>,
-    L: AsyncReadSamples<S>,
-    R: AsyncReadSamples<T>,
+    L: AsyncReadSamples,
+    R: AsyncReadSamples,
+    L::Sample: Add<R::Sample>,
 {
+    type Sample = <L::Sample as Add<R::Sample>>::Output;
     type Error = ZipError<L::Error, R::Error>;
 
     #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<<S as Add<T>>::Output>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_read_samples(cx, buffer)
     }
 }
 
-impl<L, R, S, T> GetSampleRate for Summed<L, R, S, T>
+impl<L, R> GetSampleRate for Summed<L, R>
 where
-    L: GetSampleRate,
+    L: AsyncReadSamples + GetSampleRate,
+    R: AsyncReadSamples,
 {
     #[inline]
     fn sample_rate(&self) -> f32 {
@@ -199,10 +253,10 @@ where
     }
 }
 
-impl<L, R, S, T> StreamLength for Summed<L, R, S, T>
+impl<L, R> StreamLength for Summed<L, R>
 where
-    L: StreamLength,
-    R: StreamLength,
+    L: AsyncReadSamples + StreamLength,
+    R: AsyncReadSamples + StreamLength,
 {
     #[inline]
     fn remaining(&self) -> Remaining {
@@ -210,23 +264,44 @@ where
     }
 }
 
-impl<L, R, S, T> FiniteStream for Summed<L, R, S, T>
+impl<L, R> FiniteStream for Summed<L, R>
 where
-    L: FiniteStream,
-    R: FiniteStream,
+    L: AsyncReadSamples + FiniteStream,
+    R: AsyncReadSamples + FiniteStream,
 {
+}
+
+impl<L, R> Clone for Summed<L, R>
+where
+    L: AsyncReadSamples + Clone,
+    R: AsyncReadSamples + Clone,
+    L::Sample: Clone,
+    R::Sample: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 pin_project! {
     // todo: renamed to Mixed?
-    #[derive(Clone, Debug)]
-    pub struct Multiplied<L, R, S, T> {
+    pub struct Multiplied<L, R>
+    where
+        L: AsyncReadSamples,
+        R: AsyncReadSamples,
+    {
         #[pin]
-        inner: ZipWith<L, R, S, T, ProductScanner>,
+        inner: ZipWith<L, R, ProductScanner>,
     }
 }
 
-impl<L, R, S, T> Multiplied<L, R, S, T> {
+impl<L, R> Multiplied<L, R>
+where
+    L: AsyncReadSamples,
+    R: AsyncReadSamples,
+{
     #[inline]
     pub fn new(left: L, right: R) -> Self {
         Self {
@@ -235,27 +310,29 @@ impl<L, R, S, T> Multiplied<L, R, S, T> {
     }
 }
 
-impl<L, R, S, T> AsyncReadSamples<<S as Mul<T>>::Output> for Multiplied<L, R, S, T>
+impl<L, R> AsyncReadSamples for Multiplied<L, R>
 where
-    S: Mul<T>,
-    L: AsyncReadSamples<S>,
-    R: AsyncReadSamples<T>,
+    L: AsyncReadSamples,
+    R: AsyncReadSamples,
+    L::Sample: Mul<R::Sample>,
 {
+    type Sample = <L::Sample as Mul<R::Sample>>::Output;
     type Error = ZipError<L::Error, R::Error>;
 
     #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<<S as Mul<T>>::Output>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_read_samples(cx, buffer)
     }
 }
 
-impl<L, R, S, T> GetSampleRate for Multiplied<L, R, S, T>
+impl<L, R> GetSampleRate for Multiplied<L, R>
 where
-    L: GetSampleRate,
+    L: AsyncReadSamples + GetSampleRate,
+    R: AsyncReadSamples,
 {
     #[inline]
     fn sample_rate(&self) -> f32 {
@@ -263,10 +340,10 @@ where
     }
 }
 
-impl<L, R, S, T> StreamLength for Multiplied<L, R, S, T>
+impl<L, R> StreamLength for Multiplied<L, R>
 where
-    L: StreamLength,
-    R: StreamLength,
+    L: AsyncReadSamples + StreamLength,
+    R: AsyncReadSamples + StreamLength,
 {
     #[inline]
     fn remaining(&self) -> Remaining {
@@ -274,11 +351,25 @@ where
     }
 }
 
-impl<L, R, S, T> FiniteStream for Multiplied<L, R, S, T>
+impl<L, R> FiniteStream for Multiplied<L, R>
 where
-    L: FiniteStream,
-    R: FiniteStream,
+    L: AsyncReadSamples + FiniteStream,
+    R: AsyncReadSamples + FiniteStream,
 {
+}
+
+impl<L, R> Clone for Multiplied<L, R>
+where
+    L: AsyncReadSamples + Clone,
+    R: AsyncReadSamples + Clone,
+    L::Sample: Clone,
+    R::Sample: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -48,16 +48,17 @@ impl<R> Decimate<R> {
     }
 }
 
-impl<R, S> AsyncReadSamples<S> for Decimate<R>
+impl<R> AsyncReadSamples for Decimate<R>
 where
-    R: AsyncReadSamples<S>,
+    R: AsyncReadSamples,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
 
@@ -124,6 +125,14 @@ where
 }
 
 pin_project! {
+    /// Interpolated stream
+    ///
+    /// This is created with the [`interpolate`](AsyncReadSamplesFilterExt::interpolate) method.
+    ///
+    /// # TODO
+    ///
+    /// We think it doesn't matter with what value you pad. So we could accept this as an argument.
+    /// Then we don't need the [`Sample`] trait bound for the equilibrium value.
     #[derive(Clone, Debug)]
     pub struct Interpolate<R> {
         #[pin]
@@ -144,17 +153,18 @@ impl<R> Interpolate<R> {
     }
 }
 
-impl<R, S> AsyncReadSamples<S> for Interpolate<R>
+impl<R> AsyncReadSamples for Interpolate<R>
 where
-    R: AsyncReadSamples<S>,
-    S: Zero,
+    R: AsyncReadSamples,
+    R::Sample: Sample,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
 
@@ -183,7 +193,7 @@ where
                 let mut write_pos = 0;
 
                 while read_pos < read_end_pos {
-                    let mut sample = S::zero();
+                    let mut sample = <R::Sample>::EQUILIBRIUM;
 
                     if *this.counter == 0 {
                         sample = unsafe { buffer_unfilled[read_pos].assume_init_read() };
@@ -242,29 +252,33 @@ where
 ///
 /// <https://en.wikipedia.org/wiki/Finite_impulse_response#Moving_average_example>
 #[derive(Clone, Debug)]
-pub struct AverageDecimate<T, S> {
+pub struct AverageDecimate<T>
+where
+    T: AsyncReadSamples,
+{
     input: T,
     decimate: usize,
-    accumulator: (S, usize),
+    accumulator: (T::Sample, usize),
 }
 
-impl<T, S> AverageDecimate<T, S>
+impl<T> AverageDecimate<T>
 where
-    S: Zero,
+    T: AsyncReadSamples,
+    T::Sample: Zero,
 {
     #[inline]
     pub fn new(input: T, decimate: usize) -> Self {
         Self {
             input,
             decimate,
-            accumulator: (S::zero(), 0),
+            accumulator: (<T::Sample>::zero(), 0),
         }
     }
 }
 
-impl<T, S> GetSampleRate for AverageDecimate<T, S>
+impl<T> GetSampleRate for AverageDecimate<T>
 where
-    T: GetSampleRate,
+    T: AsyncReadSamples + GetSampleRate,
 {
     #[inline]
     fn sample_rate(&self) -> f32 {
@@ -272,9 +286,9 @@ where
     }
 }
 
-impl<T, S> StreamLength for AverageDecimate<T, S>
+impl<T> StreamLength for AverageDecimate<T>
 where
-    T: StreamLength,
+    T: AsyncReadSamples + StreamLength,
 {
     #[inline]
     fn remaining(&self) -> Remaining {
@@ -284,18 +298,25 @@ where
     }
 }
 
-impl<T, S> AsyncReadSamples<S> for AverageDecimate<T, S>
+impl<T> AsyncReadSamples for AverageDecimate<T>
 where
-    T: AsyncReadSamples<S> + Unpin,
-    S: Sample + Clone + Zero + AddAssign + Div<Output = S> + Unpin + Div<S::Scalar, Output = S>,
-    S::Scalar: FromPrimitive,
+    T: AsyncReadSamples + Unpin,
+    T::Sample: Sample
+        + Clone
+        + Zero
+        + AddAssign
+        + Div<Output = T::Sample>
+        + Unpin
+        + Div<<T::Sample as Sample>::Scalar, Output = T::Sample>,
+    <T::Sample as Sample>::Scalar: FromPrimitive,
 {
+    type Sample = T::Sample;
     type Error = T::Error;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = &mut *self;
 
@@ -327,8 +348,12 @@ where
                         this.accumulator.0 += buffer.filled()[read_pos].clone();
                         this.accumulator.1 += 1;
                         if this.accumulator.1 == this.decimate {
-                            let average = std::mem::replace(&mut this.accumulator.0, S::zero())
-                                / <S::Scalar>::from_usize(this.decimate).unwrap();
+                            let average =
+                                std::mem::replace(
+                                    &mut this.accumulator.0,
+                                    <T::Sample as Zero>::zero(),
+                                ) / <<T::Sample as Sample>::Scalar>::from_usize(this.decimate)
+                                    .unwrap();
                             buffer.filled_mut()[write_pos] = average;
                             write_pos += 1;
                             this.accumulator.1 = 0;

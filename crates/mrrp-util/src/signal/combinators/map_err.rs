@@ -36,18 +36,19 @@ impl<R, F> MapErr<R, F> {
     }
 }
 
-impl<R, S, E, F> AsyncReadSamples<S> for MapErr<R, F>
+impl<R, E, F> AsyncReadSamples for MapErr<R, F>
 where
-    R: AsyncReadSamples<S>,
+    R: AsyncReadSamples,
     F: FnMut(R::Error) -> E,
 {
+    type Sample = R::Sample;
     type Error = E;
 
     #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
         this.inner

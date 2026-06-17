@@ -37,17 +37,18 @@ impl<T> WithSpan<T> {
     }
 }
 
-impl<T, S> AsyncReadSamples<S> for WithSpan<T>
+impl<T> AsyncReadSamples for WithSpan<T>
 where
-    T: AsyncReadSamples<S>,
+    T: AsyncReadSamples,
 {
+    type Sample = T::Sample;
     type Error = T::Error;
 
     #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
         let _guard = this.span.enter();

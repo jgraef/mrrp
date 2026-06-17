@@ -41,17 +41,18 @@ impl<R, I> InspectWith<R, I> {
     }
 }
 
-impl<R, I, S> AsyncReadSamples<S> for InspectWith<R, I>
+impl<R, I> AsyncReadSamples for InspectWith<R, I>
 where
-    R: AsyncReadSamples<S>,
-    I: Inspector<S>,
+    R: AsyncReadSamples,
+    I: Inspector<R::Sample>,
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<R::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = self.project();
 
@@ -100,17 +101,18 @@ impl<R, F> Inspect<R, F> {
     }
 }
 
-impl<R, S, F> AsyncReadSamples<S> for Inspect<R, F>
+impl<R, F> AsyncReadSamples for Inspect<R, F>
 where
-    R: AsyncReadSamples<S>,
-    F: FnMut(&[S]),
+    R: AsyncReadSamples,
+    F: FnMut(&[R::Sample]),
 {
+    type Sample = R::Sample;
     type Error = R::Error;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<S>,
+        buffer: &mut ReadBuf<R::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_read_samples(cx, buffer)
     }

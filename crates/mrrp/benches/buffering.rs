@@ -94,9 +94,9 @@ pub fn bench_buffering(c: &mut Criterion) {
 criterion_group!(benches, bench_buffering);
 criterion_main!(benches);
 
-fn read_stream<R, S>(mut stream: R)
+fn read_stream<R>(mut stream: R)
 where
-    R: AsyncReadSamples<S> + Unpin + FiniteStream,
+    R: AsyncReadSamples + Unpin + FiniteStream,
     R::Error: Debug,
 {
     let mut output = vec![];
