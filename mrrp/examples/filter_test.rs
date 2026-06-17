@@ -20,7 +20,6 @@ use mrrp::{
         },
         fir::FirFilter,
     },
-    rtl_tcp,
     signal::{
         AsyncReadSamplesExt,
         combinators::Scanner,
@@ -29,7 +28,6 @@ use mrrp::{
 };
 use num_complex::Complex;
 use rand::rngs::SmallRng;
-use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -89,13 +87,15 @@ async fn main() -> Result<(), Error> {
     if let Some(path) = &args.file_output {
         write_stream_to_wav(path, output).await?;
     }
-    else if let Some(address) = &args.tcp_output {
+    else if let Some(_address) = &args.tcp_output {
         //let tcp_stream = TcpStream::connect(&output).await?;
-        println!("Waiting for connection");
-        let tcp_listener = TcpListener::bind(&address).await?;
-        let (tcp_stream, _) = tcp_listener.accept().await?;
-        println!("Client connected");
-        rtl_tcp::serve_connection(tcp_stream, output.throttle_to_sample_rate()).await?;
+        //println!("Waiting for connection");
+        //let tcp_listener = TcpListener::bind(&address).await?;
+        //let (tcp_stream, _) = tcp_listener.accept().await?;
+        //println!("Client connected");
+        //rtl_tcp::serve_connection(tcp_stream,
+        // output.throttle_to_sample_rate()).await?;
+        todo!("accept a single rtl_tcp connection");
     }
 
     Ok(())

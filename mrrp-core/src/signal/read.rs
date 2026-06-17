@@ -443,41 +443,6 @@ pub trait AsyncReadSamplesExt<S>: AsyncReadSamples<S> {
         WithSpan::new(self, span)
     }
 
-    /* todo: move these into a separate extension trait?
-    #[inline]
-    fn decimate(self, factor: usize) -> Decimate<Self>
-    where
-        Self: Sized,
-    {
-        Decimate::new(self, factor)
-    }
-
-    #[inline]
-    fn decimate_to(self, target_sample_rate: f32) -> Decimate<Self>
-    where
-        Self: Sized + GetSampleRate,
-    {
-        let sample_rate = self.sample_rate();
-        self.decimate((sample_rate / target_sample_rate).round() as usize)
-    }
-
-    #[inline]
-    fn interpolate(self, factor: usize) -> Interpolate<Self>
-    where
-        Self: Sized,
-    {
-        Interpolate::new(self, factor)
-    }
-
-    #[inline]
-    fn interpolate_to(self, target_sample_rate: f32) -> Interpolate<Self>
-    where
-        Self: Sized + GetSampleRate,
-    {
-        let sample_rate = self.sample_rate();
-        self.interpolate((target_sample_rate / sample_rate).round() as usize)
-    } */
-
     #[inline]
     fn throttle(self, sample_duration: Duration) -> Throttled<Self>
     where

@@ -4,6 +4,7 @@ use anyhow::Error;
 use clap::Parser;
 use mrrp::{
     filter::{
+        AsyncReadSamplesFilterExt,
         biquad,
         design::{
             FilterDesign,
@@ -59,7 +60,7 @@ async fn main() -> Result<(), Error> {
     if let Some(output) = &args.file_output {
         write_stream_to_wav(output, filtered).await?;
     }
-    else if let Some(output) = &args.tcp_output {
+    else if let Some(_output) = &args.tcp_output {
         //let tcp_stream = TcpStream::connect(&output).await?;
         //println!("Waiting for connection");
         //let tcp_listener = TcpListener::bind(&output).await?;

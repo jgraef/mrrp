@@ -15,7 +15,11 @@ use std::{
     },
 };
 
-use mrrp_core::signal::combinators::Scanner;
+use mrrp_core::signal::{
+    AsyncReadSamples,
+    GetSampleRate,
+    combinators::Scanner,
+};
 use num_complex::Complex;
 use num_traits::Zero;
 
@@ -27,7 +31,13 @@ use crate::design::{
     Hilbert,
     Normalize,
 };
-use crate::fir::FirFilter;
+use crate::{
+    fir::FirFilter,
+    resampling::{
+        Decimate,
+        Interpolate,
+    },
+};
 
 pub trait MakeFilter<R> {
     type Filter;
@@ -156,3 +166,85 @@ where
         self.sum * self.norm
     }
 }
+
+pub trait AsyncReadSamplesFilterExt<S>: AsyncReadSamples<S> {
+    /// Decimate the input stream
+    ///
+    /// The returned stream will only return one out of `factor` samples and
+    /// drop the rest.
+    #[inline]
+    fn decimate(self, factor: usize) -> Decimate<Self>
+    where
+        Self: Sized,
+    {
+        Decimate::new(self, factor)
+    }
+
+    /// Decimate the input stream to a target sample rate
+    ///
+    /// This will decimate such that the resulting sample rate is as close as
+    /// possible to the `target_sampling_rate`.
+    ///
+    /// This is a short-hand for:
+    ///
+    /// ```
+    /// # use mrrp_core::signal::{WithSampleRate, NullSource};
+    /// # let input: WithSampleRate<NullSource> = NullSource.with_sample_rate(100.0);
+    /// let sample_rate = input.sample_rate();
+    /// let decimated = input.decimate((sample_rate / target_sample_rate).round() as usize);
+    /// ```
+    ///
+    /// # TODO
+    ///
+    /// We can probably make this exact by alternating between the floored and
+    /// ceiled decimation rate.
+    #[inline]
+    fn decimate_to(self, target_sample_rate: f32) -> Decimate<Self>
+    where
+        Self: Sized + GetSampleRate,
+    {
+        let sample_rate = self.sample_rate();
+        self.decimate((sample_rate / target_sample_rate).round() as usize)
+    }
+
+    /// Interpolate the input stream
+    ///
+    /// This pads the input stream such that one input sample is followed by
+    /// `factor - 1` samples containing silence.
+    #[inline]
+    fn interpolate(self, factor: usize) -> Interpolate<Self>
+    where
+        Self: Sized,
+    {
+        Interpolate::new(self, factor)
+    }
+
+    /// Interpolate the input stream to a target sample rate
+    ///
+    /// This will interpolate such that the resulting sample rate is as close as
+    /// possible to the `target_sampling_rate`.
+    ///
+    /// This is a short-hand for:
+    ///
+    /// ```
+    /// # use mrrp_core::signal::{WithSampleRate, NullSource};
+    /// # let input: WithSampleRate<NullSource> = NullSource.with_sample_rate(100.0);
+    /// let sample_rate = input.sample_rate();
+    /// let interpolated = input.interpolate((sample_rate / target_sample_rate).round() as usize);
+    /// ```
+    ///
+    /// # TODO
+    ///
+    /// We can probably make this exact by alternating between the floored and
+    /// ceiled interpolation rate.
+    #[inline]
+    fn interpolate_to(self, target_sample_rate: f32) -> Interpolate<Self>
+    where
+        Self: Sized + GetSampleRate,
+    {
+        let sample_rate = self.sample_rate();
+        self.interpolate((target_sample_rate / sample_rate).round() as usize)
+    }
+}
+
+impl<R, S> AsyncReadSamplesFilterExt<S> for R where R: AsyncReadSamples<S> + ?Sized {}

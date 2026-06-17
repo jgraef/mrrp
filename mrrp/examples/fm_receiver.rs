@@ -18,6 +18,7 @@ use mrrp::{
         GetSampleRate,
     },
 };
+use mrrp_filter::AsyncReadSamplesFilterExt;
 use num_complex::Complex;
 use tokio::signal::ctrl_c;
 
