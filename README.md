@@ -6,7 +6,7 @@ This is a collection of crates for SDR (Software Defined Radio) with Rust.
 
 **IN DEVELOPMENT**
 
-This is still under a development. Don't expect anything to be in a usable state.
+This is still under development. Don't expect anything to be in a usable state.
 
 ## Crates
 
