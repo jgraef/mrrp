@@ -8,51 +8,23 @@ This is a collection of crates for SDR (Software Defined Radio) with Rust.
 
 This is still under a development. Don't expect anything to be in a usable state.
 
-## `mrrp`
+## Crates
 
-Core crate that defines traits for streaming IQ asynchronously, and operating on them. Also contains tools for filter construction, file IO. There are some experimental demodulators. Some parts of this will likely be split into separate crates.
+This project consists of a number of different crates:
 
-## `mrrp-cli`
-
-Experimental terminal SDR app. Will likely not be developed for a while in favor of mrrp-sdr.
-
-![mrrp-cli screenshot](https://media.githubusercontent.com/media/jgraef/mrrp/refs/heads/main/docs/screenshot.png)
-
-## `mrrp-sdr`
-
-Graphical SDR app.
-
-## `mrrp-widgets`
-
-egui widgets that are necessary for displaying radio-related things. Contains a GPU-rendered display for spectrum and waterfall.
-
-## `mrrp-sat`
-
-Satellite tracking
-
-## `mrrp-adsb`
-
-Mode-S a.k.a ADS-B demodulation and decoding for plane tracking.
-
-TODO: Merge from adsbee repo.
-
-## `mrrp-rigctl`
-
-[hamlib rigctl](https://github.com/Hamlib/Hamlib) client and server.
-
-## Random TODOs
-
-- move `AsyncReadSamplesExt` into `mrrp-util`. Add back filter-related combinator methods via another extension trait.
-- Fix `Samples`/`SamplesMut` to actually be useful (`freeze`/`thaw`)
-- `tracing`/`log` integration: some of our dependencies log using `log` crate, we want to forward that to tracing
-- `AsyncBufReadSamples`
-
-## Planned features:
-
-Just some features we want to implement eventually, but might forget if not noted down:
-
-- Capture Rollback: Keep a ring-buffer of samples (on disk?) so that we can start a capture starting a few seconds in the past.
-- Satellite overlay: Show transponder frequencies of satellites that are overhead.
-- Lots of demodulators/decoders of course :3
-- rpitx-like transmit (merge our BCM2711 code)
-- Does our NanoVNA crate fit in here? Probably not.
+- `mrrp`: This just pulls in and re-exports some other crates to make it easier for application development and prototyping.
+- `mrrp-adsb`: Mode-S / ADS-B demodulation and decoding.
+- `mrrp-cli`: Deprecated TUI SDR app that initially started this project. ([Screenshot](https://media.githubusercontent.com/media/jgraef/mrrp/refs/heads/main/docs/mrrp-cli.png))
+- `mrrp-core`: Defines the main traits and types for DSP.
+- `mrrp-filter`: Signal filtering and filter synthesis.
+- `mrrp-hamlib`: WIP hamlib rigctl client and server.
+- `mrrp-modem`: General-purpose modulation & demodulations (e.g. FM).
+- `mrrp-rtl-sdr`: From-scratch RTL-SDR driver in async Rust.
+- `mrrp-rtl-sdr-test`: Test CLI for `mrrp-rtl-sdr`. This will become a more useful CLI program for using RTL-SDRs - similar to that librtlsdr offers.
+- `mrrp-rtl-tcp`: Client and server implementation of the `rtl_tcp` protocol.
+- `mrrp-sat`: Satellite tracking
+- `mrrp-sdr`: SDR GUI application
+- `mrrp-sstv`: WIP SSTV encoder and decoder
+- `mrrp-util`: Useful utilities to use with `mrrp-core`.
+- `mrrp-widgets`: egui widgets that are needed to display radio-related information in a GUI. Contains hardware-accelerated spectrum and waterfall renderers.
+- `mrrp-xtask`: Development tools.
