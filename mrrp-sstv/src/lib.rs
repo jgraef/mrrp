@@ -1,3 +1,5 @@
+//! WIP SSTV encoder and decoder
+//!
 //! # References
 //!
 //! - <http://lionel.cordesses.free.fr/gpages/sstv.html>

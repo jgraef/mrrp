@@ -587,7 +587,7 @@ impl SelectMode for ModeSpecification {
 
 #[cfg(test)]
 mod tests {
-    use crate::modem::sstv::modes::{
+    use crate::modes::{
         ModeSpecification,
         VisCode,
     };

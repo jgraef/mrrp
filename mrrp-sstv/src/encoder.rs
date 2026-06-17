@@ -7,27 +7,8 @@ use std::{
     },
 };
 
-use num_complex::Complex;
-
-use crate::{
+use mrrp_core::{
     buf::SampleBufMut,
-    modem::sstv::{
-        LEADER_BREAK_TIME,
-        LEADER_TIME,
-        LEADER_TONE,
-        PORCH_TONE,
-        SYNC_TONE,
-        VIS_BIT_TIME,
-        VIS_HIGH_TONE,
-        VIS_LOW_TONE,
-        image::FrameBuffer,
-        modes::ModeSpecification,
-        state::{
-            HeaderState,
-            LineState,
-            State,
-        },
-    },
     signal::{
         AsyncReadSamples,
         GetSampleRate,
@@ -35,11 +16,30 @@ use crate::{
         Remaining,
         StreamLength,
     },
-    source::{
-        ComplexSinusoid,
-        SignalGenerator,
+};
+use mrrp_util::{
+    generator::SignalGenerator,
+    lerp,
+    sine::ComplexSinusoid,
+};
+use num_complex::Complex;
+
+use crate::{
+    LEADER_BREAK_TIME,
+    LEADER_TIME,
+    LEADER_TONE,
+    PORCH_TONE,
+    SYNC_TONE,
+    VIS_BIT_TIME,
+    VIS_HIGH_TONE,
+    VIS_LOW_TONE,
+    image::FrameBuffer,
+    modes::ModeSpecification,
+    state::{
+        HeaderState,
+        LineState,
+        State,
     },
-    util::lerp,
 };
 
 #[derive(Clone, Debug)]

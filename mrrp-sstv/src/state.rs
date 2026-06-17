@@ -1,4 +1,4 @@
-use crate::modem::sstv::{
+use crate::{
     image::Channel,
     modes::ModeSpecification,
 };
