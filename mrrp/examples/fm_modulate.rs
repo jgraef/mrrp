@@ -17,18 +17,16 @@ use mrrp::{
         AsyncReadSamplesExt,
         GetSampleRate,
     },
-    sink::{
-        file::write_stream_to_wav,
-        rtl_tcp,
-    },
-    source::file::WavSource,
 };
-use tokio::net::TcpListener;
+use mrrp_audio::{
+    WavSource,
+    write_stream_to_wav,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
-    color_eyre::install()?;
+
     tracing_subscriber::fmt::init();
     tracing::info!("FM modulator example");
 
@@ -63,11 +61,13 @@ async fn main() -> Result<(), Error> {
     }
     else if let Some(output) = &args.tcp_output {
         //let tcp_stream = TcpStream::connect(&output).await?;
-        println!("Waiting for connection");
-        let tcp_listener = TcpListener::bind(&output).await?;
-        let (tcp_stream, _) = tcp_listener.accept().await?;
-        println!("Client connected");
-        rtl_tcp::serve_connection(tcp_stream, filtered.throttle_to_sample_rate()).await?;
+        //println!("Waiting for connection");
+        //let tcp_listener = TcpListener::bind(&output).await?;
+        //let (tcp_stream, _) = tcp_listener.accept().await?;
+        //println!("Client connected");
+        //rtl_tcp::serve_connection(tcp_stream,
+        // filtered.throttle_to_sample_rate()).await?;
+        todo!("accept a single rtl_tcp connection");
     }
 
     Ok(())

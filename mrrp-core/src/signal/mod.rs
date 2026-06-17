@@ -39,24 +39,6 @@ impl<T: GetSampleRate> GetSampleRate for &mut T {
     }
 }
 
-pub trait GetCenterFrequency {
-    fn center_frequency(&self) -> f32;
-}
-
-impl<T: GetCenterFrequency> GetCenterFrequency for &T {
-    #[inline]
-    fn center_frequency(&self) -> f32 {
-        (&**self).center_frequency()
-    }
-}
-
-impl<T: GetCenterFrequency> GetCenterFrequency for &mut T {
-    #[inline]
-    fn center_frequency(&self) -> f32 {
-        (&**self).center_frequency()
-    }
-}
-
 pub trait StreamLength {
     fn remaining(&self) -> Remaining;
 

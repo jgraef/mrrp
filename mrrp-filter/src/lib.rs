@@ -21,14 +21,13 @@ use num_traits::Zero;
 
 #[cfg(feature = "pm-remez")]
 pub use crate::design::pm_remez::pm_remez;
-use crate::{
-    design::{
-        FilterDesign,
-        Hilbert,
-        Normalize,
-    },
-    fir::FirFilter,
+#[cfg(feature = "pm-remez")]
+use crate::design::{
+    FilterDesign,
+    Hilbert,
+    Normalize,
 };
+use crate::fir::FirFilter;
 
 pub trait MakeFilter<R> {
     type Filter;

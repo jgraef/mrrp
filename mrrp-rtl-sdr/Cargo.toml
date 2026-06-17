@@ -7,8 +7,11 @@ repository.workspace = true
 
 [dependencies]
 bitfield = "0.19.4"
+bytemuck = { workspace = true, optional = true }
 derive_more = { workspace = true, features = ["debug", "from", "into"] }
 futures-util.workspace = true
+mrrp-core = { workspace = true, optional = true }
+num-complex = { workspace = true, optional = true, features = ["bytemuck"] }
 nusb = { version = "0.2.3", features = ["tokio"] }
 parking_lot.workspace = true
 paste = "1.0.15"
@@ -21,3 +24,7 @@ tokio = { workspace = true, default-features = false, features = [
     "time",
 ] }
 tracing.workspace = true
+
+[features]
+default = ["mrrp"]
+mrrp = ["dep:mrrp-core", "dep:num-complex", "dep:bytemuck"]

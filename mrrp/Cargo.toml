@@ -6,12 +6,13 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-mrrp-audio = { workspace = true, features = ["full"] }
+mrrp-audio = { workspace = true, features = ["full"], optional = true }
 mrrp-core.workspace = true
-mrrp-filter = { workspace = true, features = ["full"] }
-mrrp-modem.workspace = true
+mrrp-filter = { workspace = true, features = ["full"], optional = true }
+mrrp-modem = { workspace = true, optional = true }
+mrrp-rtl-sdr = { workspace = true, optional = true, features = ["mrrp"] }
+#mrrp-rtl-tcp = { version = "0.1.0", path = "../mrrp-rtl-tcp", optional = true }
 mrrp-util.workspace = true
-
 
 [[bench]]
 name = "buffering"
@@ -30,3 +31,12 @@ rand.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
+
+[features]
+default = ["full"]
+full = ["audio", "rtl_sdr"]
+audio = ["dep:mrrp-audio"]
+filter = ["dep:mrrp-filter"]
+modem = ["dep:mrrp-modem"]
+rtl_sdr = ["dep:mrrp-rtl-sdr"]
+#rtl_tcp = ["dep:mrrp-rtl-tcp"]

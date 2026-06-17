@@ -169,7 +169,7 @@ async fn main() -> Result<(), Error> {
             device.set_center_frequency(center_frequency).await?;
 
             if stream {
-                let mut reader = device.reader(0x100000).await?;
+                let mut reader = device.reader(Default::default()).await?;
 
                 struct SamplesPerSecond {
                     start_time: Instant,

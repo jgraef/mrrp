@@ -40,7 +40,6 @@ pub struct RtlSdrSource {
     device: mrrp_rtl_sdr::Device,
     reader: Option<mrrp_rtl_sdr::Reader>,
     name: String,
-    buffer_size: usize,
 }
 
 impl RtlSdrSource {
@@ -51,9 +50,6 @@ impl RtlSdrSource {
             device,
             reader: None,
             name,
-            // 1 MiB
-            // todo: if we make this configurable, it must be larger than 1 sample in bytes
-            buffer_size: 0x100000,
         }
     }
 }
@@ -76,7 +72,7 @@ impl Source for RtlSdrSource {
     fn start(&mut self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
         Box::pin(async {
             if self.reader.is_none() {
-                self.reader = Some(self.device.reader(self.buffer_size).await?);
+                self.reader = Some(self.device.reader(Default::default()).await?);
             }
             Ok(())
         })
@@ -90,6 +86,7 @@ impl Source for RtlSdrSource {
     }
 }
 
+// todo: obsolute. use mrrp feature in mrrp_rtl_sdr
 impl AsyncReadSamples<Iq> for RtlSdrSource {
     type Error = Error;
 

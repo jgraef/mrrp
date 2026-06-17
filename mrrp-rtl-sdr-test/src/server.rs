@@ -12,7 +12,10 @@ use anyhow::{
     anyhow,
 };
 use bytes::Buf;
-use mrrp_rtl_sdr::tuner::gain;
+use mrrp_rtl_sdr::{
+    device::ReaderOptions,
+    tuner::gain,
+};
 use mrrp_rtl_tcp::{
     protocol::TunerGainMode,
     server,
@@ -252,7 +255,13 @@ async fn handle_commands(
                 let _ = result_sender.send(result);
             }
             Command::GetReader { result_sender } => {
-                let result = device.reader(config.buffer_size).await.map_err(Into::into);
+                let result = device
+                    .reader(ReaderOptions {
+                        buffer_size: config.buffer_size,
+                        ..Default::default()
+                    })
+                    .await
+                    .map_err(Into::into);
                 let _ = result_sender.send(result);
             }
             Command::Shutdown { result_sender } => {

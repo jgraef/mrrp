@@ -367,12 +367,12 @@ impl<S> SampledIdealFrequencyResponse<S>
 where
     S: DesiredFrequencyResponse,
 {
-    fn get(&self, index: usize) -> Option<FrequencyResponseAt> {
+    pub fn get(&self, index: usize) -> Option<FrequencyResponseAt> {
         let frequency = self.frequency(index).abs();
         self.filter_specification.frequency_response_at(frequency)
     }
 
-    fn frequency(&self, index: usize) -> f32 {
+    pub fn frequency(&self, index: usize) -> f32 {
         let mut frequency = index as f32 / self.fft_size as f32;
         if frequency >= 0.5 {
             frequency -= 1.0;
@@ -380,7 +380,7 @@ where
         frequency
     }
 
-    fn iter(&self) -> impl Iterator<Item = Option<FrequencyResponseAt>> {
+    pub fn iter(&self) -> impl Iterator<Item = Option<FrequencyResponseAt>> {
         (0..self.fft_size).map(|i| self.get(i))
     }
 }

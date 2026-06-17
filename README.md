@@ -42,6 +42,7 @@ TODO: Merge from adsbee repo.
 
 ## Random TODOs
 
+- move `AsyncReadSamplesExt` into `mrrp-util`. Add back filter-related combinator methods via another extension trait.
 - Fix `Samples`/`SamplesMut` to actually be useful (`freeze`/`thaw`)
 - `tracing`/`log` integration: some of our dependencies log using `log` crate, we want to forward that to tracing
 - `AsyncBufReadSamples`

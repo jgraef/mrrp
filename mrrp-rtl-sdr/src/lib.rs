@@ -77,7 +77,7 @@
 //! let buffer_size = 64 * 1024;
 //! let mut reader = device.reader(buffer_size).await?;
 //!
-//! // read samples. these are interleaved IQ as paits of u8, with the equilibrium at 128.
+//! // read samples. these are interleaved IQ as pairs of u8, with the equilibrium at 128.
 //! loop {
 //!     let i = reader.read_u8().await?;
 //!     let q = reader.read_u8().await?;
@@ -121,6 +121,12 @@
 //! made to do this in the background, when either is dropped. For this a tokio
 //! task is spawned that performs the shutdown. This is not 100% reliable, if
 //! e.g. the tokio runtime is shutdown before the task can run.
+//!
+//! # mrrp integration
+//!
+//! For [`Reader`] to implement `mrrp_core::AsyncReadSamples`, the `mrrp`
+//! feature must be enabled. It is enabled by default, but can be disabled if
+//! not needed.
 
 pub mod device;
 pub mod enumerate;

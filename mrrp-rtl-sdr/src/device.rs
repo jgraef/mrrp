@@ -12,6 +12,7 @@ use std::{
     },
 };
 
+use parking_lot::RwLock;
 use tokio::{
     io::{
         AsyncBufRead,
@@ -19,8 +20,8 @@ use tokio::{
         ReadBuf,
     },
     sync::{
-        Mutex,
-        MutexGuard,
+        Mutex as AsyncMutex,
+        MutexGuard as AsyncMutexGuard,
     },
 };
 
@@ -78,16 +79,19 @@ pub struct Device {
     device_info: DeviceInfo,
     reset_on_drop: bool,
 
-    /// The RTL2832U and tuner are in an `Arc<Mutex<_>>` so we can access them
-    /// in drop code for [`Device`] and [`Reader`].
-    inner: SharedInner,
+    /// This contains [`Rtl2832u`], [`AnyTuner`], and some state, that we have
+    /// to share with [`Reader`].
+    ///
+    /// The [`Rtl2832u`] and [`AnyTuner`] are only accessed by [`Reader`] when
+    /// it's closed.
+    ///
+    /// The shared state currently only contains the configured sample rate,
+    /// such that [`Reader`] can implement `mrrp::signal::GetSampleRate`.
+    shared: Arc<Shared>,
 
     /// The frequency correction factor (in ppm) that was set on the
     /// RTL2832U.
     frequency_correction: i16,
-
-    /// The current sample rate
-    sample_rate: f32,
 
     /// The current center frequency
     center_frequency: Option<f32>,
@@ -152,11 +156,12 @@ impl Device {
         Ok(Self {
             device_info,
             reset_on_drop: options.reset_on_drop,
-            inner: SharedInner {
-                inner: Arc::new(Mutex::new(inner)),
-            },
+            shared: Arc::new(Shared {
+                inner: AsyncMutex::new(inner),
+                state: RwLock::new(SharedState { sample_rate }),
+            }),
             frequency_correction: 0,
-            sample_rate,
+
             center_frequency: None,
             tuner_gains,
             if_offset: 0.0,
@@ -186,7 +191,8 @@ impl Device {
 
     #[inline(always)]
     pub fn sample_rate(&self) -> f32 {
-        self.sample_rate
+        let state_guard = self.shared.state.read();
+        state_guard.sample_rate
     }
 
     #[inline(always)]
@@ -213,18 +219,18 @@ impl Device {
     /// handlers).
     #[inline(always)]
     pub async fn inner_mut(&mut self) -> InnerGuard<'_> {
-        self.inner.lock().await
+        self.shared.lock_inner().await
     }
 
-    pub async fn reader(&mut self, buffer_size: usize) -> Result<Reader, Error> {
-        let mut inner = self.inner.lock().await;
+    pub async fn reader(&mut self, options: ReaderOptions) -> Result<Reader, Error> {
+        let mut inner = self.shared.lock_inner().await;
         inner.rtl2832u.start_epa().await?;
-        let epa_reader = inner.rtl2832u.epa_reader(buffer_size)?;
+        let epa_reader = inner.rtl2832u.epa_reader(options.buffer_size)?;
 
         Ok(Reader {
             epa_reader,
-            inner: self.inner.clone(),
-            stop_on_drop: true,
+            shared: self.shared.clone(),
+            stop_on_drop: options.stop_on_drop,
         })
     }
 
@@ -245,7 +251,7 @@ impl Device {
                 "frequency_correction must be between -8192 and 8191 inclusive: {frequency_correction}"
             );
 
-            let Inner { rtl2832u, tuner: _ } = &mut *self.inner.lock().await;
+            let Inner { rtl2832u, tuner: _ } = &mut *self.shared.lock_inner().await;
 
             rtl2832u
                 .set_sample_frequency_correction(frequency_correction)
@@ -260,7 +266,7 @@ impl Device {
     pub async fn set_sample_rate(&mut self, sample_rate: f32) -> Result<(), Error> {
         tracing::debug!(?sample_rate, "setting sample rate");
 
-        let inner = &mut *self.inner.lock().await;
+        let inner = &mut *self.shared.lock_inner().await;
 
         // set rtl2832u's sample rate.
         //
@@ -313,7 +319,8 @@ impl Device {
         inner.rtl2832u.set_soft_reset(true).await?;
         inner.rtl2832u.set_soft_reset(false).await?;
 
-        self.sample_rate = actual_sample_rate;
+        let mut state_guard = self.shared.state.write();
+        state_guard.sample_rate = actual_sample_rate;
 
         Ok(())
     }
@@ -321,7 +328,7 @@ impl Device {
     pub async fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
         tracing::debug!(?center_frequency, "setting center frequency");
 
-        let Inner { rtl2832u, tuner } = &mut *self.inner.lock().await;
+        let Inner { rtl2832u, tuner } = &mut *self.shared.lock_inner().await;
 
         // librtlsdr sets the "exact" sample rate here. We think they basically convert
         // from the encoded value back to Hz. But they also do some bit-manipulation.
@@ -345,7 +352,7 @@ impl Device {
 
         self.if_offset = if_offset;
 
-        let inner = &mut *self.inner.lock().await;
+        let inner = &mut *self.shared.lock_inner().await;
         inner.configure_if(if_offset).await?;
 
         Ok(())
@@ -354,7 +361,7 @@ impl Device {
     /// Enables or disables the [`Rtl2832u`]'s Digital Automatic Gain Control.
     pub async fn set_agc_mode(&mut self, enable: bool) -> Result<(), Error> {
         tracing::debug!(?enable, "enable DAGC mode");
-        let Inner { rtl2832u, tuner: _ } = &mut *self.inner.lock().await;
+        let Inner { rtl2832u, tuner: _ } = &mut *self.shared.lock_inner().await;
         rtl2832u.set_agc_mode(enable).await?;
         Ok(())
     }
@@ -369,7 +376,7 @@ impl Device {
         let gain = gain.into_tuner_gain(&self.tuner_gains);
         tracing::debug!(?gain, "set tuner gain");
 
-        let Inner { rtl2832u, tuner } = &mut *self.inner.lock().await;
+        let Inner { rtl2832u, tuner } = &mut *self.shared.lock_inner().await;
 
         {
             let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
@@ -395,15 +402,30 @@ impl Drop for Device {
 
             self.reset_on_drop = false;
 
-            let inner = self.inner.clone();
+            let shared = self.shared.clone();
 
             tokio::spawn(async move {
-                let mut inner = inner.lock().await;
+                let mut inner = shared.lock_inner().await;
 
                 if let Err(error) = inner.reset().await {
                     tracing::error!(%error, "Error resetting RTL2832U while dropping");
                 }
             });
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ReaderOptions {
+    pub buffer_size: usize,
+    pub stop_on_drop: bool,
+}
+
+impl Default for ReaderOptions {
+    fn default() -> Self {
+        Self {
+            buffer_size: 64 * 1024,
+            stop_on_drop: true,
         }
     }
 }
@@ -428,7 +450,7 @@ impl Drop for Device {
 #[derive(Debug)]
 pub struct Reader {
     epa_reader: EpaReader,
-    inner: SharedInner,
+    shared: Arc<Shared>,
     stop_on_drop: bool,
 }
 
@@ -451,7 +473,7 @@ impl Reader {
 
     pub async fn close(mut self) -> Result<(), Error> {
         self.stop_on_drop = false;
-        let mut inner = self.inner.lock().await;
+        let mut inner = self.shared.lock_inner().await;
         inner.rtl2832u.stop_epa().await?;
         Ok(())
     }
@@ -485,9 +507,9 @@ impl Drop for Reader {
         if self.stop_on_drop {
             self.stop_on_drop = false;
 
-            let inner = self.inner.clone();
+            let shared = self.shared.clone();
             tokio::spawn(async move {
-                let mut inner = inner.lock().await;
+                let mut inner = shared.lock_inner().await;
 
                 if let Err(error) = inner.rtl2832u.stop_epa().await {
                     tracing::error!(%error, "Error stopping EPA while dropping");
@@ -497,6 +519,60 @@ impl Drop for Reader {
     }
 }
 
+#[cfg(feature = "mrrp")]
+impl mrrp_core::signal::AsyncReadSamples<num_complex::Complex<u8>> for Reader {
+    type Error = std::io::Error;
+
+    fn poll_read_samples(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut mrrp_core::signal::ReadBuf<num_complex::Complex<u8>>,
+    ) -> Poll<Result<(), Self::Error>> {
+        let this = self.get_mut();
+        match Pin::new(&mut this.epa_reader).poll_fill_buf(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
+            Poll::Ready(Ok(samples)) => {
+                use mrrp_core::buf::SampleBufMut;
+                use tokio::io::AsyncBufReadExt;
+
+                let samples_iq = bytemuck::cast_slice::<_, num_complex::Complex<u8>>(
+                    // ignore the last byte if the buffer has an odd number of bytes
+                    &samples[..samples.len() & !1],
+                );
+
+                let num_samples = buffer.remaining_mut().min(samples_iq.len());
+                buffer.put_slice(&samples_iq[..num_samples]);
+
+                this.epa_reader.consume(num_samples * 2);
+
+                Poll::Ready(Ok(()))
+            }
+        }
+    }
+}
+
+#[cfg(feature = "mrrp")]
+impl mrrp_core::signal::StreamLength for Reader {
+    fn remaining(&self) -> mrrp_core::signal::Remaining {
+        mrrp_core::signal::Remaining::Infinite
+    }
+}
+
+#[cfg(feature = "mrrp")]
+impl mrrp_core::signal::GetSampleRate for Reader {
+    fn sample_rate(&self) -> f32 {
+        let state_guard = self.shared.state.read();
+        state_guard.sample_rate
+    }
+}
+
+/// Composite of [`Rtl2832u`] and [`AnyTuner`]
+///
+/// This is used by [`Device`]. Since both need to be shared in rare
+/// circumstances (shutting down a [`Reader`]), these are behind a lock. This
+/// struct is what's guarded by this lock.
+///
 /// todo: pub only for testing
 #[derive(Debug)]
 pub struct Inner {
@@ -554,13 +630,27 @@ impl Inner {
     }
 }
 
-#[derive(Clone, Debug)]
-struct SharedInner {
-    inner: Arc<Mutex<Inner>>,
+/// Device state that needs to be shared.
+
+#[derive(Debug)]
+struct SharedState {
+    /// The current sample rate
+    sample_rate: f32,
 }
 
-impl SharedInner {
-    pub async fn lock(&self) -> InnerGuard<'_> {
+/// This contains the devices and some shared state
+///
+/// The devices ([`Rtl2832U`] and [`AnyTuner`]) need to be guarded behind an
+/// [`AsyncLock`]. The shared state doesn't have such strict requirements and
+/// can be guarded behind a [`RwLock`].
+#[derive(Debug)]
+struct Shared {
+    inner: AsyncMutex<Inner>,
+    state: RwLock<SharedState>,
+}
+
+impl Shared {
+    pub async fn lock_inner(&self) -> InnerGuard<'_> {
         let guard = self.inner.lock().await;
 
         InnerGuard { guard }
@@ -569,7 +659,7 @@ impl SharedInner {
 
 /// todo: pub only for testing
 pub struct InnerGuard<'a> {
-    guard: MutexGuard<'a, Inner>,
+    guard: AsyncMutexGuard<'a, Inner>,
 }
 
 impl<'a> Deref for InnerGuard<'a> {

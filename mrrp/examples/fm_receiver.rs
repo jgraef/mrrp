@@ -12,12 +12,13 @@ use mrrp::{
         },
     },
     modem::fm::FmDemodulator,
+    rtl_sdr,
     signal::{
         AsyncReadSamplesExt,
         GetSampleRate,
     },
-    source::rtlsdr::RtlSdrSource,
 };
+use num_complex::Complex;
 use tokio::signal::ctrl_c;
 
 // https://github.com/JulianKemmerer/PipelineC/wiki/Example:-FM-Radio-Demodulation
@@ -25,7 +26,7 @@ use tokio::signal::ctrl_c;
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
-    color_eyre::install()?;
+
     tracing_subscriber::fmt::init();
     tracing::info!("FM receiver example");
 
@@ -39,7 +40,13 @@ async fn main() -> Result<(), Error> {
     const RTLSDR_SAMPLE_RATE: f32 = 2_400_000.0; // 2.4 MHz
 
     // Open the RTL-SDR and get a complex IQ stream
-    let baseband = RtlSdrSource::open(args.device, args.frequency, RTLSDR_SAMPLE_RATE).await?;
+    let mut rtl_sdr = rtl_sdr::open_any(Default::default()).await?;
+    rtl_sdr.set_sample_rate(RTLSDR_SAMPLE_RATE).await?;
+    rtl_sdr.set_center_frequency(args.frequency).await?;
+    let radio_source = rtl_sdr.reader(Default::default()).await?;
+
+    // convert u8 to f32
+    let converted = radio_source.convert::<Complex<f32>>();
 
     // decimate down to 200 kHz by averaging.
     // the following FIR filter is better, but more expensive, so we decimate by a
@@ -47,7 +54,7 @@ async fn main() -> Result<(), Error> {
     //let baseband = AverageDecimate::new(baseband, 6);
 
     // use Remez to design a linear-phase lowpass filter
-    let sample_rate = baseband.sample_rate();
+    let sample_rate = converted.sample_rate();
     let filter_design = pm_remez(
         Lowpass::new(150000.0, 5000.0, 0.05, 0.005).normalize(sample_rate),
         11,
@@ -61,7 +68,7 @@ async fn main() -> Result<(), Error> {
     )?;*/
     println!("filter design: {filter_design:#?}");
 
-    let filtered_baseband = baseband.scan_in_place_with(filter_design.fir_filter());
+    let filtered_baseband = converted.scan_in_place_with(filter_design.fir_filter());
 
     let demodulated = filtered_baseband.scan_with(FmDemodulator::new(sample_rate, 75_000.0));
 
