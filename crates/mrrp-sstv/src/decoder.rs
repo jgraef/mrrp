@@ -12,11 +12,13 @@ use mrrp_core::signal::{
     AsyncReadSamples,
     GetSampleRate,
     ReadBuf,
-    combinators::Scanner,
 };
 use mrrp_filter::GoertzelFilter;
 use mrrp_modem::fm;
-use mrrp_util::unlerp;
+use mrrp_util::{
+    signal::Scanner,
+    unlerp,
+};
 use num_complex::Complex;
 use pin_project_lite::pin_project;
 

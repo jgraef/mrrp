@@ -7,15 +7,17 @@ use std::{
 };
 
 use futures_util::Stream;
+use mrrp_core::signal::{
+    FiniteStream,
+    GetSampleRate,
+    Remaining,
+    StreamLength,
+};
 use pin_project_lite::pin_project;
 
 use crate::signal::{
     AsyncReadSamples,
-    FiniteStream,
-    GetSampleRate,
     ReadBuf,
-    Remaining,
-    StreamLength,
 };
 
 pin_project! {

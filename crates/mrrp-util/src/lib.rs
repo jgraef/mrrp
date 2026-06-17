@@ -1,7 +1,4 @@
-pub mod generator;
-pub mod noise;
-pub mod pcm;
-pub mod sine;
+pub mod signal;
 
 #[inline(always)]
 pub fn lerp(t: f32, a: f32, b: f32) -> f32 {

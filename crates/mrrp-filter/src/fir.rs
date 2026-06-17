@@ -7,12 +7,10 @@ use std::{
     },
 };
 
-use mrrp_core::{
-    sample::Sample,
-    signal::combinators::{
-        ScanInPlaceWith,
-        Scanner,
-    },
+use mrrp_core::sample::Sample;
+use mrrp_util::signal::{
+    ScanInPlaceWith,
+    Scanner,
 };
 use num_traits::{
     Float,
@@ -137,12 +135,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use mrrp_core::signal::{
+    use mrrp_util::signal::{
         AsyncReadSamplesExt,
         Cursor,
-    };
-    use mrrp_util::noise::{
-        rand,
         white_noise,
     };
     use rand::rngs::SmallRng;

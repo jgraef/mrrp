@@ -12,7 +12,7 @@ use biquad::{
     Q_BUTTERWORTH_F32,
     ToHertz,
 };
-use mrrp_core::signal::combinators::Scanner;
+use mrrp_util::signal::Scanner;
 use num_traits::{
     ConstZero,
     Zero,

@@ -9,6 +9,7 @@ repository.workspace = true
 derive_more = { workspace = true, features = ["debug"] }
 hound = { version = "3.5.1", optional = true }
 mrrp-core.workspace = true
+mrrp-util.workspace = true
 num-complex.workspace = true
 parking_lot = { workspace = true, optional = true }
 rodio = { version = "0.22.2", optional = true }

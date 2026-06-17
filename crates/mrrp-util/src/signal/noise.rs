@@ -17,7 +17,6 @@ use mrrp_core::{
     },
 };
 use pin_project_lite::pin_project;
-pub use rand;
 use rand::{
     Rng,
     RngExt,

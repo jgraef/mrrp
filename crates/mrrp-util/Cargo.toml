@@ -9,8 +9,10 @@ repository.workspace = true
 bytemuck.workspace = true
 bytes.workspace = true
 futures-core.workspace = true
+futures-util.workspace = true
 mrrp-core.workspace = true
 pin-project-lite.workspace = true
 rand.workspace = true
 thiserror.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["time"] }
+tracing.workspace = true

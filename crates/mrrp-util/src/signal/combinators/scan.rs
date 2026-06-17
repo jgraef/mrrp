@@ -11,20 +11,22 @@ use std::{
     },
 };
 
-use pin_project_lite::pin_project;
-
-use crate::{
+use mrrp_core::{
     buf::SampleBufMut,
     sample::FromSample,
     signal::{
-        AsyncReadSamples,
         FiniteStream,
         GetSampleRate,
-        ReadBuf,
         Remaining,
-        ScratchBuffer,
         StreamLength,
     },
+};
+use pin_project_lite::pin_project;
+
+use crate::signal::{
+    AsyncReadSamples,
+    ReadBuf,
+    ScratchBuffer,
 };
 
 pin_project! {
@@ -210,6 +212,12 @@ where
 
 impl<R, Sc> FiniteStream for ScanInPlaceWith<R, Sc> where R: FiniteStream {}
 
+/// Maps samples
+///
+/// This works the same as `stream.map(|x| /*...*/)` would. The disadvantage of
+/// using closures is that their types can't be named. By implenting `Scanner`
+/// for a type that you can name, you can also always name the stream type after
+/// the scanner is applied.
 pub trait Scanner<S> {
     type Output;
 

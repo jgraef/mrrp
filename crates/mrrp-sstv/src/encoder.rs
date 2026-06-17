@@ -18,9 +18,11 @@ use mrrp_core::{
     },
 };
 use mrrp_util::{
-    generator::SignalGenerator,
     lerp,
-    sine::ComplexSinusoid,
+    signal::{
+        ComplexSinusoid,
+        SignalGenerator,
+    },
 };
 use num_complex::Complex;
 

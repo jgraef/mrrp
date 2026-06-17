@@ -6,17 +6,19 @@ use std::{
     },
 };
 
+use mrrp_core::signal::{
+    FiniteStream,
+    GetSampleRate,
+    Remaining,
+    StreamLength,
+};
 use pin_project_lite::pin_project;
 use tracing::Span;
 
 use crate::signal::{
     AsyncReadSamples,
     AsyncWriteSamples,
-    FiniteStream,
-    GetSampleRate,
     ReadBuf,
-    Remaining,
-    StreamLength,
 };
 
 pin_project! {

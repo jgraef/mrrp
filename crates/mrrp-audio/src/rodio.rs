@@ -27,10 +27,12 @@ use std::{
 
 use mrrp_core::signal::{
     AsyncReadSamples,
-    AsyncReadSamplesExt,
-    EofError,
     GetSampleRate,
     Remaining,
+};
+use mrrp_util::signal::{
+    AsyncReadSamplesExt,
+    EofError,
 };
 use parking_lot::Mutex;
 use rodio::{

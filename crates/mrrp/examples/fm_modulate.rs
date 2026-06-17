@@ -3,6 +3,10 @@ use std::path::PathBuf;
 use anyhow::Error;
 use clap::Parser;
 use mrrp::{
+    audio::{
+        WavSource,
+        write_stream_to_wav,
+    },
     filter::{
         AsyncReadSamplesFilterExt,
         biquad,
@@ -18,10 +22,6 @@ use mrrp::{
         AsyncReadSamplesExt,
         GetSampleRate,
     },
-};
-use mrrp_audio::{
-    WavSource,
-    write_stream_to_wav,
 };
 
 #[tokio::main]

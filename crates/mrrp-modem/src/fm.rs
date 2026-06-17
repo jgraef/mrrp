@@ -3,7 +3,7 @@ use std::f32::consts::{
     TAU,
 };
 
-use mrrp_core::signal::combinators::Scanner;
+use mrrp_util::signal::Scanner;
 use num_complex::Complex;
 use num_traits::Zero;
 

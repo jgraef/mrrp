@@ -12,25 +12,27 @@ use std::{
     },
 };
 
-use pin_project_lite::pin_project;
-
-use crate::{
+use mrrp_core::{
     buf::SampleBufMut,
     signal::{
-        AsyncReadSamples,
-        Buffer,
         FiniteStream,
         GetSampleRate,
-        ReadBuf,
         Remaining,
         SizeHint,
         StreamLength,
-        combinators::{
-            Scanner,
-            scan::{
-                ProductScanner,
-                SumScanner,
-            },
+    },
+};
+use pin_project_lite::pin_project;
+
+use crate::signal::{
+    AsyncReadSamples,
+    Buffer,
+    ReadBuf,
+    combinators::{
+        Scanner,
+        scan::{
+            ProductScanner,
+            SumScanner,
         },
     },
 };
@@ -282,12 +284,14 @@ where
 #[cfg(test)]
 mod tests {
     use futures_util::FutureExt;
+    use mrrp_core::signal::{
+        Remaining,
+        StreamLength,
+    };
 
     use crate::signal::{
         AsyncReadSamplesExt,
         Cursor,
-        Remaining,
-        StreamLength,
         combinators::FuncScanner,
         test::SingleSampleStream,
     };

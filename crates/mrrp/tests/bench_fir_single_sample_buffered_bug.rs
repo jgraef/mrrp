@@ -13,8 +13,6 @@ use mrrp_core::{
     buf::SampleBufMut,
     signal::{
         AsyncReadSamples,
-        AsyncReadSamplesExt,
-        Cursor,
         FiniteStream,
         ReadBuf,
         Remaining,
@@ -26,7 +24,11 @@ use mrrp_filter::design::{
     Lowpass,
     pm_remez::pm_remez,
 };
-use mrrp_util::noise::white_noise;
+use mrrp_util::signal::{
+    AsyncReadSamplesExt,
+    Cursor,
+    white_noise,
+};
 use num_complex::Complex;
 use pin_project_lite::pin_project;
 use rand::rngs::SmallRng;

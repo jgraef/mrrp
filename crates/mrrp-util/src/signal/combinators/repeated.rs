@@ -6,18 +6,20 @@ use std::{
     },
 };
 
-use pin_project_lite::pin_project;
-
-use crate::{
+use mrrp_core::{
     buf::SampleBufMut,
     signal::{
-        AsyncReadSamples,
-        AsyncReadSamplesExt,
         FiniteStream,
-        ReadBuf,
         Remaining,
         StreamLength,
     },
+};
+use pin_project_lite::pin_project;
+
+use crate::signal::{
+    AsyncReadSamples,
+    AsyncReadSamplesExt,
+    ReadBuf,
 };
 
 pin_project! {

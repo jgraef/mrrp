@@ -18,17 +18,17 @@ use anyhow::Error;
 use mrrp_audio::WavSource;
 use mrrp_core::signal::{
     AsyncReadSamples,
-    AsyncReadSamplesExt,
     GetSampleRate,
     ReadBuf,
     Remaining,
     StreamLength,
-    combinators::{
-        Converted,
-        Throttled,
-    },
 };
-use mrrp_util::noise::Noise;
+use mrrp_util::signal::{
+    AsyncReadSamplesExt,
+    Converted,
+    Noise,
+    Throttled,
+};
 use num_complex::Complex;
 use num_traits::Float;
 use rand::{

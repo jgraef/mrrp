@@ -16,9 +16,11 @@ use std::{
 use futures_util::Stream;
 use mrrp_core::signal::{
     AsyncReadSamples,
-    AsyncReadSamplesExt,
     ReadBuf,
-    combinators::MapInPlacePod,
+};
+use mrrp_util::signal::{
+    AsyncReadSamplesExt,
+    MapInPlacePod,
 };
 use num_complex::Complex;
 use pin_project_lite::pin_project;

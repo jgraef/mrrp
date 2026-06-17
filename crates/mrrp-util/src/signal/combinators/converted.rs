@@ -6,21 +6,23 @@ use std::{
     },
 };
 
-use pin_project_lite::pin_project;
-
-use crate::{
+use mrrp_core::{
     sample::FromSample,
     signal::{
-        AsyncReadSamples,
         FiniteStream,
         GetSampleRate,
-        ReadBuf,
         Remaining,
         StreamLength,
-        combinators::{
-            ConvertScanner,
-            scan::ScanWith,
-        },
+    },
+};
+use pin_project_lite::pin_project;
+
+use crate::signal::{
+    AsyncReadSamples,
+    ReadBuf,
+    combinators::{
+        ConvertScanner,
+        scan::ScanWith,
     },
 };
 

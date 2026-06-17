@@ -18,8 +18,8 @@ use std::{
 use mrrp_core::signal::{
     AsyncReadSamples,
     GetSampleRate,
-    combinators::Scanner,
 };
+use mrrp_util::signal::Scanner;
 use num_complex::Complex;
 use num_traits::Zero;
 
@@ -188,7 +188,8 @@ pub trait AsyncReadSamplesFilterExt<S>: AsyncReadSamples<S> {
     /// This is a short-hand for:
     ///
     /// ```
-    /// # use mrrp_core::signal::{combinators::WithSampleRate, Silence, silence, AsyncReadSamplesExt, GetSampleRate};
+    /// # use mrrp_core::signal::GetSampleRate;
+    /// # use mrrp_util::signal::{WithSampleRate, Silence, silence, AsyncReadSamplesExt};
     /// # use mrrp_filter::AsyncReadSamplesFilterExt;
     /// # fn main() {
     /// # let target_sample_rate = 10.0;
@@ -231,7 +232,8 @@ pub trait AsyncReadSamplesFilterExt<S>: AsyncReadSamples<S> {
     /// This is a short-hand for:
     ///
     /// ```
-    /// # use mrrp_core::signal::{combinators::WithSampleRate, Silence, silence, AsyncReadSamplesExt, GetSampleRate};
+    /// # use mrrp_core::signal::GetSampleRate;
+    /// # use mrrp_util::signal::{WithSampleRate, Silence, silence, AsyncReadSamplesExt};
     /// # use mrrp_filter::AsyncReadSamplesFilterExt;
     /// # fn main() {
     /// # let target_sample_rate = 1000.0;

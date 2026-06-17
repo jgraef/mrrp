@@ -16,10 +16,12 @@ use std::{
 
 use mrrp_core::signal::{
     AsyncReadSamples,
-    AsyncReadSamplesExt,
     AsyncWriteSamples,
-    ForwardError,
     GetSampleRate,
+};
+use mrrp_util::signal::{
+    AsyncReadSamplesExt,
+    ForwardError,
 };
 use num_complex::Complex;
 

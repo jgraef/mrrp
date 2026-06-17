@@ -22,9 +22,9 @@ use mrrp::{
     },
     signal::{
         AsyncReadSamplesExt,
-        combinators::Scanner,
+        Scanner,
+        white_noise,
     },
-    util::noise::white_noise,
 };
 use num_complex::Complex;
 use rand::rngs::SmallRng;

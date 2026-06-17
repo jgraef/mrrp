@@ -7,16 +7,18 @@ use std::{
     },
 };
 
+use mrrp_core::signal::{
+    FiniteStream,
+    GetSampleRate,
+    Remaining,
+    SizeHint,
+    StreamLength,
+};
 use pin_project_lite::pin_project;
 
 use crate::signal::{
     AsyncReadSamples,
-    FiniteStream,
-    GetSampleRate,
     ReadBuf,
-    Remaining,
-    SizeHint,
-    StreamLength,
 };
 
 pin_project! {

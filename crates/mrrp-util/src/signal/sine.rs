@@ -5,7 +5,7 @@ use mrrp_core::{
     signal::GetSampleRate,
 };
 
-use crate::generator::SignalGenerator;
+use crate::signal::SignalGenerator;
 
 #[inline]
 fn step_from_frequency_and_sample_rate(frequency: f32, sample_rate: f32) -> f32 {

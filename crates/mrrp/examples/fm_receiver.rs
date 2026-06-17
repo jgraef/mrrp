@@ -13,12 +13,10 @@ use mrrp::{
     },
     modem::fm::FmDemodulator,
     rtl_sdr,
-    signal::{
-        AsyncReadSamplesExt,
-        GetSampleRate,
-    },
+    signal::GetSampleRate,
 };
 use mrrp_filter::AsyncReadSamplesFilterExt;
+use mrrp_util::signal::AsyncReadSamplesExt;
 use num_complex::Complex;
 use tokio::signal::ctrl_c;
 

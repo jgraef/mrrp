@@ -14,23 +14,21 @@ use std::{
 use futures_core::Stream;
 use mrrp_core::signal::{
     AsyncReadSamples,
-    AsyncReadSamplesExt,
     FiniteStream,
     GetSampleRate,
     ReadBuf,
     Remaining,
-    Silence,
     SizeHint,
     StreamLength,
-    combinators::Limited,
-    silence,
 };
-use mrrp_util::{
-    generator::{
-        SignalGenerator,
-        SignalGeneratorReadSamples,
-    },
-    sine::ComplexSinusoid,
+use mrrp_util::signal::{
+    AsyncReadSamplesExt,
+    ComplexSinusoid,
+    Limited,
+    SignalGenerator,
+    SignalGeneratorReadSamples,
+    Silence,
+    silence,
 };
 use num_complex::Complex;
 use pin_project_lite::pin_project;
@@ -307,9 +305,11 @@ mod tests {
     use futures_util::stream;
     use mrrp_core::signal::{
         AsyncReadSamples,
+        StreamLength,
+    };
+    use mrrp_util::signal::{
         AsyncReadSamplesExt,
         EofError,
-        StreamLength,
     };
 
     use crate::dtmf::{

@@ -8,15 +8,17 @@ use std::{
 };
 
 use bytemuck::Pod;
+use mrrp_core::signal::{
+    FiniteStream,
+    GetSampleRate,
+    Remaining,
+    StreamLength,
+};
 use pin_project_lite::pin_project;
 
 use crate::signal::{
     AsyncReadSamples,
-    FiniteStream,
-    GetSampleRate,
     ReadBuf,
-    Remaining,
-    StreamLength,
     combinators::scan::{
         FuncScanner,
         ScanInPlaceWith,
