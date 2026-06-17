@@ -15,7 +15,7 @@ use futures_util::pin_mut;
 use mrrp::{
     audio::play_audio,
     filter::resampling::AverageDecimate,
-    io::{
+    signal::{
         AsyncReadSamplesExt,
         GetSampleRate,
     },

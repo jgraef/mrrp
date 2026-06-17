@@ -1,6 +1,6 @@
 use crate::{
     filter::fir::FirFilter,
-    io::GetSampleRate,
+    signal::GetSampleRate,
 };
 
 pub mod argmin;

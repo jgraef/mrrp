@@ -19,7 +19,7 @@ use mrrp::{
         },
         fir::FirFilter,
     },
-    io::{
+    signal::{
         AsyncReadSamplesExt,
         combinators::Scanner,
     },

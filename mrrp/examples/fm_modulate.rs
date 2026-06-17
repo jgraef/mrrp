@@ -12,11 +12,11 @@ use mrrp::{
             pm_remez::pm_remez,
         },
     },
-    io::{
+    modem::fm::FmModulator,
+    signal::{
         AsyncReadSamplesExt,
         GetSampleRate,
     },
-    modem::fm::FmModulator,
     sink::{
         file::write_stream_to_wav,
         rtl_tcp,

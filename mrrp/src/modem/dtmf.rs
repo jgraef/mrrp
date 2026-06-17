@@ -16,7 +16,7 @@ use num_complex::Complex;
 use pin_project_lite::pin_project;
 
 use crate::{
-    io::{
+    signal::{
         AsyncReadSamples,
         AsyncReadSamplesExt,
         FiniteStream,
@@ -311,15 +311,15 @@ mod tests {
     };
 
     use crate::{
-        io::{
+        modem::dtmf::{
+            DtmfEncoder,
+            DtmfSymbol,
+        },
+        signal::{
             AsyncReadSamples,
             AsyncReadSamplesExt,
             EofError,
             StreamLength,
-        },
-        modem::dtmf::{
-            DtmfEncoder,
-            DtmfSymbol,
         },
     };
 

@@ -1,10 +1,5 @@
-pub mod file;
 mod noise;
 pub mod pcm;
-#[cfg(feature = "rtlsdr")]
-pub mod rtlsdr;
-// #[cfg(feature = "rtlsdr")]
-// pub mod rtlsdr_new;
 mod sine;
 
 use std::{
@@ -22,7 +17,7 @@ pub use sine::*;
 
 use crate::{
     buf::SamplesMut,
-    io::{
+    signal::{
         AsyncReadSamples,
         GetSampleRate,
         ReadBuf,

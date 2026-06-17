@@ -17,7 +17,7 @@ use num_traits::{
     Zero,
 };
 
-use crate::io::combinators::Scanner;
+use crate::signal::combinators::Scanner;
 
 impl<C, T> Scanner<T> for DirectForm1<C, T>
 where

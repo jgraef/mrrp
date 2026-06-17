@@ -25,7 +25,11 @@ use crate::{
         Decimate,
         Interpolate,
     },
-    io::{
+    sample::{
+        FromSample,
+        Sample,
+    },
+    signal::{
         AsyncWriteSamples,
         FiniteStream,
         Forward,
@@ -54,10 +58,6 @@ use crate::{
             WithSpan,
             ZipWith,
         },
-    },
-    sample::{
-        FromSample,
-        Sample,
     },
 };
 
@@ -1034,7 +1034,7 @@ where
 mod tests {
     use futures_util::FutureExt;
 
-    use crate::io::read::{
+    use crate::signal::read::{
         AsyncReadSamplesExt,
         repeat,
     };

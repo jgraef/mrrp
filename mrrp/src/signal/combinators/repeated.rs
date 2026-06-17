@@ -10,7 +10,7 @@ use pin_project_lite::pin_project;
 
 use crate::{
     buf::SampleBufMut,
-    io::{
+    signal::{
         AsyncReadSamples,
         AsyncReadSamplesExt,
         FiniteStream,

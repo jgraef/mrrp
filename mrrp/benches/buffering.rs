@@ -17,7 +17,7 @@ use mrrp::{
         Lowpass,
         pm_remez::pm_remez,
     },
-    io::{
+    signal::{
         AsyncReadSamples,
         AsyncReadSamplesExt,
         Cursor,

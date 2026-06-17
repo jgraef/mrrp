@@ -15,7 +15,8 @@ use pin_project_lite::pin_project;
 
 use crate::{
     buf::SampleBufMut,
-    io::{
+    sample::FromSample,
+    signal::{
         AsyncReadSamples,
         FiniteStream,
         GetSampleRate,
@@ -24,7 +25,6 @@ use crate::{
         ScratchBuffer,
         StreamLength,
     },
-    sample::FromSample,
 };
 
 pin_project! {

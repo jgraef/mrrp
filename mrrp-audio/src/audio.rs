@@ -1,5 +1,11 @@
-// should we make audio sinks? currently this just turns any stream into rodio
-// sources.
+//! Capture signal from or play them on a sound card
+//!
+//! This uses rodio for audio capture and playback.
+//!
+//! # TODO
+//!
+//! A proper [`Sink`](crate::sink::Sink) would be nice, but rodio's interface
+//! doesn't play along nicely (maybe it does now?).
 
 use std::{
     num::NonZero,
@@ -30,7 +36,7 @@ use tokio::{
     sync::oneshot,
 };
 
-use crate::io::{
+use crate::signal::{
     AsyncReadSamples,
     AsyncReadSamplesExt,
     EofError,

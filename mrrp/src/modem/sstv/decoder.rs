@@ -13,12 +13,6 @@ use pin_project_lite::pin_project;
 
 use crate::{
     filter::GoertzelFilter,
-    io::{
-        AsyncReadSamples,
-        GetSampleRate,
-        ReadBuf,
-        combinators::Scanner,
-    },
     modem::{
         fm,
         sstv::{
@@ -43,6 +37,12 @@ use crate::{
                 State,
             },
         },
+    },
+    signal::{
+        AsyncReadSamples,
+        GetSampleRate,
+        ReadBuf,
+        combinators::Scanner,
     },
     util::unlerp,
 };

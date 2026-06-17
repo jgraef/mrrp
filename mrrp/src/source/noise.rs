@@ -18,7 +18,7 @@ use rand::{
     },
 };
 
-use crate::io::{
+use crate::signal::{
     AsyncReadSamples,
     ReadBuf,
     Remaining,

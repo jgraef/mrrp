@@ -14,20 +14,22 @@ use std::{
     },
 };
 
-use num_complex::Complex;
-
-use crate::io::{
-    AsyncReadSamples,
-    AsyncReadSamplesExt,
-    AsyncWriteSamples,
-    ForwardError,
-    GetSampleRate,
+use mrrp::{
+    sample::Complex,
+    signal::{
+        AsyncReadSamples,
+        AsyncReadSamplesExt,
+        AsyncWriteSamples,
+        ForwardError,
+        GetSampleRate,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]
-#[error("wav sink error")]
 pub enum Error {
+    #[error(transparent)]
     Hound(#[from] hound::Error),
+    #[error("This sink is closed")]
     Closed,
 }
 

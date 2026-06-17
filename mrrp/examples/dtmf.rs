@@ -20,16 +20,6 @@ use mrrp::{
         GoertzelFilter,
         MovingAverage,
     },
-    io::{
-        AsyncReadSamples,
-        AsyncReadSamplesExt,
-        Cursor,
-        GetSampleRate,
-        combinators::{
-            Scanner,
-            ScannerExt,
-        },
-    },
     modem::{
         dtmf::{
             DtmfEncoder,
@@ -42,6 +32,16 @@ use mrrp::{
             SYNC_TONE,
             VIS_HIGH_TONE,
             VIS_LOW_TONE,
+        },
+    },
+    signal::{
+        AsyncReadSamples,
+        AsyncReadSamplesExt,
+        Cursor,
+        GetSampleRate,
+        combinators::{
+            Scanner,
+            ScannerExt,
         },
     },
     sink::file::write_stream_to_wav,

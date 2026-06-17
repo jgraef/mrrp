@@ -20,15 +20,6 @@ use mrrp::{
             pm_remez::pm_remez,
         },
     },
-    io::{
-        AsyncReadSamplesExt,
-        FiniteStream,
-        GetSampleRate,
-        combinators::{
-            Scanner,
-            ScannerExt,
-        },
-    },
     modem::{
         fm,
         sstv::{
@@ -43,6 +34,15 @@ use mrrp::{
                 ModeSpecification,
                 VisCode,
             },
+        },
+    },
+    signal::{
+        AsyncReadSamplesExt,
+        FiniteStream,
+        GetSampleRate,
+        combinators::{
+            Scanner,
+            ScannerExt,
         },
     },
     sink::file::write_stream_to_wav,

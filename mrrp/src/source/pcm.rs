@@ -19,7 +19,7 @@ use std::{
 use num_complex::Complex;
 use pin_project_lite::pin_project;
 
-use crate::io::{
+use crate::signal::{
     AsyncReadSamples,
     ReadBuf,
     Remaining,
@@ -34,7 +34,7 @@ pin_project! {
     /// **Completely untested!**
     ///
     #[derive(Clone, Debug)]
-    pub struct PcmSource<R, S> where S: PcmSample {
+    pub struct PcmSource<R, S> where S: DecodeSample {
         #[pin]
         reader: R,
         remainder_buffer: S::RemainderBuffer,
@@ -45,7 +45,7 @@ pin_project! {
 impl<R, S> AsyncReadSamples<S> for PcmSource<R, S>
 where
     R: tokio::io::AsyncRead,
-    S: PcmSample,
+    S: DecodeSample,
 {
     type Error = std::io::Error;
 
@@ -131,30 +131,30 @@ where
 
 impl<R, S> StreamLength for PcmSource<R, S>
 where
-    S: PcmSample,
+    S: DecodeSample,
 {
     fn remaining(&self) -> Remaining {
         Remaining::Unknown
     }
 }
 
-pub unsafe trait PcmSample {
+pub unsafe trait DecodeSample {
     type RemainderBuffer: RemainderBuffer;
 }
 
-unsafe impl PcmSample for u8 {
+unsafe impl DecodeSample for u8 {
     type RemainderBuffer = ();
 }
 
-unsafe impl PcmSample for i8 {
+unsafe impl DecodeSample for i8 {
     type RemainderBuffer = Option<u8>;
 }
 
-unsafe impl PcmSample for Complex<u8> {
+unsafe impl DecodeSample for Complex<u8> {
     type RemainderBuffer = Option<u8>;
 }
 
-unsafe impl PcmSample for Complex<i8> {
+unsafe impl DecodeSample for Complex<i8> {
     type RemainderBuffer = Option<u8>;
 }
 

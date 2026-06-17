@@ -16,7 +16,7 @@ use std::{
 
 use anyhow::Error;
 use mrrp::{
-    io::{
+    signal::{
         AsyncReadSamples,
         AsyncReadSamplesExt,
         GetSampleRate,
@@ -28,11 +28,9 @@ use mrrp::{
             Throttled,
         },
     },
-    source::{
-        Noise,
-        file::WavSource,
-    },
+    source::Noise,
 };
+use mrrp_audio::WavSource;
 use num_complex::Complex;
 use num_traits::Float;
 use rand::{

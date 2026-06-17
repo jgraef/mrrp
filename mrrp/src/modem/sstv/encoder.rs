@@ -11,13 +11,6 @@ use num_complex::Complex;
 
 use crate::{
     buf::SampleBufMut,
-    io::{
-        AsyncReadSamples,
-        GetSampleRate,
-        ReadBuf,
-        Remaining,
-        StreamLength,
-    },
     modem::sstv::{
         LEADER_BREAK_TIME,
         LEADER_TIME,
@@ -34,6 +27,13 @@ use crate::{
             LineState,
             State,
         },
+    },
+    signal::{
+        AsyncReadSamples,
+        GetSampleRate,
+        ReadBuf,
+        Remaining,
+        StreamLength,
     },
     source::{
         ComplexSinusoid,

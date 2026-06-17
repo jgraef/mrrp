@@ -10,11 +10,10 @@ use std::{
     },
 };
 
-use num_complex::Complex;
-
-use crate::{
+use mrrp::{
     buf::SampleBufMut,
-    io::{
+    sample::Complex,
+    signal::{
         AsyncReadSamples,
         FiniteStream,
         GetSampleRate,

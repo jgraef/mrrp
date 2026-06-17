@@ -18,14 +18,14 @@ use pin_project_lite::pin_project;
 
 use crate::{
     buf::SampleBufMut,
-    io::{
+    sample::Sample,
+    signal::{
         AsyncReadSamples,
         GetSampleRate,
         ReadBuf,
         Remaining,
         StreamLength,
     },
-    sample::Sample,
 };
 
 pin_project! {

@@ -1,7 +1,9 @@
 [workspace]
 resolver = "3"
 members = [
-    "mrrp", "mrrp-adsb",
+    "mrrp",
+    "mrrp-adsb",
+    "mrrp-audio",
     "mrrp-cli",
     "mrrp-hamlib",
     "mrrp-rtl-sdr",
@@ -45,8 +47,9 @@ overflow-checks = true
 
 [workspace.dependencies]
 mrrp = { path = "mrrp", default-features = false }
+mrrp-audio = { path = "mrrp-audio", default-features = false }
 mrrp-widgets = { path = "mrrp-widgets", default-features = false }
-mrrp-rtl-sdr = { path = "mrrp-rtl-sdr" }
+mrrp-rtl-sdr = { path = "mrrp-rtl-sdr", default-features = false }
 
 # todo: remote and use rtl-sdr-rs instead
 rtlsdr-async = { version = "0.1.0", git = "https://github.com/jgraef/rtlsdr-async.git" }

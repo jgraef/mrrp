@@ -11,7 +11,7 @@ use pin_project_lite::pin_project;
 
 use crate::{
     buf::SampleBufMut,
-    io::{
+    signal::{
         AsyncReadSamples,
         FiniteStream,
         ReadBuf,
@@ -21,7 +21,9 @@ use crate::{
 };
 
 pin_project! {
-    /// Stream that only ever returns a single sample
+    /// Stream that only ever returns a single sample when polled
+    ///
+    /// This was used to benchmark if polling for single samples, i.e. a `Stream`-like interface, would work.
     #[derive(Clone, Copy, Debug)]
     pub struct SingleSampleStream<R> {
         #[pin]

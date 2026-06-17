@@ -6,7 +6,7 @@ use std::f32::consts::{
 use num_complex::Complex;
 use num_traits::Zero;
 
-use crate::io::combinators::Scanner;
+use crate::signal::combinators::Scanner;
 
 /// <https://wirelesspi.com/frequency-modulation-fm-and-demodulation-using-dsp-techniques/>
 #[derive(Clone, Copy, Debug)]

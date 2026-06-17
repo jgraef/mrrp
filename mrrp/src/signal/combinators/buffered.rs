@@ -8,7 +8,7 @@ use std::{
 
 use pin_project_lite::pin_project;
 
-use crate::io::{
+use crate::signal::{
     AsyncReadSamples,
     Buffer,
     FiniteStream,
@@ -154,7 +154,7 @@ impl<R, S> FiniteStream for Buffered<R, S> where R: FiniteStream {}
 mod tests {
     use futures_util::FutureExt;
 
-    use crate::io::{
+    use crate::signal::{
         AsyncReadSamplesExt,
         Cursor,
     };

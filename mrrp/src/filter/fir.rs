@@ -15,11 +15,11 @@ use num_traits::{
 };
 
 use crate::{
-    io::combinators::{
+    sample::Sample,
+    signal::combinators::{
         ScanInPlaceWith,
         Scanner,
     },
-    sample::Sample,
 };
 
 #[derive(Clone, Debug)]
@@ -146,7 +146,7 @@ mod tests {
             FirFilter,
             hann_window,
         },
-        io::{
+        signal::{
             AsyncReadSamplesExt,
             Cursor,
         },

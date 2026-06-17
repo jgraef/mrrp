@@ -15,13 +15,13 @@ use std::{
 
 use futures_util::Stream;
 use mrrp::{
-    io::{
+    sample::Complex,
+    signal::{
         AsyncReadSamples,
         AsyncReadSamplesExt,
         ReadBuf,
         combinators::MapInPlacePod,
     },
-    sample::Complex,
 };
 use pin_project_lite::pin_project;
 

@@ -8,7 +8,7 @@ use std::{
 
 use pin_project_lite::pin_project;
 
-use crate::io::{
+use crate::signal::{
     AsyncReadSamples,
     FiniteStream,
     GetSampleRate,

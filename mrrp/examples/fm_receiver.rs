@@ -11,11 +11,11 @@ use mrrp::{
             pm_remez::pm_remez,
         },
     },
-    io::{
+    modem::fm::FmDemodulator,
+    signal::{
         AsyncReadSamplesExt,
         GetSampleRate,
     },
-    modem::fm::FmDemodulator,
     source::rtlsdr::RtlSdrSource,
 };
 use tokio::signal::ctrl_c;

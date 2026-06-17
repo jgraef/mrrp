@@ -27,7 +27,7 @@ use crate::{
         },
         fir::FirFilter,
     },
-    io::combinators::Scanner,
+    signal::combinators::Scanner,
     util::dim::{
         Const,
         DequeLike,

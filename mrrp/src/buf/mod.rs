@@ -12,7 +12,7 @@ pub use crate::buf::{
     samples_mut::SamplesMut,
     uninit_slice::UninitSlice,
 };
-use crate::io::ReadBuf;
+use crate::signal::ReadBuf;
 
 #[derive(Clone, Copy, Debug, thiserror::Error)]
 #[error("Tried to read {requested} samples from a buffer with {available} samples remaining.")]

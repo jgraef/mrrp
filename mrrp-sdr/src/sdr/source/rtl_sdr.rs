@@ -9,13 +9,13 @@ use std::{
 use anyhow::Error;
 use mrrp::{
     buf::SampleBufMut,
-    io::{
+    sample::Sample,
+    signal::{
         AsyncReadSamples,
         ReadBuf,
         Remaining,
         StreamLength,
     },
-    sample::Sample,
 };
 use num_complex::Complex;
 use tokio::io::AsyncBufRead;

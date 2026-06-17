@@ -12,7 +12,7 @@ use num_complex::Complex;
 use pin_project_lite::pin_project;
 use tokio::io::AsyncWrite;
 
-use crate::io::AsyncWriteSamples;
+use crate::signal::AsyncWriteSamples;
 
 #[derive(Debug, thiserror::Error)]
 #[error("raw sample writer error")]
@@ -22,8 +22,9 @@ pub enum RawWriterError<E> {
 }
 
 pin_project! {
+    /// Sink that writes samples to a [`AsyncWrite`].
     #[derive(Clone, Debug)]
-    pub struct RawAsyncWriter<W> {
+    pub struct PcmSink<W> {
         #[pin]
         writer: W,
         write_pos: usize,
@@ -31,7 +32,7 @@ pin_project! {
     }
 }
 
-impl<W> RawAsyncWriter<W> {
+impl<W> PcmSink<W> {
     pub fn new(writer: W) -> Self {
         Self {
             writer,
@@ -41,7 +42,7 @@ impl<W> RawAsyncWriter<W> {
     }
 }
 
-impl<W, S> AsyncWriteSamples<S> for RawAsyncWriter<W>
+impl<W, S> AsyncWriteSamples<S> for PcmSink<W>
 where
     W: AsyncWrite,
     S: EncodeSample,

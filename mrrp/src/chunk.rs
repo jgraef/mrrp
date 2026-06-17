@@ -19,7 +19,7 @@ use crate::{
         SampleBufMut,
         SamplesMut,
     },
-    io::{
+    signal::{
         AsyncReadSamples,
         AsyncWriteSamples,
         AsyncWriteSamplesExt,

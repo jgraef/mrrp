@@ -16,7 +16,7 @@ use pin_project_lite::pin_project;
 
 use crate::{
     buf::SampleBufMut,
-    io::{
+    signal::{
         AsyncReadSamples,
         Buffer,
         FiniteStream,
@@ -283,7 +283,7 @@ where
 mod tests {
     use futures_util::FutureExt;
 
-    use crate::io::{
+    use crate::signal::{
         AsyncReadSamplesExt,
         Cursor,
         Remaining,
