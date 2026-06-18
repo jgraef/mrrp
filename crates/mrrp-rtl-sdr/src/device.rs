@@ -83,7 +83,7 @@ pub struct Device {
     /// to share with [`Reader`].
     ///
     /// The [`Rtl2832u`] and [`AnyTuner`] are only accessed by [`Reader`] when
-    /// it's closed.
+    /// it's being closed.
     ///
     /// The shared state currently only contains the configured sample rate,
     /// such that [`Reader`] can implement `mrrp::signal::GetSampleRate`.
@@ -114,7 +114,6 @@ impl Device {
         rtl2832u.initialize(&options.fir_filter).await?;
 
         // probe tuners
-        let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
 
         // either use the override from options, or the one provided by the device
         // config, or the fallback - in that order.
@@ -124,6 +123,8 @@ impl Device {
             .or(device_info.device_config.tuner_probe.as_ref())
             .map(Cow::Borrowed)
             .unwrap_or_else(|| Cow::Owned(AnyTunerProbe::new(FallbackTunerProbe)));
+
+        let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
 
         let tuner = tuner_probe
             .try_open(&mut i2c_repeater_guard)
@@ -150,7 +151,7 @@ impl Device {
         // the R82xx doesn't let us read the relevant registers.
         //
         // we have considered writing the center frequency into unused rtl2832u's system
-        // memory memory. we would have to make sure that this memory is absolutely
+        // memory. we would have to make sure that this memory is absolutely
         // unused - which is hard, or impossible.
 
         Ok(Self {

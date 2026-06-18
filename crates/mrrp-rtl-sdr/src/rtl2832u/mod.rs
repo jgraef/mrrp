@@ -128,10 +128,7 @@ pub struct Rtl2832u {
     /// How long to wait for control commands.
     control_timeout: Duration,
 
-    /// Stores cached values for registers to avoid redundant reads.
-    ///
-    /// This is a `[`tokio::sync::RwLock`] because we need to hold it across
-    /// await points (the USB reads and writes).
+    /// Stores cached values for registers to avoid redundant reads and writes.
     shadow_map: ShadowMap,
 
     /// Shared I2C state
@@ -171,7 +168,6 @@ impl Rtl2832u {
     ///
     /// This variant specifically doesn't access the shadow map and is not
     /// synchronized with other reads and writes.
-
     pub async fn read(&self, address: Register, length: u16) -> Result<Vec<u8>, Error> {
         let request = address.control_in(length);
 
