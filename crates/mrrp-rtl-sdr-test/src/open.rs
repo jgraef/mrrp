@@ -11,9 +11,13 @@ use mrrp_rtl_sdr::{
 
 #[derive(Debug, Args)]
 pub struct DeviceArgs {
+    /// Specify a device by serial number.
+    ///
+    /// If you only have one device connected, you can omit this.
     #[clap(short, long)]
     pub serial: Option<String>,
 
+    /// Attempt to detach kernel modules before claiming the USB interface.
     #[clap(long)]
     pub detach_kernel: bool,
 }

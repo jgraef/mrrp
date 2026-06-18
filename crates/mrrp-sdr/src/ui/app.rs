@@ -2,7 +2,7 @@ use eframe::Storage;
 use tracing::span::EnteredSpan;
 
 use crate::{
-    cli::UiCommand,
+    cli::Args,
     sdr::{
         initialize_sdr_runtime,
         source::{
@@ -36,7 +36,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(command: UiCommand, ctx: &egui::Context, storage: &dyn Storage) -> Self {
+    pub fn new(command: Args, ctx: &egui::Context, storage: &dyn Storage) -> Self {
         // start SDR runtime
         let sdr = initialize_sdr_runtime(ctx);
 

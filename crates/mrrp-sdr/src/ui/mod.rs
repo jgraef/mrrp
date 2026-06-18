@@ -12,13 +12,13 @@ use eframe::NativeOptions;
 use egui::ViewportBuilder;
 
 use crate::{
-    cli::UiCommand,
+    cli::Args,
     config::Config,
     directories::Directories,
     ui::app::App,
 };
 
-pub fn run_app(directories: Directories, _config: Config, command: UiCommand) -> Result<(), Error> {
+pub fn run_app(directories: Directories, _config: Config, command: Args) -> Result<(), Error> {
     let egui_persist_path = directories.state_dir().join("egui.json");
     tracing::debug!(?egui_persist_path);
 

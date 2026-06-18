@@ -13,10 +13,7 @@ use clap::Parser;
 use dotenvy::dotenv;
 
 use crate::{
-    cli::{
-        Cli,
-        Command,
-    },
+    cli::Args,
     config::Config,
     directories::Directories,
     ui::run_app,
@@ -26,29 +23,11 @@ fn main() -> Result<(), Error> {
     let _ = dotenv();
     tracing_subscriber::fmt::init();
 
-    let args = Cli::parse();
-
+    let args = Args::parse();
     let directories = Directories::new()?;
-
     let config = Config::read_or_default(directories.config_path())?;
 
-    match args.command.unwrap_or_default() {
-        Command::Ui(command) => {
-            run_app(directories, config, command)?;
-        }
-        Command::ListRadios => {
-            list_devices()?;
-        }
-    }
-
-    Ok(())
-}
-
-#[tokio::main]
-async fn list_devices() -> Result<(), Error> {
-    for device in mrrp_rtl_sdr::enumerate_devices().await? {
-        println!("{device:?}");
-    }
+    run_app(directories, config, args)?;
 
     Ok(())
 }

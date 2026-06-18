@@ -356,7 +356,7 @@ enum Command {
         #[clap(flatten)]
         device: DeviceArgs,
     },
-    /// Reset
+    /// Reset the device.
     ///
     /// This doesn't perform a soft or hard reset (via the bits), but turns off
     /// the DEMOD chip and disables all GPIO outputs.
@@ -365,53 +365,88 @@ enum Command {
         device: DeviceArgs,
     },
     /// Dump registers
+    ///
+    /// This dumps the registers documented in the datasheet. More specifically
+    /// it'll dump the whole blocks that are known to work. It'll always dump
+    /// the blocks with their known base addresses.
     DumpRegs {
         #[clap(flatten)]
         device: DeviceArgs,
 
+        /// Demod blocks
+        ///
+        /// This contains registers for demodulator. The block consists of 5
+        /// pages.
         #[clap(long)]
         demod: Vec<u8>,
 
+        /// USB block
+        ///
+        /// This contains registers for the USB interface.
         #[clap(long)]
         usb: bool,
 
+        /// System block
+        ///
+        /// This contains registers for the 8051 system processor.
         #[clap(long)]
         system: bool,
 
-        #[clap(long)]
+        /// This block seems to be unused.
+        #[clap(long, hide = true)]
         tuner: bool,
 
-        #[clap(long)]
+        /// This doesn't seem to work. We also tried to implement a separate
+        /// command for this.
+        #[clap(long, hide = true)]
         rom: bool,
 
+        /// This dumps the registers of the tuner
+        ///
+        /// This will access the tuner via I2C and dump the registers. Currently
+        /// only support for R82XX is implemented. A quirk of the R82XX are that
+        /// you will only get the first 16 of the 32 registers.
         #[clap(long)]
         tuner_i2c: bool,
 
+        /// Specify path for output
+        ///
+        /// `dump-regs` will always output files with fixed file names, as it'll
+        /// usually also generate multiple files. This specifies the directory
+        /// into which to write these files. The default directory is the
+        /// current directory.
         #[clap(short, long)]
         output: Option<PathBuf>,
     },
     /// Print register dump
     ///
-    /// This dumps registers as documented in the datasheet. Specifically this
-    /// reads from the specified base addresses.
+    /// This dumps registers as documented in the datasheet.
     PrintRegDump {
+        /// Path to register dump.
+        ///
+        /// This is usually the directory into which `dump-regs` wrote files.
         path: Option<PathBuf>,
 
+        /// Decode starting from `offset`.
         #[clap(short, long)]
         offset: Option<usize>,
 
+        /// Only decode `length` bytes.
         #[clap(short, long)]
         length: Option<usize>,
 
+        /// Decode meanings of known registers
         #[clap(short = 'd', long)]
         decode: bool,
 
+        /// Print a hex dump
         #[clap(short = 'H', long)]
         hexdump: bool,
     },
     /// Dump ROM code
     ///
     /// Doesn't seem to work.
+    #[clap(hide = true)]
     DumpRomCode {
         #[clap(flatten)]
         device: DeviceArgs,
@@ -427,6 +462,15 @@ enum Command {
         #[clap(flatten)]
         device: DeviceArgs,
 
+        /// GPIO pin number
+        ///
+        /// The RTL2832U has pins 0 to 7 (inclusive)
+        ///
+        /// Be careful! Pin 0 on the RTL-SDR Blog V4 is GPIO. Thus if you have
+        /// your antenna shorted, enabling this can cause a short-circuit. Other
+        /// SDRs might use these pins in other ways.
+        ///
+        /// Also on the RTL-SDR Blog V4, the upconverter will be on pin 5.
         pin: u8,
 
         #[clap(subcommand)]
@@ -435,6 +479,12 @@ enum Command {
     /// Control Bias-Tee
     ///
     /// This is just an alias for `gpio 0`.
+    ///
+    /// This works only for the RTL-SDR Blog V4, or other RTL-SDRs that use GPIO
+    /// pin 0 for the Bias-Tee.
+    ///
+    /// Be careul! This will put ~5V on your antenna. Make sure it's not
+    /// shorted.
     BiasTee {
         #[clap(flatten)]
         device: DeviceArgs,
@@ -442,35 +492,90 @@ enum Command {
         #[clap(subcommand)]
         command: GpioCommand,
     },
+    /// Test a device
+    ///
+    /// Opens the device, configures sample rate and center frequency, and
+    /// optionally streams samples from it.
     Test {
         #[clap(flatten)]
         device: DeviceArgs,
 
+        /// Sets the devices sample rate
         #[clap(short = 'S', long, default_value = "2400000")]
         sample_rate: f32,
 
+        /// Sets the device's center frequency
         #[clap(short = 'F', long, default_value = "144000000")]
         center_frequency: f32,
 
+        /// Enables IQ streaming
+        ///
+        /// Enable this if you want to test if IQ samples can be read from the
+        /// device. The program will stream IQ samples until it's interrupted
+        /// via Ctrl-C. It will display the measured sample rate while doing so.
         #[clap(short, long)]
         stream: bool,
 
+        /// Performs a change of center frequency after 5 seconds.
+        ///
+        /// This will tune up by 400 kHz after 5 seconds to test the ability to
+        /// change center frequency while the device is in use.
         #[clap(long)]
         test_hop: bool,
     },
+    /// rtl_tcp server
+    ///
+    /// This will run a server compatible with the rtl_tcp protocol. In contrast
+    /// to the original rtl_tcp this will accept connections from multiple
+    /// clients at once.
     Tcp {
         #[clap(flatten)]
         device: DeviceArgs,
 
+        /// Listen address and port
         #[clap(short, long, default_value = "localhost:1234")]
         listen_address: String,
 
+        /// Buffer size
+        ///
+        /// The USB interface will use buffers to facility reading samples from
+        /// the device and this program also uses a ring buffer to broadcast the
+        /// sample sample stream to multiple clients. This configures the buffer
+        /// size for both.
+        ///
+        /// This must be a multiple of 2 and greater than 0. In practice it
+        /// should be choosen much larger than that. 64 kB seems to be an
+        /// approproate size.
         #[clap(short, long, default_value = "65536")]
         buffer_size: usize,
 
+        /// Logs if samples have been dropped
+        ///
+        /// This will log warnings if a client is lagging such that some samples
+        /// for them have been dropped.
+        ///
+        /// The ring buffer used for broadcasting to multiple clients will not
+        /// wait for all clients to read all available data when it drops old
+        /// data from the ring buffer. Thus, if a client is too slow at
+        /// receiving the data, some samples for them might get lost.
+        ///
+        /// Since the rtl_tcp protocol is rather simple, this can't be reported
+        /// to the client unfortunately.
+        ///
+        /// To be able to see the log messages, you need to set the `RUST_LOG`
+        /// environment variable, e.g. `RUST_LOG=mrrp=warn`.
         #[clap(long)]
         log_dropped: bool,
 
+        /// Fix tuner frequency
+        ///
+        /// This feature was implemented for testing purposes. This will fix the
+        /// tuner frequency to the provided value. When the client sets a center
+        /// frequency, it'll only affect the frequency (relative to IF) at which
+        /// the RTL samples.
+        ///
+        /// This makes it possible to look at the signal received from the tuner
+        /// outside of the intended band.
         #[clap(long)]
         fix_tuner_frequency: Option<f32>,
     },

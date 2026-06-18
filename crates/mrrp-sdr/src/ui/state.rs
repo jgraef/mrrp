@@ -5,7 +5,7 @@ use serde::{
 };
 
 use crate::{
-    cli::UiCommand,
+    cli::Args,
     ui::{
         dock::{
             DockState,
@@ -60,7 +60,7 @@ impl Default for AppState {
 impl AppState {
     const KEY: &str = "app_state";
 
-    pub fn load(storage: &dyn eframe::Storage, command: &UiCommand) -> Self {
+    pub fn load(storage: &dyn eframe::Storage, command: &Args) -> Self {
         tracing::debug!("loading app state");
 
         let mut state = if command.reset_app_state {
