@@ -969,7 +969,7 @@ impl<'a> Transaction<'a> {
             // work pretty well now. we'll leave this here for a while
 
             let mut any_difference = false;
-            for (i, expected) in SHUTDOWN_REGITSERS.iter().copied() {
+            for (i, expected) in SHUTDOWN_REGISTERS.iter().copied() {
                 if self.registers[i] != expected {
                     tracing::warn!(
                         "Register 0x{i:02x} differs:\n  expected: 0x{:02x}\n  provided: 0x{:02x}",
@@ -989,7 +989,7 @@ impl<'a> Transaction<'a> {
 
     #[allow(dead_code)]
     fn shutdown_librtlsdr(&mut self) {
-        for (address, value) in SHUTDOWN_REGITSERS.iter().copied() {
+        for (address, value) in SHUTDOWN_REGISTERS.iter().copied() {
             self.registers[address] = value;
         }
     }
@@ -1087,7 +1087,7 @@ impl<'a> Transaction<'a> {
     }
 }
 
-const SHUTDOWN_REGITSERS: &[(u8, u8)] = &[
+const SHUTDOWN_REGISTERS: &[(u8, u8)] = &[
     (0x06, 0xb1),
     (0x05, 0xa0),
     (0x07, 0x3a),

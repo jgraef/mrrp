@@ -173,9 +173,6 @@ impl Rtl2832u {
     /// device at that address is not already in use (i.e. by another call
     /// to this method).
     ///
-    /// The returned device handle can be used independently of the
-    /// [`Rtl2832u`].
-    ///
     /// The device will be made available again when the [`I2cDevice`] handle is
     /// dropped.
     pub fn try_open_i2c(&self, i2c_address: I2cAddress) -> Result<I2cDevice, I2cDeviceBusy> {
