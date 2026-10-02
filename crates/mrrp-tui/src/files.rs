@@ -37,7 +37,7 @@ pub struct AppFiles {
 
 impl AppFiles {
     pub fn new() -> Result<Self, Error> {
-        let project_dirs = ProjectDirs::from("", "mrrp", "mrrp-cli")
+        let project_dirs = ProjectDirs::from("", "mrrp", "mrrp-tui")
             .ok_or_else(|| eyre!("Could not determine project directories"))?;
         let this = Self { project_dirs };
 
