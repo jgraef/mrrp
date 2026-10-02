@@ -8,12 +8,17 @@ repository.workspace = true
 [dependencies]
 bytemuck.workspace = true
 bytes.workspace = true
+chrono = { workspace = true, optional = true }
 derive_more = { workspace = true, features = ["debug"] }
 futures-core.workspace = true
 futures-util.workspace = true
 mrrp-core.workspace = true
+mrrp-sat = { workspace = true, optional = true }
 pin-project-lite.workspace = true
 rand.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
+
+[features]
+sat = ["dep:mrrp-sat", "dep:chrono"]

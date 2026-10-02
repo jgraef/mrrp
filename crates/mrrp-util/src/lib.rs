@@ -1,3 +1,5 @@
+#[cfg(feature = "sat")]
+pub mod sat;
 pub mod signal;
 
 #[inline(always)]

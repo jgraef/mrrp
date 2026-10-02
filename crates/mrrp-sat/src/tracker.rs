@@ -14,10 +14,6 @@ use std::{
     },
 };
 
-use anyhow::{
-    Error,
-    anyhow,
-};
 use chrono::{
     DateTime,
     TimeDelta,
@@ -29,6 +25,7 @@ use serde::{
 };
 
 use crate::{
+    error::Error,
     geo::Geodetic,
     satellite::{
         OrbitPropagationCache,
@@ -287,7 +284,11 @@ impl TrackedSatellite {
     ) -> Result<Self, Error> {
         let handle = satellites
             .get_by_id(&cache_entry.satellite_id)
-            .ok_or_else(|| anyhow!("Satellite not found: {}", cache_entry.satellite_id))?;
+            .ok_or_else(|| {
+                Error::SatelliteNotFound {
+                    sat_id: cache_entry.satellite_id,
+                }
+            })?;
 
         let mut this = Self::new(handle);
 
@@ -359,9 +360,9 @@ impl StateCache {
     }
 
     pub fn push(&mut self, state: SatelliteState, relative: Option<RelativeState>) -> StateCacheId {
-        // it would be nice if we could insert arbitrarly timed states, but that would
-        // mess up the monotically increasing ids we had code here to do this
-        // before. it just does a binary search and insert.
+        // it would be nice if we could insert arbitrarly timed states, but that
+        // would mess up the monotically increasing ids we had code here
+        // to do this before. it just does a binary search and insert.
 
         if let Some((_, latest)) = self.get_latest() {
             assert!(state.time() > latest.state.time());

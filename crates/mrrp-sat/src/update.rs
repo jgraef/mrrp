@@ -3,14 +3,16 @@ use std::path::{
     PathBuf,
 };
 
-use anyhow::Error;
 use chrono::{
     DateTime,
     TimeDelta,
     Utc,
 };
 
-use crate::satellite::SatelliteDatabase;
+use crate::{
+    error::Error,
+    satellite::SatelliteDatabase,
+};
 
 #[derive(Debug)]
 pub struct Updater {

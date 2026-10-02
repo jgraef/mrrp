@@ -17,10 +17,6 @@ use std::{
     },
 };
 
-use anyhow::{
-    Error,
-    anyhow,
-};
 use chrono::{
     DateTime,
     Utc,
@@ -44,6 +40,7 @@ use serde::{
 };
 
 use crate::{
+    error::Error,
     geo::Geodetic,
     satnogs::{
         self,
@@ -375,7 +372,9 @@ impl Satellite {
             Ok(())
         }
         else {
-            Err(anyhow!("Satellite without TLE"))
+            Err(Error::NoTLE {
+                sat_id: self.id().clone(),
+            })
         }
     }
 

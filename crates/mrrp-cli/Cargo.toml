@@ -20,7 +20,7 @@ mrrp-core.workspace = true
 mrrp-rtl-sdr.workspace = true
 mrrp-rtl-tcp.workspace = true
 mrrp-sat.workspace = true
-mrrp-util.workspace = true
+mrrp-util = { workspace = true, features = ["sat"] }
 parking_lot.workspace = true
 pin-project-lite.workspace = true
 serde = { workspace = true, features = ["derive"] }

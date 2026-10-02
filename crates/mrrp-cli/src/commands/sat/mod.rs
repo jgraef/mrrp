@@ -39,23 +39,20 @@ use mrrp_core::{
     },
 };
 use mrrp_sat::{
-    geo::Geodetic,
+    Geodetic,
     satellite::{
-        OrbitPropagationCache,
         ReferenceState,
         SatelliteDatabase,
         SatelliteHandle,
-        SatelliteState,
         Satellites,
     },
     satnogs::SatelliteId,
     tracker::Tracker,
     update::Updater,
 };
-use mrrp_util::signal::{
-    AsyncReadSamplesExt,
-    ComplexSinusoid,
-    SignalGenerator,
+use mrrp_util::{
+    sat::DopplerCorrection,
+    signal::AsyncReadSamplesExt,
 };
 
 pub use self::config::Config;
@@ -215,7 +212,7 @@ enum Command {
         #[clap(short, long)]
         sat_id: SatelliteId,
 
-        /// The unshifted frequency of the signal
+        /// The unshifted frequency of the signal.
         #[clap(short = 'f', long)]
         nominal_frequency: f32,
 
@@ -234,11 +231,11 @@ enum Command {
         #[clap(short, long, default_value = "1s", value_parser = humantime::parse_duration)]
         predict_interval: Duration,
 
-        /// Output file with doppler-corrected signal
+        /// Output file with doppler-corrected signal.
         #[clap(short, long)]
         output: PathBuf,
 
-        /// Input file that is doppler shifted
+        /// Input file that is doppler shifted.
         input: PathBuf,
     },
 }
@@ -364,6 +361,7 @@ fn track_set(
         .collect::<HashMap<SatelliteHandle, Vec<usize>>>()
 }
 
+// todo: move into util module - as this is might be used by other commands
 async fn abort_on_ctrl_c(f: impl Future<Output = Result<(), Error>>) -> Result<(), Error> {
     tokio::select! {
         _ = tokio::signal::ctrl_c() => Ok(()),
@@ -395,113 +393,23 @@ async fn correct_doppler(
 
     // open source file
     let source = WavSource::<_, Complex<i16>>::from_path(&input)?.convert::<Complex<f32>>();
-    let source_length = source.len();
-    let source_duration = Duration::from_secs_f32(source_length as f32 / source.sample_rate());
+    let duration = Duration::from_secs_f32(source.len() as f32 / source.sample_rate());
 
-    // calculate timing information
-    let num_intervals =
-        (source_duration.as_secs_f32() / predict_interval.as_secs_f32()).ceil() as usize;
-    let num_samples_per_interval =
-        (predict_interval.as_secs_f32() * source.sample_rate()).floor() as usize;
-    let effective_predict_interval = num_samples_per_interval as f32 * source.sample_rate();
-
-    // calculate exact timestamps for which we want satellite states
-    let times = (0..num_intervals)
-        .map(|i| start_time + Duration::from_secs_f32(effective_predict_interval * i as f32))
-        .collect::<Vec<_>>();
-
-    // predict satellite states for the time spanned by the source
-    let mut orbit_propagation_cache = OrbitPropagationCache::default();
-    let satellite_states = satellite.predict_state(&times, &mut orbit_propagation_cache)?;
-
-    // create mixing factor to correct dopller shift
-    let mut correction = DopplerShiftCorrection::new(
-        satellite_states,
+    let doppler_correction = DopplerCorrection::from_satellite(
+        satellite,
         ReferenceState::from_geodetic(location),
         nominal_frequency,
+        start_time,
+        predict_interval,
         source.sample_rate(),
-    );
+        duration,
+    )?;
 
     // apply correction
-    let corrected = source.map_in_place(|sample| sample * correction.next());
+    let corrected = source.scan_in_place_with(doppler_correction);
 
     // write corrected stream to file
     write_stream_to_wav(&output, corrected).await?;
 
     Ok(())
-}
-
-#[derive(Clone, Debug)]
-pub struct DopplerShiftCorrection {
-    satellite_states: Vec<SatelliteState>,
-    reference_state: ReferenceState,
-    nominal_frequency: f32,
-    sinusoid: ComplexSinusoid,
-    start_time: DateTime<Utc>,
-    sample_index: usize,
-    state_index: usize,
-}
-
-impl DopplerShiftCorrection {
-    pub fn new(
-        satellite_states: Vec<SatelliteState>,
-        reference_state: ReferenceState,
-        nominal_frequency: f32,
-        sample_rate: f32,
-    ) -> Self {
-        // note: we initialize the frequency to 1 Hz, but it will be updated
-        // before generating the first sample
-        let sinusoid = ComplexSinusoid::new(1.0, sample_rate);
-
-        let start_time = satellite_states
-            .get(0)
-            .unwrap_or_else(|| panic!("satellite_states must not be empty."))
-            .time();
-
-        Self {
-            satellite_states,
-            reference_state,
-            nominal_frequency,
-            sinusoid,
-            start_time,
-            sample_index: 0,
-            state_index: 0,
-        }
-    }
-}
-
-impl SignalGenerator for DopplerShiftCorrection {
-    type Sample = Complex<f32>;
-
-    fn next(&mut self) -> Self::Sample {
-        // or should we just calculate the delta time per sample ahead of time
-        // and use that? our concern was that this would accumulate error.
-        let time = self.start_time
-            + Duration::from_secs_f32(self.sample_index as f32 * self.sinusoid.sample_rate());
-
-        // current state we're at
-        let mut current_state = &self.satellite_states[self.state_index];
-
-        // check if we moved on to the next state
-        if let Some(next_state) = self.satellite_states.get(self.state_index + 1) {
-            if time >= next_state.time() {
-                self.state_index += 1;
-                current_state = next_state;
-            }
-        }
-
-        let relative_state = current_state.relative(&self.reference_state);
-        let doppler_shift = relative_state.doppler_shift(self.nominal_frequency as f64) as f32;
-
-        self.sample_index += 1;
-
-        self.sinusoid.set_frequency(-doppler_shift);
-        self.sinusoid.next()
-    }
-}
-
-impl GetSampleRate for DopplerShiftCorrection {
-    fn sample_rate(&self) -> f32 {
-        self.sinusoid.sample_rate()
-    }
 }

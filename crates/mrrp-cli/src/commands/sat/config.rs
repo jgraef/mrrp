@@ -1,6 +1,6 @@
 use chrono::TimeDelta;
 use mrrp_sat::{
-    geo::Geodetic,
+    Geodetic,
     tracker::TrackerOptions,
 };
 use serde::{
