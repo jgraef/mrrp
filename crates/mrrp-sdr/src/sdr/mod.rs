@@ -19,13 +19,20 @@ use std::{
     },
 };
 
+use anyhow::{
+    Error,
+    anyhow,
+};
 use mrrp_core::buf::{
     SampleBufMut,
     SamplesMut,
 };
 use num_complex::Complex;
 use rustfft::FftPlanner;
-use tokio::sync::mpsc;
+use tokio::sync::{
+    mpsc,
+    oneshot,
+};
 use tracing::Instrument;
 
 use crate::{
@@ -93,7 +100,7 @@ impl SdrRuntime {
                 biased;
                 command = self.command_receiver.recv() => {
                     let Some(command) = command else { break; };
-                    self.handle_command(command);
+                    self.handle_command(command).await;
                 }
                 id = self.sources.read() => {
                     self.handle_data(id);
@@ -102,12 +109,25 @@ impl SdrRuntime {
         }
     }
 
-    fn handle_command(&mut self, command: Command) {
+    async fn handle_command(&mut self, command: Command) {
         tracing::debug!(?command, "handling command");
 
         match command {
-            Command::AddSource { id, source } => {
-                self.sources.insert(id, source);
+            Command::AddSource { id, mut source } => {
+                async fn start_source(source: &mut dyn Source) -> Result<(), Error> {
+                    // todo: we don't have config right now, so hard-code sample rate
+                    source.set_sample_rate(2_400_000.0).await?;
+                    source.start().await?;
+                    Ok(())
+                }
+
+                // start source
+                if let Err(error) = start_source(&mut *source).await {
+                    tracing::error!(%error, "failed to start source");
+                }
+                else {
+                    self.sources.insert(id, source);
+                }
             }
             Command::RemoveSource { id } => {
                 self.sources.remove(id);
@@ -120,6 +140,22 @@ impl SdrRuntime {
             }
             Command::RemoveSpectrumSink { id } => {
                 self.spectrum_sinks.remove(&id);
+            }
+            Command::Shutdown { result_sender } => {
+                tracing::debug!("Shutting down SDR runtime. Closing all sources.");
+                let result = self.sources.close_all().await;
+                let _ = result_sender.send(result);
+            }
+            Command::SetCenterFrequency {
+                id,
+                center_frequency,
+                result_sender,
+            } => {
+                let result = self
+                    .sources
+                    .set_center_frequency(id, center_frequency)
+                    .await;
+                let _ = result_sender.send(result);
             }
         }
     }
@@ -211,12 +247,33 @@ impl Sources {
         self.waker.wake_by_ref();
     }
 
+    pub async fn set_center_frequency(
+        &mut self,
+        id: usize,
+        center_frequency: f32,
+    ) -> Result<(), Error> {
+        let source = self
+            .buffered_sources
+            .get_mut(&id)
+            .ok_or_else(|| anyhow!("Source not found: {id}"))?;
+        source.source.set_center_frequency(center_frequency).await?;
+        Ok(())
+    }
+
     pub fn remove(&mut self, id: usize) {
         self.buffered_sources.remove(&id);
     }
 
     pub fn read(&mut self) -> HandleSources<'_> {
         HandleSources { sources: self }
+    }
+
+    pub async fn close_all(&mut self) -> Result<(), Error> {
+        // todo: ideally if one close() fails, we still want to run the others
+        for (_id, source) in self.buffered_sources.drain() {
+            source.source.close().await?;
+        }
+        Ok(())
     }
 }
 
@@ -227,6 +284,7 @@ struct BufferedSource {
     //control_future: Option<Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>>,
     buffer: SamplesMut<Iq>,
 
+    // what was this supposed to be for?
     active: bool,
 }
 
@@ -410,6 +468,12 @@ impl SdrHandle {
 
         SourceHandle::new(self.command_sender.clone(), id, name)
     }
+
+    pub async fn shutdown(&self) -> Result<(), Error> {
+        let (result_sender, result_receiver) = oneshot::channel();
+        self.send_command(Command::Shutdown { result_sender });
+        result_receiver.await?
+    }
 }
 
 #[derive(derive_more::Debug)]
@@ -429,6 +493,14 @@ enum Command {
     },
     RemoveSpectrumSink {
         id: usize,
+    },
+    Shutdown {
+        result_sender: oneshot::Sender<Result<(), Error>>,
+    },
+    SetCenterFrequency {
+        id: usize,
+        center_frequency: f32,
+        result_sender: oneshot::Sender<Result<(), Error>>,
     },
 }
 
@@ -456,6 +528,12 @@ impl HandleInner {
 
     fn leak(&self) {
         self.remove_on_drop.store(false, Ordering::Relaxed);
+    }
+
+    fn send_command(&self, command: Command) {
+        self.command_sender
+            .send(command)
+            .expect("SDR runtime's command channel closed");
     }
 }
 
@@ -513,6 +591,17 @@ impl SourceHandle {
 
     pub fn name(&self) -> &Arc<str> {
         &self.name
+    }
+
+    pub async fn set_center_frequency(&self, center_frequency: f32) -> Result<(), Error> {
+        let (result_sender, result_receiver) = oneshot::channel();
+
+        self.inner.send_command(Command::SetCenterFrequency {
+            id: self.inner.id,
+            center_frequency,
+            result_sender,
+        });
+        result_receiver.await?
     }
 }
 

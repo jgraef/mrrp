@@ -4,11 +4,8 @@ use tracing::span::EnteredSpan;
 use crate::{
     cli::Args,
     sdr::{
+        GetSdrHandle,
         initialize_sdr_runtime,
-        source::{
-            LoopedFileSource,
-            MockSource,
-        },
     },
     ui::{
         about_window::AboutWindow,
@@ -38,7 +35,7 @@ pub struct App {
 impl App {
     pub fn new(command: Args, ctx: &egui::Context, storage: &dyn Storage) -> Self {
         // start SDR runtime
-        let sdr = initialize_sdr_runtime(ctx);
+        let _sdr = initialize_sdr_runtime(ctx);
 
         // tracing span for whole app (not sdr runtime)
         let span = tracing::info_span!("app").entered();
@@ -49,7 +46,7 @@ impl App {
         });
 
         // create a nock source
-        let center_frequency = command.center_frequency.unwrap_or(7000000.0);
+        /*let center_frequency = command.center_frequency.unwrap_or(7000000.0);
         let sample_rate = command.center_frequency.unwrap_or(2400000.0);
 
         let source = if let Some(test_file) = &command.file {
@@ -64,7 +61,7 @@ impl App {
             tracing::debug!(?center_frequency, ?sample_rate, "test: noise");
             sdr.add_source(MockSource::new(center_frequency, sample_rate))
         };
-        source.leak();
+        source.leak()*/
 
         // load app state
         let app_state = AppState::load(storage, &command);
@@ -82,6 +79,31 @@ impl eframe::App for App {
         self.app_state
             .error_message_state
             .fill_from_context(ui.ctx());
+
+        // handle inputs
+        //
+        // note: since Ui::input locks the Context, we just extract the info we
+        // need to know from it and then handle any inputs
+        {
+            let mut close_requested = false;
+            ui.input(|input| {
+                close_requested = input.viewport().close_requested();
+            });
+
+            if close_requested {
+                // todo: instead of blocking, cancel close, show a window that
+                // we're shutting down
+
+                tracing::debug!("App close requested. Shutting down SDR runtime");
+                let sdr = ui.expect_sdr_handle();
+
+                tokio::runtime::Handle::current().block_on(async move {
+                    if let Err(error) = sdr.shutdown().await {
+                        tracing::error!(%error, "Error while shutting down SDR runtime");
+                    }
+                });
+            }
+        }
 
         // app menu
         ui.add(MainMenuPanel::new(

@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::Error;
+use futures_util::TryFutureExt;
 use mrrp_core::signal::{
     AsyncReadSamples,
     ReadBuf,
@@ -87,9 +88,33 @@ impl Source for RtlSdrSource {
             Ok(())
         })
     }
+
+    fn close(self: Pin<Box<Self>>) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send>> {
+        Box::pin(async move {
+            Pin::into_inner(self).device.close().await?;
+            Ok(())
+        })
+    }
+
+    fn set_sample_rate(
+        &mut self,
+        sample_rate: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
+        Box::pin(self.device.set_sample_rate(sample_rate).map_err(Into::into))
+    }
+
+    fn set_center_frequency(
+        &mut self,
+        center_frequency: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
+        Box::pin(
+            self.device
+                .set_center_frequency(center_frequency)
+                .map_err(Into::into),
+        )
+    }
 }
 
-// todo: obsolete. use mrrp feature in mrrp_rtl_sdr
 impl AsyncReadSamples for RtlSdrSource {
     type Sample = Iq;
     type Error = Error;
@@ -107,7 +132,9 @@ impl AsyncReadSamples for RtlSdrSource {
                 .map_err(Into::into)
         }
         else {
-            Poll::Ready(Ok(()))
+            // todo: we can remove this when if we split the sample stream from the control
+            // interface
+            panic!("Sample stream not started");
         }
     }
 }

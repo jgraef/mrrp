@@ -71,9 +71,14 @@ impl<'a> RadioDockView<'a> {
                             tracing::debug!("no devices found");
                         }
 
-                        for (i, device) in devices.iter().enumerate() {
-                            tracing::debug!(i, name = device.name(), "device found");
-                        }
+                        let devices = devices
+                            .into_iter()
+                            .enumerate()
+                            .map(|(i, device_info)| {
+                                tracing::debug!(i, name = device_info.name(), "device found");
+                                DeviceInfo::new(device_info)
+                            })
+                            .collect::<Vec<_>>();
 
                         // try to find preferred device
                         let selection =
@@ -83,6 +88,7 @@ impl<'a> RadioDockView<'a> {
                                 .and_then(|preferred_device| {
                                     devices.iter().enumerate().find_map(|(i, device)| {
                                         device
+                                            .inner
                                             .serial_number()
                                             .is_some_and(|serial| serial == preferred_device)
                                             .then_some(i)
@@ -107,12 +113,10 @@ impl<'a> RadioDockView<'a> {
                 else {
                     let available_width = ui.available_width();
 
-                    for (i, device) in devices.iter().enumerate() {
-                        // maybe format a prettier label. this could then be cached in a struct
-                        let name = device.product_string().unwrap_or_else(|| device.name());
+                    for (i, device_info) in devices.iter().enumerate() {
                         let selected = *selection == Some(i);
 
-                        let button = egui::Button::new(name)
+                        let button = egui::Button::new(&device_info.display_name)
                             .selected(selected)
                             .frame_when_inactive(true)
                             .frame(true)
@@ -160,12 +164,16 @@ impl<'a> RadioDockView<'a> {
                     if let Some(selection) = *selection
                         && let Some(device) = devices.get(selection)
                     {
-                        let device = device.clone();
+                        let device = device.inner.clone();
                         self.state.inner = StateInner::Connecting {
                             task: BackgroundTask::spawn(async move {
                                 tracing::debug!(name = device.name(), "opening device");
+                                let mut device = device.open(Default::default()).await?;
 
-                                Ok(device.open(Default::default()).await?)
+                                device.set_sample_rate(2_400_000.0).await?;
+                                device.set_center_frequency(7_250_000.0).await?;
+
+                                Ok(device)
                             }),
                         };
                     }
@@ -268,15 +276,44 @@ enum StateInner {
         task: BackgroundTask<Result<Vec<mrrp_rtl_sdr::DeviceInfo>, Error>>,
     },
     Enumerated {
-        devices: Vec<mrrp_rtl_sdr::DeviceInfo>,
+        devices: Vec<DeviceInfo>,
         selection: Option<usize>,
     },
     Connecting {
         task: BackgroundTask<Result<mrrp_rtl_sdr::Device, Error>>,
     },
     Connected {
+        // todo: we need to store this in app state, or leak it. otherwise the source will be
+        // stopped when the dock is closed.
         handle: SourceHandle,
     },
+}
+
+#[derive(Debug)]
+struct DeviceInfo {
+    inner: mrrp_rtl_sdr::DeviceInfo,
+    display_name: String,
+}
+
+impl DeviceInfo {
+    pub fn new(device_info: mrrp_rtl_sdr::DeviceInfo) -> Self {
+        // format a name
+        let display_name = if let (Some(manufacturer_string), Some(product_string), Some(serial)) = (
+            device_info.manufacturer_string(),
+            device_info.product_string(),
+            device_info.serial_number(),
+        ) {
+            format!("{manufacturer_string} {product_string} [{serial}]")
+        }
+        else {
+            device_info.name().to_owned()
+        };
+
+        Self {
+            inner: device_info,
+            display_name,
+        }
+    }
 }
 
 fn show_spinner(ui: &mut egui::Ui) {

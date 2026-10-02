@@ -293,8 +293,9 @@ async fn main() -> Result<(), Error> {
             server
                 .serve()
                 .map_err(|error| {
-                    // this needs some explicit conversion because anyhow::Error doesn't implement
-                    // std::error::Error. we just convert the non-anyhow variants into anyhow
+                    // this needs some explicit conversion because anyhow::Error
+                    // doesn't implement std::error::Error.
+                    // we just convert the non-anyhow variants into anyhow
                     // errors.
                     match error {
                         mrrp_rtl_tcp::server::Error::Socket(error) => error.into(),

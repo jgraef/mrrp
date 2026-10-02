@@ -240,7 +240,7 @@ impl<'a> Transaction<'a> {
             }
         }
 
-        tracing::debug!(registers = ?self.registers[0..n], "read registers");
+        tracing::trace!(registers = ?self.registers[0..n], "read registers");
 
         Ok(())
     }
@@ -258,7 +258,7 @@ impl<'a> Transaction<'a> {
     /// This will ever only write registers that are marked as dirty, but it'll
     /// try to do so in as few write commands as possible.
     pub async fn flush(&mut self) -> Result<(), Error> {
-        tracing::debug!(
+        tracing::trace!(
             "flushing registers\nmodified: {:?}\n{:?}",
             self.registers.modified(),
             self.registers.state().hex_dump()
@@ -283,7 +283,7 @@ impl<'a> Transaction<'a> {
             let buf_len = 1 + run.end - run.start;
             let command = &buf[..buf_len.into()];
 
-            tracing::debug!(?run, ?command, "write registers");
+            tracing::trace!(?run, ?command, "write registers");
 
             self.r82xx.i2c_device.write(self.rtl2832u, &command).await?;
 
@@ -806,7 +806,7 @@ impl<'a> Transaction<'a> {
             drive: self.r82xx.crystal_config.drive,
         };
 
-        tracing::debug!(crystal_config = ?self.r82xx.crystal_config, ?effective_cystal_config);
+        tracing::debug!(crystal_config = ?self.r82xx.crystal_config, ?effective_cystal_config, "setting crystal config");
 
         self.registers
             .set_capx(effective_cystal_config.capacitor.into());
@@ -881,8 +881,6 @@ impl<'a> Transaction<'a> {
         // the VCO frequency we want
         let vco_frequency = lo_frequency * sel_div.effective_divider();
 
-        tracing::debug!(?sel_div, ?vco_frequency, crystal_frequency = ?self.r82xx.crystal_frequency);
-
         // calculate PLL divider settings
         let pll_divider = PllDivider::from_vco_frequency(
             vco_frequency,
@@ -906,7 +904,8 @@ impl<'a> Transaction<'a> {
             }
         })?;
 
-        tracing::debug!(?pll_divider);
+        tracing::debug!(?sel_div, ?vco_frequency, crystal_frequency = ?self.r82xx.crystal_frequency, ?pll_divider, "configuring PLL");
+
         self.registers.set_n_i2c(pll_divider.n_i2c);
         self.registers.set_s_i2c(pll_divider.s_i2c);
         self.registers.set_sdm_in(pll_divider.sdm);

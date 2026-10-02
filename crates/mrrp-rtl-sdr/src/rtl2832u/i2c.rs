@@ -133,7 +133,7 @@ impl I2cDevice {
 
     /// Reads data from the I2C device.
     pub async fn read(&mut self, rtl2832u: &mut Rtl2832u, length: u16) -> Result<Vec<u8>, Error> {
-        tracing::debug!(i2c_address = ?self.i2c_address, ?length, "reading I2C");
+        tracing::trace!(i2c_address = ?self.i2c_address, ?length, "reading I2C");
 
         rtl2832u
             .read(
@@ -147,7 +147,7 @@ impl I2cDevice {
 
     /// Writes data to the I2C device.
     pub async fn write(&mut self, rtl2832u: &mut Rtl2832u, data: &[u8]) -> Result<(), Error> {
-        tracing::debug!(i2c_address = ?self.i2c_address, ?data, "writing I2C");
+        tracing::trace!(i2c_address = ?self.i2c_address, ?data, "writing I2C");
 
         rtl2832u
             .write(

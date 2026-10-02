@@ -544,6 +544,14 @@ impl mrrp_core::signal::AsyncReadSamples for Reader {
                 );
 
                 let num_samples = buffer.remaining_mut().min(samples_iq.len());
+
+                tracing::trace!(
+                    samples_iq_len = samples_iq.len(),
+                    buffer_remaining_mut = buffer.remaining_mut(),
+                    ?num_samples,
+                    "reading samples from rtl-sdr"
+                );
+
                 buffer.put_slice(&samples_iq[..num_samples]);
 
                 this.epa_reader.consume(num_samples * 2);

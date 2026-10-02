@@ -14,7 +14,10 @@ use std::{
     time::Duration,
 };
 
-use anyhow::Error;
+use anyhow::{
+    Error,
+    anyhow,
+};
 use mrrp_audio::WavSource;
 use mrrp_core::signal::{
     AsyncReadSamples,
@@ -49,7 +52,7 @@ pub trait IntoSource {
     fn into_source(self) -> Self::Source;
 }
 
-pub trait Source: AsyncReadSamples<Sample = Iq, Error = Error> {
+pub trait Source: AsyncReadSamples<Sample = Iq, Error = Error> + Send + Unpin {
     fn name(&self) -> &str;
     fn center_frequency(&self) -> f32;
     fn sample_rate(&self) -> f32;
@@ -64,7 +67,17 @@ pub trait Source: AsyncReadSamples<Sample = Iq, Error = Error> {
     /// indicate an EOF condition.
     fn stop(&mut self) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>>;
 
-    // todo
+    fn close(self: Pin<Box<Self>>) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send>>;
+
+    fn set_sample_rate(
+        &mut self,
+        sample_rate: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>>;
+
+    fn set_center_frequency(
+        &mut self,
+        center_frequency: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>>;
 }
 
 impl<S> IntoSource for S
@@ -149,6 +162,28 @@ impl Source for MockSource {
             self.active = false;
             Ok(())
         })
+    }
+
+    fn close(self: Pin<Box<Self>>) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn set_sample_rate(
+        &mut self,
+        sample_rate: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
+        // changing the sample rate doesn't change anything on this source, because it's
+        // just white noise anyway
+        let _ = sample_rate;
+        Box::pin(async { Ok(()) })
+    }
+
+    fn set_center_frequency(
+        &mut self,
+        center_frequency: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
+        let _ = center_frequency;
+        Box::pin(async { Err(anyhow!("unsupported")) })
     }
 }
 
@@ -281,6 +316,26 @@ impl Source for LoopedFileSource {
             self.active = false;
             Ok(())
         })
+    }
+
+    fn close(self: Pin<Box<Self>>) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send>> {
+        Box::pin(async { Ok(()) })
+    }
+
+    fn set_sample_rate(
+        &mut self,
+        sample_rate: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
+        let _ = sample_rate;
+        Box::pin(async { Err(anyhow!("unsupported")) })
+    }
+
+    fn set_center_frequency(
+        &mut self,
+        center_frequency: f32,
+    ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
+        let _ = center_frequency;
+        Box::pin(async { Err(anyhow!("unsupported")) })
     }
 }
 

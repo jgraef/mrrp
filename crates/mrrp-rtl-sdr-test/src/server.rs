@@ -349,17 +349,19 @@ async fn handle_data(
 
     loop {
         if let Some(reader) = &mut reader_opt {
-            // we have a reader so we need to read the data from it into our ring buffer
+            // we have a reader so we need to read the data from it into our
+            // ring buffer
 
-            // the underlying reader is an AsyncBufRead, so we can ask it to receive more
-            // data if necessary, and then give us its buffer.
+            // the underlying reader is an AsyncBufRead, so we can ask it to
+            // receive more data if necessary, and then give us its
+            // buffer.
             let data = reader.fill_buf().await?;
 
             // put that data into our ring buffer.
             // this returns if there are any receivers to receive that data.
             // if there are, the data will have been written to the buffer.
-            // if there aren't, it doesn't really matter, since no receiver will ever see
-            // that data.
+            // if there aren't, it doesn't really matter, since no receiver will
+            // ever see that data.
             if data_sender.send(data) {
                 let n = data.len();
                 reader.consume(n);
@@ -373,8 +375,8 @@ async fn handle_data(
             }
         }
         else {
-            // we don't have a reader, meaning we don't know of any receivers yet. wait for
-            // some
+            // we don't have a reader, meaning we don't know of any receivers
+            // yet. wait for some
             tracing::debug!("waiting for receivers...");
             if data_sender.wait_for_receivers().await.is_err() {
                 // no receivers and no subscribers left. we're done here
@@ -392,7 +394,8 @@ async fn handle_data(
                 break;
             }
 
-            // receive reader from command task. if the result_sender is dropped, we exit
+            // receive reader from command task. if the result_sender is
+            // dropped, we exit
             let Ok(reader) = result_receiver.await
             else {
                 break;
@@ -551,12 +554,14 @@ mod ring_buffer {
 
             // we do this in 2 steps
             //
-            // 1: check if there's data and if so return it. this only needs a read guard
-            // 2: register waker. this needs a write guard
+            // 1: check if there's data and if so return it. this only needs a
+            // read guard 2: register waker. this needs a write
+            // guard
             //
-            // between 1 and 2 we don't hold a lock, so we need to rerun the checks in 2.
-            // but 1 can be run by all readers in parallel. we hope this is more efficient
-            // (benchmark lol!)
+            // between 1 and 2 we don't hold a lock, so we need to rerun the
+            // checks in 2. but 1 can be run by all readers in
+            // parallel. we hope this is more efficient (benchmark
+            // lol!)
 
             // first we try to read through a read guard
             let new_waker = {
@@ -592,15 +597,16 @@ mod ring_buffer {
                 }
             };
 
-            // at this point we don't hold the lock, so stuff could be written, or the
-            // sender drop
+            // at this point we don't hold the lock, so stuff could be written,
+            // or the sender drop
 
             if let Some(waker) = new_waker {
                 // we'll need a write guard to insert our waker
 
                 let mut state_guard = this.inner.shared.state.write();
 
-                // but in the meantime some data might have been written to the ring buffer
+                // but in the meantime some data might have been written to the
+                // ring buffer
                 if this.inner.read_pos < state_guard.head_pos {
                     return Poll::Ready(Ok(ReceiveGuard {
                         state_guard: RwLockWriteGuard::downgrade(state_guard),
@@ -721,10 +727,11 @@ mod ring_buffer {
             let mut state_guard = self.shared.state.write();
 
             if state_guard.receiver_count == 0 {
-                // no receivers are here to ever observe the bytes we would write, so we don't.
+                // no receivers are here to ever observe the bytes we would
+                // write, so we don't.
 
-                // technically, since there are no receivers that keep track of this, we
-                // don't need to increase this
+                // technically, since there are no receivers that keep track of
+                // this, we don't need to increase this
                 state_guard.head_pos += data.len();
 
                 false

@@ -266,7 +266,7 @@ impl Rtl2832u {
         let bits = <R::Bits as register::Bits<R::Endianess>>::from_bytes(&data);
         let value = R::from_bits(bits);
 
-        tracing::debug!(address = ?R::ADDRESS, ?value, "read register");
+        tracing::trace!(address = ?R::ADDRESS, ?value, "read register");
 
         value.shadow_write(&mut self.shadow_map);
 
@@ -278,7 +278,7 @@ impl Rtl2832u {
     where
         R: RegisterValue + shadow::ShadowRegister,
     {
-        tracing::debug!(address = ?R::ADDRESS, ?value, "writing register");
+        tracing::trace!(address = ?R::ADDRESS, ?value, "writing register");
 
         let bits = value.as_bits();
         let data = bits.into_bytes();

@@ -285,7 +285,7 @@ impl<'a> InputPin {
         let gpi = rtl2832u.read_register::<reg::GPI>().await?;
         let state = gpi.0.bit(self.pin.pin.into());
 
-        tracing::debug!(pin = ?self.pin.pin, ?state, "read GPIO pin");
+        tracing::trace!(pin = ?self.pin.pin, ?state, "read GPIO pin");
 
         Ok(state)
     }
@@ -341,7 +341,7 @@ impl OutputPin {
             .cached_state
             .is_none_or(|cached_state| cached_state != state)
         {
-            tracing::debug!(pin = ?self.pin.pin, cached_state = ?self.cached_state, ?state, "writing GPIO pin");
+            tracing::trace!(pin = ?self.pin.pin, cached_state = ?self.cached_state, ?state, "writing GPIO pin");
 
             rtl2832u
                 .write_register_update::<reg::GPO>(|gpo| {
