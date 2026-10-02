@@ -13,7 +13,6 @@ use std::{
         Path,
         PathBuf,
     },
-    sync::OnceLock,
     time::{
         Duration,
         Instant,
@@ -37,22 +36,27 @@ use tokio::{
     io::AsyncBufReadExt,
     net::TcpListener,
 };
-use tokio_util::sync::CancellationToken;
 
-use crate::commands::rtl_sdr::{
-    gpio::{
-        GpioCommand,
-        gpio_command,
+use crate::{
+    commands::rtl_sdr::{
+        gpio::{
+            GpioCommand,
+            gpio_command,
+        },
+        open::DeviceArgs,
+        regdump::{
+            dump_regs,
+            hexyl,
+            print_reg_dump,
+        },
+        server::{
+            ServerConfig,
+            ServerHandler,
+        },
     },
-    open::DeviceArgs,
-    regdump::{
-        dump_regs,
-        hexyl,
-        print_reg_dump,
-    },
-    server::{
-        ServerConfig,
-        ServerHandler,
+    util::{
+        run_til_shutdown,
+        shutdown_signal,
     },
 };
 
@@ -584,37 +588,4 @@ enum Command {
         #[clap(short, long)]
         output: PathBuf,
     },
-}
-
-fn shutdown_signal() -> CancellationToken {
-    static ONCE: OnceLock<CancellationToken> = OnceLock::new();
-
-    ONCE.get_or_init(|| {
-        let cancellation_token = CancellationToken::new();
-
-        // todo: sigterm, etc.
-
-        tokio::spawn({
-            let cancellation_token = cancellation_token.clone();
-            async move {
-                if let Err(error) = tokio::signal::ctrl_c().await {
-                    tracing::error!(%error, "Ctrl-C signal returned an error");
-                }
-
-                tracing::info!("Received Ctrl-C. Shutting down.");
-                cancellation_token.cancel();
-            }
-        });
-
-        cancellation_token
-    })
-    .clone()
-}
-
-async fn run_til_shutdown<R>(fut: impl Future<Output = R>) -> Option<R> {
-    let cancellation_token = shutdown_signal();
-    tokio::select! {
-        _ = cancellation_token.cancelled() => None,
-        output = fut => Some(output),
-    }
 }

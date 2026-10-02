@@ -1,6 +1,7 @@
 #![allow(dead_code)] // todo: remove
 
 mod config;
+mod passes;
 
 use std::{
     collections::{
@@ -42,6 +43,7 @@ use mrrp_sat::{
     Geodetic,
     satellite::{
         ReferenceState,
+        Satellite,
         SatelliteDatabase,
         SatelliteHandle,
         Satellites,
@@ -56,7 +58,13 @@ use mrrp_util::{
 };
 
 pub use self::config::Config;
-use crate::files::Files;
+use crate::{
+    commands::rtl_sdr::open::DeviceArgs,
+    files::{
+        Files,
+        create_parent_dir_if_not_exists,
+    },
+};
 
 pub async fn run(args: Args, files: Files) -> Result<(), Error> {
     let config = files.config()?.sat;
@@ -151,9 +159,18 @@ pub async fn run(args: Args, files: Files) -> Result<(), Error> {
                 .ok_or_else(|| anyhow!("Station not configured"))?
                 .location;
 
+            tracing::debug!(%sat_id, nominal_frequency, ?input, ?output, "Correcting doppler");
+
+            let satellite = satellites
+                .get(
+                    satellites
+                        .get_by_id(&sat_id)
+                        .ok_or_else(|| anyhow!("Satellite not found: {sat_id}"))?,
+                )
+                .unwrap();
+
             correct_doppler(
-                &mut satellites,
-                &sat_id,
+                satellite,
                 location,
                 nominal_frequency,
                 start_time,
@@ -162,6 +179,56 @@ pub async fn run(args: Args, files: Files) -> Result<(), Error> {
                 &output,
             )
             .await?;
+        }
+        Command::ListPasses {
+            sat_id,
+            mut options,
+        } => {
+            let location = config
+                .station
+                .as_ref()
+                .ok_or_else(|| anyhow!("Station not configured"))?
+                .location;
+
+            let satellite = satellites
+                .get(
+                    satellites
+                        .get_by_id(&sat_id)
+                        .ok_or_else(|| anyhow!("Satellite not found: {sat_id}"))?,
+                )
+                .unwrap();
+
+            if options.end_time.is_none() && options.limit.is_none() {
+                options.limit = Some(20);
+            }
+
+            passes::list(satellite, location, options)?;
+        }
+        Command::CapturePasses {
+            output,
+            sat_id,
+            center_frequency,
+            sample_rate,
+            device,
+        } => {
+            create_parent_dir_if_not_exists(&output)?;
+
+            let satellite = satellites
+                .get(
+                    satellites
+                        .get_by_id(&sat_id)
+                        .ok_or_else(|| anyhow!("Satellite not found: {sat_id}"))?,
+                )
+                .unwrap();
+
+            // todo
+            //let device = device.open_device().await?;
+            //let device = ();
+
+            //capture_passes(&output, satellite, device).await?;
+            let _ = (center_frequency, sample_rate, device, satellite);
+
+            todo!();
         }
     }
 
@@ -237,6 +304,43 @@ enum Command {
 
         /// Input file that is doppler shifted.
         input: PathBuf,
+    },
+    ListPasses {
+        /// Satellite ID
+        ///
+        /// # TODO
+        ///
+        /// There's currently no good way to find this satellite ID. It's the ID
+        /// from the SatNOGS API.
+        #[clap(short, long)]
+        sat_id: SatelliteId,
+
+        #[clap(flatten)]
+        options: passes::Options,
+    },
+    CapturePasses {
+        #[clap(short, long, default_value = ".")]
+        output: PathBuf,
+
+        /// Satellite ID
+        ///
+        /// # TODO
+        ///
+        /// There's currently no good way to find this satellite ID. It's the ID
+        /// from the SatNOGS API.
+        #[clap(short, long)]
+        sat_id: SatelliteId,
+
+        /// The center frequency to capture.
+        #[clap(short = 'f', long)]
+        center_frequency: f32,
+
+        /// The sample rate to capture with.
+        #[clap(short, long)]
+        sample_rate: f32,
+
+        #[clap(flatten)]
+        device: DeviceArgs,
     },
 }
 
@@ -361,17 +465,8 @@ fn track_set(
         .collect::<HashMap<SatelliteHandle, Vec<usize>>>()
 }
 
-// todo: move into util module - as this is might be used by other commands
-async fn abort_on_ctrl_c(f: impl Future<Output = Result<(), Error>>) -> Result<(), Error> {
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => Ok(()),
-        ret = f => ret,
-    }
-}
-
 async fn correct_doppler(
-    satellites: &mut Satellites,
-    sat_id: &SatelliteId,
+    satellite: &Satellite,
     location: Geodetic,
     nominal_frequency: f32,
     start_time: DateTime<Utc>,
@@ -382,14 +477,7 @@ async fn correct_doppler(
     let input = input.as_ref();
     let output = output.as_ref();
 
-    tracing::debug!(%sat_id, nominal_frequency, ?input, ?output, "Correcting doppler");
-
-    // get satellite (TLEs)
-    let satellite_handle = satellites
-        .get_by_id(sat_id)
-        .ok_or_else(|| anyhow!("Satellite not found: {sat_id}"))?;
-    let satellite = satellites.get(satellite_handle).unwrap();
-    tracing::debug!(sat=satellite.name(), tle=?satellite.tle(), "Satellite");
+    tracing::debug!(sat=satellite.name(), tle=?satellite.tle(), "Correcting doppler");
 
     // open source file
     let source = WavSource::<_, Complex<i16>>::from_path(&input)?.convert::<Complex<f32>>();

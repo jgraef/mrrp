@@ -1,6 +1,7 @@
 pub mod commands;
 pub mod config;
 pub mod files;
+pub mod util;
 
 use anyhow::Error;
 use clap::{

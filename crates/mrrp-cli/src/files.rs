@@ -46,10 +46,20 @@ impl Files {
     }
 }
 
-fn create_dir_if_not_exists(path: impl AsRef<Path>) -> Result<(), Error> {
+pub fn create_dir_if_not_exists(path: impl AsRef<Path>) -> Result<(), Error> {
     let path = path.as_ref();
 
     if !path.exists() {
+        std::fs::create_dir_all(&path)?;
+    }
+
+    Ok(())
+}
+
+pub fn create_parent_dir_if_not_exists(path: impl AsRef<Path>) -> Result<(), Error> {
+    if let Some(path) = path.as_ref().parent()
+        && !path.exists()
+    {
         std::fs::create_dir_all(&path)?;
     }
 

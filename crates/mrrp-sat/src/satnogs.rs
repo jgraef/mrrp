@@ -1,8 +1,4 @@
-use std::{
-    borrow::Cow,
-    fs::File,
-    io::BufReader,
-};
+use std::borrow::Cow;
 
 use chrono::{
     DateTime,
@@ -51,19 +47,20 @@ impl SatnogsApi {
     where
         T: DeserializeOwned,
     {
-        /*Ok(self
-        .client
-        .get(self.base_url.join(endpoint).expect("invalid endpoint URL"))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?)*/
+        Ok(self
+            .client
+            .get(self.base_url.join(endpoint).expect("invalid endpoint URL"))
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?)
 
         // for testing we'll use a local copy to not spam their API
-        let reader =
-            BufReader::new(File::open(&format!("tmp/satnogs/{}_pretty.json", endpoint)).unwrap());
-        Ok(serde_json::from_reader(reader).unwrap())
+        //let reader =
+        //    BufReader::new(File::open(&format!("tmp/satnogs/{}_pretty.json",
+        // endpoint)).unwrap()); Ok(serde_json::from_reader(reader).
+        // unwrap())
     }
 
     pub async fn modes(&self) -> Result<Vec<Mode>, Error> {
@@ -173,6 +170,8 @@ pub enum SatelliteStatus {
     ReEntered,
     Dead,
     Future,
+    #[serde(rename = "in orbit")]
+    InOrbit,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

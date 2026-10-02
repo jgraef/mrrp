@@ -353,7 +353,7 @@ impl Satellite {
         cache: &mut OrbitPropagationCache,
         output: &mut Vec<SatelliteState>,
     ) -> Result<(), Error> {
-        tracing::debug!(satellite = ?self, num_times = times.len(), "predicting");
+        tracing::trace!(satellite = ?self, num_times = times.len(), "predicting");
 
         if let Some(tle) = &self.satkit_tle {
             let mut source = CachedTle {

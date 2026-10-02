@@ -21,9 +21,11 @@ mrrp-rtl-sdr.workspace = true
 mrrp-rtl-tcp.workspace = true
 mrrp-sat.workspace = true
 mrrp-util = { workspace = true, features = ["sat"] }
+num-traits.workspace = true
 parking_lot.workspace = true
 pin-project-lite.workspace = true
 serde = { workspace = true, features = ["derive"] }
+tabled = "0.22.0"
 tokio = { workspace = true, features = [
     "macros",
     "rt-multi-thread",

@@ -48,11 +48,8 @@ impl Updater {
     }
 
     pub async fn perform_update(&self, satellites: &mut SatelliteDatabase) -> Result<(), Error> {
-        // todo: disabled during early dev, because we need to debug the update
-        // mechanism a bit more.
-        //
-        // tracing::info!("Updating satkit data");
-        // satkit_update().await?;
+        tracing::info!("Updating satkit data");
+        satkit_update().await?;
 
         tracing::info!("Updating satellite list");
         satellites.update().await?;

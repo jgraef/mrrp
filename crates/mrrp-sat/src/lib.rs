@@ -3,6 +3,7 @@
 
 mod error;
 mod geo;
+pub mod pass;
 pub mod satellite;
 pub mod satnogs;
 pub mod tracker;
