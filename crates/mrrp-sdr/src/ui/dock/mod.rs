@@ -310,7 +310,7 @@ impl<'a> egui::Widget for DockPanel<'a> {
     fn ui(mut self, ui: &mut egui::Ui) -> egui::Response {
         egui::CentralPanel::default()
             .frame(Frame::central_panel(ui.style()).inner_margin(Margin::ZERO))
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 let mut dock_viewer = DockViewer::new(
                     &mut self.app_state.dock_state.viewer_state,
                     &mut self.command_buffer,
@@ -319,8 +319,8 @@ impl<'a> egui::Widget for DockPanel<'a> {
                 let mut style = egui_dock::Style::from_egui(ui.style());
                 //tracing::debug!("dock style: {style:#?}");
 
-                // this is just another line between docks, but docks have an outline, so this
-                // just adds clutter.
+                // this is just another line between docks, but docks have an
+                // outline, so this just adds clutter.
                 style.separator.color_idle = Color32::TRANSPARENT;
 
                 // spacing between docks and outer border
@@ -328,13 +328,14 @@ impl<'a> egui::Widget for DockPanel<'a> {
                 // spacing between individual docks
                 style.separator.width = 3.0;
 
-                // the border doesn't 100% match up. we can draw it ourselves with a Frame in
-                // the DockViewer, but then we also need to handle scrolling.
-                //style.tab.tab_body.stroke = Stroke::NONE;
+                // the border doesn't 100% match up. we can draw it ourselves
+                // with a Frame in the DockViewer, but then we
+                // also need to handle scrolling.
+                // style.tab.tab_body.stroke = Stroke::NONE;
 
-                // we wanted 0 margin to be flush against the outer border. but the border is
-                // drawn a bit inside, so we would draw over it. so lets also go
-                // inside a bit
+                // we wanted 0 margin to be flush against the outer border. but
+                // the border is drawn a bit inside, so we would
+                // draw over it. so lets also go inside a bit
                 style.tab.tab_body.inner_margin = Margin::symmetric(2, 0);
 
                 style.tab.tab_body.corner_radius = CornerRadius::ZERO;

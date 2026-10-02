@@ -16,11 +16,10 @@
 //! - When moving the cursor to the left beyond what is displayed, display more
 //!   while editing.
 
-use std::hash::Hash;
-
 use egui::{
     Align,
     Align2,
+    AsId,
     Color32,
     CursorIcon,
     FontId,
@@ -31,6 +30,7 @@ use egui::{
     TextFormat,
     Vec2,
     text::{
+        ByteIndex,
         LayoutJob,
         LayoutSection,
         TextWrapping,
@@ -74,7 +74,7 @@ impl<'a> FrequencyDial<'a> {
         self
     }
 
-    pub fn id(mut self, id: impl Hash) -> Self {
+    pub fn id(mut self, id: impl AsId) -> Self {
         self.id = Some(egui::Id::new(id));
         self
     }
@@ -102,7 +102,8 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
 
         let id = self.id.unwrap_or_else(|| ui.id().with("frequency_dial"));
 
-        // data needed to track superficial widget state, such as if it's being edited
+        // data needed to track superficial widget state, such as if it's being
+        // edited
         let data_id = id.with("data");
         let mut data = ui.data(|data_storage| {
             data_storage
@@ -116,9 +117,9 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
             .unwrap_or_else(|| FrequencyDialStyle::from_egui(&ui.style()));
 
         // track if the frequency changed.
-        // we could also just check at the end if it's unequal to before, but with this
-        // explicit flag we can mark_changed in the response even if it technically
-        // didn't change.
+        // we could also just check at the end if it's unequal to before, but
+        // with this explicit flag we can mark_changed in the response
+        // even if it technically didn't change.
         let mut frequency_changed = false;
 
         // track if we consumed the scroll delta
@@ -137,6 +138,7 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
                 halign: Align::Min,
                 justify: false,
                 round_output_to_gui: false,
+                keep_trailing_whitespace: false,
             };
 
             let frequency = *self.frequency;
@@ -144,13 +146,13 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
 
             let mut digit_index = 0;
 
-            // individual characters (digits, decimals, sign) with layout sections
-            // we need to create this ahead of time to properly reverse it and convert it to
-            // text.
+            // individual characters (digits, decimals, sign) with layout
+            // sections we need to create this ahead of time to
+            // properly reverse it and convert it to text.
             let mut text_chars = Vec::with_capacity(num_characters);
 
-            // similar to text_chars, but only tracks what digit this character corresponds
-            // to
+            // similar to text_chars, but only tracks what digit this character
+            // corresponds to
             let mut selections = Vec::with_capacity(num_characters);
 
             let mut layout_section = |ch: char, highlight, weak, smol, select_info| {
@@ -187,7 +189,7 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
 
                 let layout_section = LayoutSection {
                     leading_space: style.digit_spacing,
-                    byte_range: 0..0, // placeholder, fixed later
+                    byte_range: ByteIndex(0)..ByteIndex(0), // placeholder, fixed later
                     format,
                 };
 
@@ -204,8 +206,8 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
                     .as_ref()
                     .is_some_and(|edit_state| edit_state.digit_index == digit_index);
 
-                // the remaining digits are all 0 and will be displayed in a lighter
-                // tone
+                // the remaining digits are all 0 and will be displayed in a
+                // lighter tone
                 let remaining_is_zero = frequency_abs == 0;
 
                 // these will be rendered with a smaller font size
@@ -241,16 +243,17 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
             }
 
             // draw minus sign
-            // todo: this needs to be editable too. but we could also clamp to positive
+            // todo: this needs to be editable too. but we could also clamp to
+            // positive
             if frequency < 0 {
                 layout_section('-', false, false, false, None);
             }
 
             // we created sections from right-to-left. now we fix this
             for (ch, mut layout_section) in text_chars.into_iter().rev() {
-                layout_section.byte_range.start = layout_job.text.len();
+                layout_section.byte_range.start = layout_job.text.len().into();
                 layout_job.text.push(ch);
-                layout_section.byte_range.end = layout_job.text.len();
+                layout_section.byte_range.end = layout_job.text.len().into();
                 layout_job.sections.push(layout_section);
             }
             selections.reverse();
@@ -277,7 +280,8 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
 
         painter.galley(aligned.min, galley.clone(), Color32::WHITE);
 
-        // Helper to map cursor position to (digit_index, digit_value, step/multiplier)
+        // Helper to map cursor position to (digit_index, digit_value,
+        // step/multiplier)
         let cursor_position_to_digit = |cursor_position| {
             let row = &galley.rows[0];
             let position: Vec2 = cursor_position - aligned.min - row.pos.to_vec2();
@@ -286,8 +290,8 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
                 .iter()
                 .enumerate()
                 .find_map(|(character_index, glyph)| {
-                    // you can also match via rect() or logical_rect(), but this way we only
-                    // consider the x coordinate
+                    // you can also match via rect() or logical_rect(), but this
+                    // way we only consider the x coordinate
                     if position.x >= glyph.pos.x && position.x < glyph.pos.x + glyph.advance_width {
                         selections[character_index]
                     }
@@ -309,7 +313,8 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
                         phase,
                         modifiers,
                     } => {
-                        // check if we're still scrolling with a digit under the pointer
+                        // check if we're still scrolling with a digit under the
+                        // pointer
                         if (*unit == MouseWheelUnit::Line || *unit == MouseWheelUnit::Point)
                             && input_state.smooth_scroll_delta.y != 0.0
                             && let Some(hover_pos) = hover_pos
@@ -378,7 +383,8 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
                             }
                             egui::Key::ArrowLeft => {
                                 if let Some(edit_state) = &mut data.edit_state {
-                                    // todo: shift-left/right to jump to next 1000s position.
+                                    // todo: shift-left/right to jump to next
+                                    // 1000s position.
                                     if modifiers.ctrl {
                                         let num_digits = ilog10(*self.frequency).saturating_sub(1);
                                         edit_state.digit_index = num_digits;
@@ -491,8 +497,8 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
             "frequency_changed boolean not set, but frequency changed"
         );
 
-        // first we auto-confirmed when the cursor left, but i think it's more intuitive
-        // to do this when you click outside
+        // first we auto-confirmed when the cursor left, but i think it's more
+        // intuitive to do this when you click outside
         //
         // !response.contains_pointer()
         if response.clicked_elsewhere() && data.edit_state.is_some() {

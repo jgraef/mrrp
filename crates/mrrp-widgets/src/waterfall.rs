@@ -155,17 +155,19 @@ impl<'a> WaterfallStateUpdateGuard<'a> {
 
 impl<'a> Drop for WaterfallStateUpdateGuard<'a> {
     fn drop(&mut self) {
-        // we don't want to flush on every line if possible, as it can be more efficient
-        // if data transfers can be batched. thus we prefer flushing this queue when
-        // rendering happens. but we also can't have this grow limitless. also the
-        // longer we delay a flush the larger/more staging buffers we need.
+        // we don't want to flush on every line if possible, as it can be more
+        // efficient if data transfers can be batched. thus we prefer
+        // flushing this queue when rendering happens. but we also can't
+        // have this grow limitless. also the longer we delay a flush
+        // the larger/more staging buffers we need.
 
         if self.state.queued_lines.len() >= 32 {
             self.state.flush_background();
 
-            // normally flush_background should clear the queue, but it might not if it
-            // doesn't have a device/queue or can't create a staging transaction. but we
-            // absolutely don't want this queue to grow without bounds.
+            // normally flush_background should clear the queue, but it might
+            // not if it doesn't have a device/queue or can't create
+            // a staging transaction. but we absolutely don't want
+            // this queue to grow without bounds.
             self.state.queued_lines.clear();
         }
     }
@@ -427,8 +429,8 @@ impl State {
         );
         self.queued_lines.clear();
 
-        // if buffers were reallocated we'll just remove the bind group. a visible flush
-        // can later create them
+        // if buffers were reallocated we'll just remove the bind group. a
+        // visible flush can later create them
         if buffers_reallocated {
             self.bind_group = None;
         }
@@ -470,8 +472,8 @@ impl State {
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             });
 
-            // note: no need to recreate a bind group here, since we can't have one already
-            // anyway
+            // note: no need to recreate a bind group here, since we can't have
+            // one already anyway
             assert!(self.bind_group.is_none());
 
             self.config = Some(*config);
@@ -602,8 +604,8 @@ struct RingBuffer {
 
 impl RingBuffer {
     fn set_line_capacity(&mut self, line_capacity: usize) {
-        // note: we don't need to check if the index buffer is still large enough. this
-        // will be done in `Self::push_back`
+        // note: we don't need to check if the index buffer is still large
+        // enough. this will be done in `Self::push_back`
 
         self.line_capacity = line_capacity;
     }
@@ -658,8 +660,8 @@ impl RingBuffer {
         let mut reallocated = false;
         let mut rebuild_index_buffer = false;
 
-        // check if the index buffer has correct capacity. if not, remove the current
-        // index buffer. we'll allocate it later.
+        // check if the index buffer has correct capacity. if not, remove the
+        // current index buffer. we'll allocate it later.
         let required_index_buffer_size = u64::try_from(
             size_of::<IndexBufferHeader>() + size_of::<IndexBufferEntry>() * self.line_capacity,
         )
@@ -680,8 +682,8 @@ impl RingBuffer {
             rebuild_index_buffer = true;
         }
 
-        // check if the index buffer allocator has correct capacity. if we're already
-        // rebuilding we need to reset it too.
+        // check if the index buffer allocator has correct capacity. if we're
+        // already rebuilding we need to reset it too.
         if rebuild_index_buffer
             || self.index_buffer_allocator.capacity() < u64::try_from(self.line_capacity).unwrap()
         {
@@ -716,8 +718,8 @@ impl RingBuffer {
         let required_data_buffer_size = lines.iter().map(|line| line.bytes_len()).sum::<u64>()
             + self.data_buffer_allocator.len();
 
-        // this is the estimated total buffer capacity, if the buffer was filled to line
-        // capacity with a line size from the first line
+        // this is the estimated total buffer capacity, if the buffer was filled
+        // to line capacity with a line size from the first line
         let estimated_required_data_buffer_size =
             lines.first().unwrap().bytes_len() * u64::try_from(self.line_capacity).unwrap();
 
@@ -768,7 +770,8 @@ impl RingBuffer {
             }
 
             // fix index
-            // the new allocations should now be contiguous and in the same order as before
+            // the new allocations should now be contiguous and in the same
+            // order as before
             let mut cursor = 0;
             assert_eq!(new_allocator.allocated().start(), 0);
             for line in &mut self.index {
@@ -788,8 +791,8 @@ impl RingBuffer {
             *data_buffer = new_buffer;
         }
 
-        // if we need to rebuild the index buffer we will need to add all existing index
-        // entries to the allocator now
+        // if we need to rebuild the index buffer we will need to add all
+        // existing index entries to the allocator now
         if rebuild_index_buffer {
             self.index_buffer_allocator.clear();
 
@@ -811,8 +814,8 @@ impl RingBuffer {
             start..end
         }
 
-        // add new lines to index. this allocates space for them in the index and data
-        // buffers
+        // add new lines to index. this allocates space for them in the index
+        // and data buffers
         for line in lines {
             let index_buffer_position = self
                 .index_buffer_allocator
@@ -849,7 +852,8 @@ impl RingBuffer {
             }
 
             if !rebuild_index_buffer {
-                // we have an index buffer that we can immediately write the new entries to
+                // we have an index buffer that we can immediately write the new
+                // entries to
                 let index_buffer = self.index_buffer.as_ref().unwrap();
 
                 staging.write_buffer_from_slice(
@@ -875,8 +879,9 @@ impl RingBuffer {
         };
 
         if rebuild_index_buffer {
-            // we need to ship the whole index buffer. instead of copying to a possibly
-            // existing one through staging we might as well create a new one.
+            // we need to ship the whole index buffer. instead of copying to a
+            // possibly existing one through staging we might as
+            // well create a new one.
 
             let capacity = u64::try_from(size_of::<IndexBufferHeader>()).unwrap()
                 + u64::try_from(size_of::<IndexBufferEntry>()).unwrap()
@@ -891,7 +896,9 @@ impl RingBuffer {
             });
 
             {
-                let mut view_mut = index_buffer.get_mapped_range_mut(..);
+                let mut view_mut = index_buffer
+                    .get_mapped_range_mut(..)
+                    .expect("could not get mapped range");
 
                 view_mut
                     .slice(..size_of::<IndexBufferHeader>())

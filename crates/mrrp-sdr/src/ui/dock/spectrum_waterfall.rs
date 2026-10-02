@@ -55,7 +55,7 @@ impl<'a> SpectrumWaterfallDockView<'a> {
             .resizable(false)
             .default_size(0.0)
             .size_range(0.0..=f32::INFINITY)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add(
                     Slider::new(&mut self.state.shared.max_db, 0.0..=100.0)
                         .vertical()
@@ -75,7 +75,7 @@ impl<'a> SpectrumWaterfallDockView<'a> {
 
         egui::CentralPanel::default()
             .frame(Frame::NONE)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 match (&mut self.state.spectrum, &mut self.state.waterfall) {
                     (None, None) => unreachable!(),
                     (None, Some(waterfall)) => {
@@ -89,13 +89,13 @@ impl<'a> SpectrumWaterfallDockView<'a> {
                             .frame(Frame::NONE)
                             .default_size(0.2 * height)
                             .resizable(true)
-                            .show_inside(ui, |ui| {
+                            .show(ui, |ui| {
                                 spectrum.show(ui, &self.state.shared);
                             });
 
                         egui::CentralPanel::default()
                             .frame(Frame::NONE)
-                            .show_inside(ui, |ui| {
+                            .show(ui, |ui| {
                                 waterfall.show(ui, &self.state.shared);
                             });
                     }

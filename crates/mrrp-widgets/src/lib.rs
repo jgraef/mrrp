@@ -1,3 +1,16 @@
+// Warning about trait solver reaching recursion limit which will be a hard
+// error in the future. Points to [this][1] issue. This only seems to affect
+// types that contain deeply nested types from wgpu. [The wgpu team is already
+// working on it][2], but it seems to not be published yet.
+//
+// Applying the suggested fix didn't work for us as the recursion limit is
+// already reached within wgpu. So we'll just wait for wgpu to ship the fix.
+// Since it's still only a warning, we can ignore it.
+//
+// [1]: https://github.com/rust-lang/rust/issues/159228
+// [2]: https://github.com/gfx-rs/wgpu/pull/9953
+#![allow(recursion_depth_exceeding_limit)]
+
 pub mod colormap;
 pub mod frequency_dial;
 pub mod spectrum;
@@ -20,8 +33,8 @@ pub fn initialize_wgpu_rendering(ctx: &egui::Context, render_state: &RenderState
 
     let callback_resources = &mut render_state.renderer.write().callback_resources;
 
-    // eframe doesn't give us some info we need in the paint callback, so we need to
-    // store it in the callback resources.
+    // eframe doesn't give us some info we need in the paint callback, so we
+    // need to store it in the callback resources.
     callback_resources.insert(widget_render_state.clone());
 
     // we also sometimes want access to the device and queue where we only have

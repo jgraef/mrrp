@@ -69,8 +69,8 @@ async fn main() -> Result<(), Error> {
 
     // set satkit data directory
     //
-    // this is where satkits stores the data necessary for orbit projections. this
-    // doesn't contain the satellite TLEs.
+    // this is where satkits stores the data necessary for orbit projections.
+    // this doesn't contain the satellite TLEs.
     let satkit_data_dir = data_dir.join("satkit_data");
     std::fs::create_dir_all(&satkit_data_dir)?;
     satkit::utils::set_datadir(&satkit_data_dir)?;

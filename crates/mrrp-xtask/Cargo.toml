@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
-colorgrad = { version = "0.8.0", features = ["preset"] }
+colorgrad = { workspace = true, features = ["preset"] }
 dotenvy.workspace = true
 mrrp-widgets = { workspace = true, features = ["colorgrad", "serde"] }
 serde.workspace = true

@@ -3,5 +3,7 @@
 pub mod beast;
 pub mod decode;
 pub mod demod;
+#[cfg(feature = "rtl_adsb_command")]
+pub mod rtl_adsb;
 pub mod sbs;
 pub mod types;

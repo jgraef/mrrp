@@ -13,9 +13,9 @@ derive_more = { workspace = true, features = ["display"] }
 directories = "6.0.0"
 dotenvy.workspace = true
 humantime = "2.3.0"
-numeris = { version = "0.5.11", features = ["serde"] }
+numeris = { version = "0.6.0", features = ["serde"] }
 reqwest = { version = "0.13.3", features = ["json"] }
-satkit = { version = "0.18.0", features = ["chrono"] }
+satkit = { version = "0.24.1", features = ["chrono"] }
 serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true

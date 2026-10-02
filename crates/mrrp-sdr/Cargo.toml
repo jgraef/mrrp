@@ -10,16 +10,15 @@ anyhow.workspace = true
 bytemuck.workspace = true
 chrono = { workspace = true, features = ["serde"] }
 clap.workspace = true
-colorgrad = { version = "0.8.0", features = ["preset"] }
+colorgrad = { workspace = true, features = ["preset"] }
 const_format = "0.2.36"
 derive_more = { workspace = true, features = ["debug"] }
 directories = "6.0.0"
 dotenvy.workspace = true
-eframe = { version = "0.34.2", features = ["persistence"] }
+eframe = { version = "0.36.2", features = ["persistence"] }
 egui = { workspace = true, features = ["default"] }
-egui-phosphor = "0.12.0"
-egui_dock = { version = "0.19.1", features = ["serde"] }
-egui_extras = { version = "0.34.2", features = ["all_loaders"] }
+egui-phosphor = "0.14.0"
+egui_dock = { version = "0.21.1", features = ["serde"] }
 futures-util.workspace = true
 indexmap = { version = "2.14.0", features = ["serde"] }
 mrrp-core.workspace = true
@@ -41,11 +40,10 @@ tokio = { workspace = true, features = [
     "sync",
     "time",
 ] }
-tokio-util = { workspace = true, features = ["rt"] }
 toml = "1.1.2"
 tracing.workspace = true
 tracing-subscriber.workspace = true
-wgpu = { version = "29.0.3", features = ["serde"] }
+wgpu = { version = "30.0.1", features = ["serde"] }
 mrrp-util.workspace = true
 
 [build-dependencies]

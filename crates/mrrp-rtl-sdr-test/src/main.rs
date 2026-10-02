@@ -1,5 +1,3 @@
-#![feature(vec_deque_truncate_front)]
-
 pub mod gpio;
 pub mod open;
 pub mod regdump;

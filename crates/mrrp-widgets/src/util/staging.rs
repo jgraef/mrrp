@@ -2,6 +2,7 @@
 
 use std::{
     borrow::Cow,
+    num::NonZeroU64,
     ops::Deref,
     sync::Arc,
 };
@@ -195,7 +196,8 @@ impl StagingTransaction {
             InflightChunks::new(self.pool.clone(), std::mem::take(&mut self.active_chunks));
 
         command_encoder.on_submitted_work_done(move || {
-            // the command encoder got submitted and is done, we can recall the chunks
+            // the command encoder got submitted and is done, we can recall the
+            // chunks
             inflight_chunks.recall();
         });
     }
@@ -237,7 +239,9 @@ impl StagingTransaction {
 
         self.allocate(device, size, alignment, |staging_buffer_slice| {
             with_buffer_slice(staging_buffer_slice);
-            staging_buffer_slice.get_mapped_range_mut()
+            staging_buffer_slice
+                .get_mapped_range_mut()
+                .expect("could not get mapped range")
         })
     }
 
@@ -252,13 +256,15 @@ impl StagingTransaction {
         let size = destination.size();
 
         assert!(
-            size.get().is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT),
+            size.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT),
             "allocation size {size} must be a multiple of `COPY_BUFFER_ALIGNMENT`"
         );
         assert!(
             offset.is_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT),
             "WriteStaging offset {offset} must be a multiple of `COPY_BUFFER_ALIGNMENT`"
         );
+        let size = NonZeroU64::new(size)
+            .unwrap_or_else(|| panic!("allocation size {size} must greater than 1"));
 
         self.view_mut(
             size,
@@ -283,7 +289,7 @@ impl StagingTransaction {
         device: &wgpu::Device,
         command_encoder: &mut wgpu::CommandEncoder,
     ) {
-        assert_eq!(destination.size().get(), data.len() as wgpu::BufferAddress);
+        assert_eq!(destination.size(), data.len() as wgpu::BufferAddress);
         let mut view = self.write_buffer(destination, device, command_encoder);
         view.copy_from_slice(data);
     }
@@ -315,8 +321,9 @@ mod inflight {
     impl Drop for InflightChunk {
         fn drop(&mut self) {
             if let Some((pool, chunk)) = self.inner.take() {
-                // this chunk got lost somewhere (map_sync dropped it). we'll drop it because we
-                // don't know its state (whether it's mapped or not). but we want to take it
+                // this chunk got lost somewhere (map_sync dropped it). we'll
+                // drop it because we don't know its state
+                // (whether it's mapped or not). but we want to take it
                 // into account
                 tracing::warn!(?chunk, "inflight chunk dropped");
                 let mut state = pool.inner.state.write();
@@ -329,8 +336,8 @@ mod inflight {
         type Target = Chunk;
 
         fn deref(&self) -> &Self::Target {
-            // this is always okay, because we only take out the chunk when we take
-            // ownership of this.
+            // this is always okay, because we only take out the chunk when we
+            // take ownership of this.
             &self.inner.as_ref().unwrap().1
         }
     }
@@ -362,8 +369,8 @@ mod inflight {
 
     impl InflightChunks {
         pub fn recall(mut self) {
-            // we could just drop it, since the drop impl will call the same method, but
-            // this is more explicit.
+            // we could just drop it, since the drop impl will call the same
+            // method, but this is more explicit.
             self.recall_impl();
         }
 
@@ -378,11 +385,12 @@ mod inflight {
                         tracing::error!("{error}");
                     }
                     else {
-                        // take out the chunk from the `InflightChunk`, so it's Drop doesn't do
-                        // anything
+                        // take out the chunk from the `InflightChunk`, so it's
+                        // Drop doesn't do anything
                         let (pool, mut chunk) = chunk.into_inner();
 
-                        // well, this includes alignment, but it's only used for debug info :shrug:
+                        // well, this includes alignment, but it's only used for
+                        // debug info :shrug:
                         let allocated = chunk.offset;
 
                         chunk.reset();
@@ -400,8 +408,8 @@ mod inflight {
 
     impl Drop for InflightChunks {
         fn drop(&mut self) {
-            // this is to make sure active buffers are recalled even if the command encoder
-            // is dropped and never submitted
+            // this is to make sure active buffers are recalled even if the
+            // command encoder is dropped and never submitted
             self.recall_impl();
         }
     }

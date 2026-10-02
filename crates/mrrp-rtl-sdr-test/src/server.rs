@@ -745,7 +745,7 @@ mod ring_buffer {
                     .saturating_sub(state_guard.buffer.capacity());
                 let keep = state_guard.buffer.capacity().saturating_sub(truncate);
                 debug_assert!(skip == 0 || keep != 0);
-                state_guard.buffer.truncate_front(keep);
+                state_guard.buffer.retain_back(keep);
 
                 // write data to buffer
                 state_guard.buffer.extend(data.iter().cloned());

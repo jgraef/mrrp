@@ -13,6 +13,5 @@ futures-util = { workspace = true, default-features = false, features = [
 pin-project-lite.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "io-util", "sync"] }
-tokio-stream.workspace = true
 tokio-util = { workspace = true, features = ["codec"] }
 tracing.workspace = true

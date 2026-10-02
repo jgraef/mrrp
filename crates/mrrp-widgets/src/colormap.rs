@@ -78,8 +78,8 @@ impl ColorMap {
     }
 
     pub(crate) fn buffer(&self, device: &wgpu::Device) -> wgpu::Buffer {
-        // note: read-upgradable locking this won't help since only one thread can do
-        // this at once
+        // note: read-upgradable locking this won't help since only one thread
+        // can do this at once
 
         // optimitically we only need to read
         let guard = self.inner.state.read();
@@ -94,8 +94,8 @@ impl ColorMap {
         drop(guard);
         let mut guard = self.inner.state.write();
 
-        // just in case someone uploaded the data inbetween us switching from ro to rw
-        // lock
+        // just in case someone uploaded the data inbetween us switching from ro
+        // to rw lock
         if let Some(buffer) = &guard.buffer {
             return buffer.clone();
         }
@@ -119,7 +119,9 @@ impl ColorMap {
         });
 
         {
-            let mut view_mut = buffer.get_mapped_range_mut(..);
+            let mut view_mut = buffer
+                .get_mapped_range_mut(..)
+                .expect("could not get mapped range");
             view_mut.copy_from_slice(lut_bytes);
         }
 
@@ -143,8 +145,8 @@ impl Default for ColorMap {
     /// forget to enable the `colorgrad` feature). This is just so we can
     /// provide any default.
     fn default() -> Self {
-        // we want to always return clormaps that share the same internal state so that
-        // they all share the same gpu buffers
+        // we want to always return clormaps that share the same internal state
+        // so that they all share the same gpu buffers
 
         static DEFAULT: OnceLock<ColorMap> = OnceLock::new();
         DEFAULT.get_or_init(|| Self::new(DEFAULT_LUT)).clone()

@@ -382,8 +382,8 @@ impl State {
         config: &ConfigData,
         color_map: wgpu::Buffer,
     ) {
-        // if we don't have any data yet, we can't estimate buffer requirements and thus
-        // not get a staging transaction. so better wait
+        // if we don't have any data yet, we can't estimate buffer requirements
+        // and thus not get a staging transaction. so better wait
         let Some(frame) = &self.queued_data
         else {
             return;
@@ -424,8 +424,8 @@ impl State {
                 usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::UNIFORM,
             });
 
-            // note: no need to recreate a bind group here, since we can't have one already
-            // anyway
+            // note: no need to recreate a bind group here, since we can't have
+            // one already anyway
             assert!(self.bind_group.is_none());
 
             self.config = Some(*config);
@@ -458,8 +458,8 @@ impl State {
         }
 
         if self.queued_dirty {
-            // if the the host-buffer is now bigger than the gpu buffer, we need to
-            // reallocate
+            // if the the host-buffer is now bigger than the gpu buffer, we need
+            // to reallocate
             if self
                 .data_buffer
                 .as_ref()
@@ -509,7 +509,9 @@ impl State {
                     mapped_at_creation: true,
                 });
 
-                let mut view_mut = data_buffer.get_mapped_range_mut(..);
+                let mut view_mut = data_buffer
+                    .get_mapped_range_mut(..)
+                    .expect("could not get mapped range");
                 write_to_buffer(view_mut);
 
                 data_buffer.unmap();
