@@ -6,7 +6,7 @@ use serde::{
 
 use crate::{
     geo::Geodetic,
-    track::TrackerOptions,
+    tracker::TrackerOptions,
 };
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

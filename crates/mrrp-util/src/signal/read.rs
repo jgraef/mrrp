@@ -333,7 +333,7 @@ pub trait AsyncReadSamplesExt: AsyncReadSamples {
     }
 
     #[inline]
-    fn add<R, T>(self, other: R) -> Summed<Self, R>
+    fn add<R>(self, other: R) -> Summed<Self, R>
     where
         Self: Sized,
         R: AsyncReadSamples + Sized,
@@ -342,7 +342,7 @@ pub trait AsyncReadSamplesExt: AsyncReadSamples {
     }
 
     #[inline]
-    fn mul<R, T>(self, other: R) -> Multiplied<Self, R>
+    fn mul<R>(self, other: R) -> Multiplied<Self, R>
     where
         Self: Sized,
         R: AsyncReadSamples + Sized,
@@ -388,8 +388,9 @@ where
                 else {
                     let [sample] = buffer;
                     let sample = unsafe {
-                        // SAFETY: the buffer has been filled. since our buffer is only 1 sample
-                        // wide, this has to have been filled.
+                        // SAFETY: the buffer has been filled. since our buffer
+                        // is only 1 sample wide, this
+                        // has to have been filled.
                         sample.assume_init()
                     };
                     Poll::Ready(Ok(sample))

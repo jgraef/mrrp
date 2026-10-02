@@ -260,15 +260,15 @@ impl DtmfTone {
             column: ComplexSinusoid::new(column_frequency, sample_rate),
         }
     }
+
+    pub fn set_sample_rate(&mut self, sample_rate: f32) {
+        self.row.set_sample_rate(sample_rate);
+        self.column.set_sample_rate(sample_rate);
+    }
 }
 
 impl SignalGenerator for DtmfTone {
     type Sample = Complex<f32>;
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        self.row.set_sample_rate(sample_rate);
-        self.column.set_sample_rate(sample_rate);
-    }
 
     fn next(&mut self) -> Self::Sample {
         self.row.next() + self.column.next()
@@ -320,11 +320,12 @@ mod tests {
 
     #[tokio::test]
     async fn bug_dtmf_not_playing_sounds() {
-        // this bug manifested as it not playing any sounds when unbuffered, or playing
-        // only a short sound when buffered. the reason for the bug was a
-        // missing break in the read loop when a successful read was done. it would then
-        // proceed to call poll_read again, which would return 0 because the buffer was
-        // already full. it would do this multiple times, cycling through the tones,
+        // this bug manifested as it not playing any sounds when unbuffered, or
+        // playing only a short sound when buffered. the reason for the
+        // bug was a missing break in the read loop when a successful
+        // read was done. it would then proceed to call poll_read again,
+        // which would return 0 because the buffer was already full. it
+        // would do this multiple times, cycling through the tones,
         // until no tone was left, and return.
 
         let sample_rate = 44100.0;

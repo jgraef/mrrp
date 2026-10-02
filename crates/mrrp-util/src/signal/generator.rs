@@ -22,7 +22,6 @@ use mrrp_core::{
 pub trait SignalGenerator: GetSampleRate {
     type Sample;
 
-    fn set_sample_rate(&mut self, sample_rate: f32);
     fn next(&mut self) -> Self::Sample;
 
     #[inline]
@@ -52,10 +51,6 @@ where
     G: SignalGenerator + GetSampleRate,
 {
     type Sample = G::Sample;
-
-    fn set_sample_rate(&mut self, sample_rate: f32) {
-        (*self).set_sample_rate(sample_rate);
-    }
 
     fn next(&mut self) -> Self::Sample {
         (*self).next()

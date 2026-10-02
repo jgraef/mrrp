@@ -303,10 +303,6 @@ pub struct Satellite {
     satnogs_tle: Option<satnogs::Tle>,
     satnogs_transmitters: Vec<satnogs::Transmitter>,
 
-    // note: this is in a Mutex, because satkit caches some data in it.
-    //
-    // todo: remove mutex. let caller pass a &mut to a workspace struct to get_location in which we
-    // store that instead. we will likely have to implement our own SGP4Source
     satkit_tle: Option<satkit::TLE>,
 }
 
@@ -348,6 +344,10 @@ impl Satellite {
 
     pub fn norad_cat_id(&self) -> Option<NoradCatId> {
         self.satnogs_satellite.norad_cat_id
+    }
+
+    pub fn tle(&self) -> Option<&satkit::TLE> {
+        self.satkit_tle.as_ref()
     }
 
     pub fn predict_state_into(

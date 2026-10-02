@@ -13,6 +13,7 @@ members = [
     "crates/mrrp-rtl-sdr-test",
     "crates/mrrp-rtl-tcp",
     "crates/mrrp-sat",
+    "crates/mrrp-sat-cli",
     "crates/mrrp-sdr",
     "crates/mrrp-sstv",
     "crates/mrrp-util",
@@ -58,9 +59,6 @@ mrrp-rtl-sdr = { path = "crates/mrrp-rtl-sdr", default-features = false }
 mrrp-util = { path = "crates/mrrp-util", default-features = false }
 mrrp-widgets = { path = "crates/mrrp-widgets", default-features = false }
 
-# todo: remote and use rtl-sdr-rs instead
-rtlsdr-async = { version = "0.1.0", git = "https://github.com/jgraef/rtlsdr-async.git" }
-
 anyhow = "1.0.102"
 bytemuck = { version = "1.25.0", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
@@ -85,5 +83,6 @@ serde_with = "3.21.0"
 thiserror = { version = "2.0.18", default-features = false }
 tokio = { version = "1.52.3", default-features = false }
 tokio-util = { version = "0.7.18", default-features = false }
+toml = "1.1.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }

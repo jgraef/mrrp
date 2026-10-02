@@ -8,11 +8,7 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 chrono = { workspace = true, features = ["serde"] }
-clap.workspace = true
-derive_more = { workspace = true, features = ["display"] }
-directories = "6.0.0"
-dotenvy.workspace = true
-humantime = "2.3.0"
+derive_more = { workspace = true, features = ["display", "from_str"] }
 numeris = { version = "0.6.0", features = ["serde"] }
 reqwest = { version = "0.13.3", features = ["json"] }
 satkit = { version = "0.24.1", features = ["chrono"] }
@@ -20,8 +16,6 @@ serde.workspace = true
 serde_json.workspace = true
 serde_with.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
-toml = "1.1.2"
+tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
-tracing-subscriber.workspace = true
 url = { version = "2.5.8", features = ["serde"] }

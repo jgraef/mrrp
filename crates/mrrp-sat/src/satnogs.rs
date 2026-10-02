@@ -61,7 +61,8 @@ impl SatnogsApi {
         .await?)*/
 
         // for testing we'll use a local copy to not spam their API
-        let reader = BufReader::new(File::open(&format!("tmp/{}_pretty.json", endpoint)).unwrap());
+        let reader =
+            BufReader::new(File::open(&format!("tmp/satnogs/{}_pretty.json", endpoint)).unwrap());
         Ok(serde_json::from_reader(reader).unwrap())
     }
 
@@ -120,7 +121,17 @@ pub struct Satellite {
 }
 
 #[derive(
-    Clone, Debug, derive_more::Display, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+    Clone,
+    Debug,
+    derive_more::Display,
+    derive_more::FromStr,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serialize,
+    Deserialize,
 )]
 #[serde(transparent)]
 pub struct SatelliteId(pub String);
