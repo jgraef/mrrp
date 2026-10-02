@@ -1,25 +1,22 @@
 [package]
-name = "mrrp-sat-cli"
+name = "mrrp-cli"
 version = "0.1.0"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
-[[bin]]
-name = "mrrp-sat"
-path = "src/main.rs"
-
 [dependencies]
 anyhow.workspace = true
-chrono = { workspace = true, features = ["serde"] }
+chrono.workspace = true
 clap.workspace = true
 directories = "6.0.0"
 dotenvy.workspace = true
 humantime = "2.3.0"
 mrrp-audio = { workspace = true, default-features = false, features = ["wav"] }
 mrrp-core.workspace = true
-mrrp-sat = { version = "0.1.0", path = "../mrrp-sat" }
+mrrp-sat.workspace = true
 mrrp-util.workspace = true
+serde = { workspace = true, features = ["derive"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 toml.workspace = true
 tracing.workspace = true

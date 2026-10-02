@@ -1,4 +1,6 @@
-#![allow(dead_code)]
+#![allow(dead_code)] // todo: remove
+
+mod config;
 
 use std::{
     collections::{
@@ -25,7 +27,6 @@ use clap::{
     Parser,
     Subcommand,
 };
-use directories::ProjectDirs;
 use mrrp_audio::{
     WavSource,
     write_stream_to_wav,
@@ -38,7 +39,6 @@ use mrrp_core::{
     },
 };
 use mrrp_sat::{
-    config::Config,
     geo::Geodetic,
     satellite::{
         OrbitPropagationCache,
@@ -58,35 +58,12 @@ use mrrp_util::signal::{
     SignalGenerator,
 };
 
-#[tokio::main]
-async fn main() -> Result<(), Error> {
-    let _ = dotenvy::dotenv();
+pub use self::config::Config;
+use crate::files::Files;
 
-    tracing_subscriber::fmt::init();
-
-    let args = Args::parse();
-
-    // determine our data directory
-    let dirs = ProjectDirs::from("", "mrrp", "mrrp-sat")
-        .ok_or_else(|| anyhow!("Failed to determine project directories"))?;
-    let data_dir = dirs.data_dir();
-
-    // load config
-    let config_dir = dirs.config_dir();
-    if !config_dir.exists() {
-        std::fs::create_dir_all(&config_dir)?;
-    }
-    let config_path = config_dir.join("config.toml");
-    let config = if !config_path.exists() {
-        tracing::info!(?config_path, "Config not found. Creating default config.");
-        let config = Config::default();
-        std::fs::write(&config_path, &toml::to_string_pretty(&config)?)?;
-        config
-    }
-    else {
-        tracing::info!(?config_path, "Reading config");
-        toml::from_slice(&std::fs::read(&config_path)?)?
-    };
+pub async fn run(args: Args, files: Files) -> Result<(), Error> {
+    let config = files.config()?.sat;
+    let data_dir = files.data_dir();
 
     // open satellite data
     let mut satellites = SatelliteDatabase::open(data_dir.join("satellites.json"))?;
@@ -193,7 +170,7 @@ async fn main() -> Result<(), Error> {
 }
 
 #[derive(Debug, Parser)]
-struct Args {
+pub struct Args {
     #[clap(subcommand)]
     command: Command,
 

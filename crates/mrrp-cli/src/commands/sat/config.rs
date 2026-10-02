@@ -1,12 +1,11 @@
 use chrono::TimeDelta;
+use mrrp_sat::{
+    geo::Geodetic,
+    tracker::TrackerOptions,
+};
 use serde::{
     Deserialize,
     Serialize,
-};
-
-use crate::{
-    geo::Geodetic,
-    tracker::TrackerOptions,
 };
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
