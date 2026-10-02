@@ -10,7 +10,6 @@ members = [
     "crates/mrrp-hamlib",
     "crates/mrrp-modem",
     "crates/mrrp-rtl-sdr",
-    "crates/mrrp-rtl-sdr-test",
     "crates/mrrp-rtl-tcp",
     "crates/mrrp-sat",
     "crates/mrrp-sdr",
@@ -56,7 +55,8 @@ mrrp-core = { path = "crates/mrrp-core", default-features = false }
 mrrp-filter = { path = "crates/mrrp-filter", default-features = false }
 mrrp-modem = { path = "crates/mrrp-modem", default-features = false }
 mrrp-rtl-sdr = { path = "crates/mrrp-rtl-sdr", default-features = false }
-mrrp-sat = { version = "0.1.0", path = "crates/mrrp-sat", default-features = false }
+mrrp-rtl-tcp = { path = "crates/mrrp-rtl-tcp", default-features = false }
+mrrp-sat = { path = "crates/mrrp-sat", default-features = false }
 mrrp-util = { path = "crates/mrrp-util", default-features = false }
 mrrp-widgets = { path = "crates/mrrp-widgets", default-features = false }
 

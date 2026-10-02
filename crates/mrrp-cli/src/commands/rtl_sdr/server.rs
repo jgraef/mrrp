@@ -29,7 +29,7 @@ use tokio::{
     },
 };
 
-use crate::server::ring_buffer::Closed;
+use crate::commands::rtl_sdr::server::ring_buffer::Closed;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ServerConfig {

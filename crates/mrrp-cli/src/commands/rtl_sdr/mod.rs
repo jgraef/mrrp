@@ -28,7 +28,6 @@ use clap::{
     Parser,
     Subcommand,
 };
-use dotenvy::dotenv;
 use futures_util::TryFutureExt;
 use mrrp_rtl_sdr::rtl2832u::register::{
     self as reg,
@@ -40,7 +39,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{
+use crate::commands::rtl_sdr::{
     gpio::{
         GpioCommand,
         gpio_command,
@@ -57,13 +56,7 @@ use crate::{
     },
 };
 
-#[tokio::main]
-async fn main() -> Result<(), Error> {
-    let _ = dotenv();
-    tracing_subscriber::fmt::init();
-
-    let args = Args::parse();
-
+pub async fn run(args: Args) -> Result<(), Error> {
     match args.command {
         Command::List => {
             for device_info in mrrp_rtl_sdr::enumerate_devices().await? {
@@ -338,8 +331,9 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
+/// RTL-SDR specific commands
 #[derive(Debug, Parser)]
-struct Args {
+pub struct Args {
     #[clap(subcommand)]
     command: Command,
 }

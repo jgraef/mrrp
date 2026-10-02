@@ -20,6 +20,7 @@ async fn main() -> Result<(), Error> {
     let args = Args::parse();
 
     match args.command {
+        Command::RtlSdr(args) => commands::rtl_sdr::run(args).await?,
         Command::Sat(args) => commands::sat::run(args, files).await?,
     }
 
@@ -34,5 +35,6 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    RtlSdr(commands::rtl_sdr::Args),
     Sat(commands::sat::Args),
 }

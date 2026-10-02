@@ -119,6 +119,8 @@ pub async fn run(args: Args, files: Files) -> Result<(), Error> {
             tracker.update(&mut satellites);
             tracker.flush_cache_to_file(&satellites)?;
 
+            todo!();
+
             /*let mut update_interval = tokio::time::interval(update_interval);
 
             abort_on_ctrl_c(async move {
@@ -169,6 +171,7 @@ pub async fn run(args: Args, files: Files) -> Result<(), Error> {
     Ok(())
 }
 
+/// Satellite tracking
 #[derive(Debug, Parser)]
 pub struct Args {
     #[clap(subcommand)]
@@ -180,7 +183,9 @@ pub struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Update TLEs
     Update,
+    /// List satellites
     List {
         #[clap(flatten)]
         band: BandArgs,
@@ -188,6 +193,7 @@ enum Command {
         #[clap(short, long)]
         mode: Vec<String>,
     },
+    /// Track satellites
     Track {
         #[clap(flatten)]
         band: BandArgs,
@@ -198,22 +204,41 @@ enum Command {
         #[clap(short, long, default_value = "2s", value_parser = humantime::parse_duration)]
         update_interval: Duration,
     },
+    /// Correct doppler shift
     CorrectDoppler {
+        /// Satellite ID
+        ///
+        /// # TODO
+        ///
+        /// There's currently no good way to find this satellite ID. It's the ID
+        /// from the SatNOGS API.
         #[clap(short, long)]
         sat_id: SatelliteId,
 
+        /// The unshifted frequency of the signal
         #[clap(short = 'f', long)]
         nominal_frequency: f32,
 
+        /// Start time of the capture.
+        ///
+        /// If omitted the file creation time will be used.
         #[clap(short = 't', long)]
         start_time: Option<DateTime<Utc>>,
 
+        /// How often the orbit propagation should run.
+        ///
+        /// Orbit propagation is computationally expensive, but doesn't have to
+        /// predict the exact satellite state for every sample of the input
+        /// file. It's usually enough to calculate the exact state every second
+        /// or so.
         #[clap(short, long, default_value = "1s", value_parser = humantime::parse_duration)]
         predict_interval: Duration,
 
+        /// Output file with doppler-corrected signal
         #[clap(short, long)]
         output: PathBuf,
 
+        /// Input file that is doppler shifted
         input: PathBuf,
     },
 }

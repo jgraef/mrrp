@@ -1,7 +1,7 @@
 use anyhow::Error;
 use clap::Subcommand;
 
-use crate::open::DeviceArgs;
+use crate::commands::rtl_sdr::open::DeviceArgs;
 
 #[derive(Debug, Subcommand)]
 pub enum GpioCommand {

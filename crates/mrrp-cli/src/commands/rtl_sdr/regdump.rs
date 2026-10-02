@@ -23,7 +23,7 @@ use mrrp_rtl_sdr::{
     },
 };
 
-use crate::open::DeviceArgs;
+use crate::commands::rtl_sdr::open::DeviceArgs;
 
 fn reg_dump_file_name_for_block(base: impl AsRef<Path>, block: reg::Block) -> PathBuf {
     let file_name = match block {
