@@ -132,8 +132,8 @@ impl AsyncReadSamples for RtlSdrSource {
                 .map_err(Into::into)
         }
         else {
-            // todo: we can remove this when if we split the sample stream from the control
-            // interface
+            // todo: we can remove this when if we split the sample stream from
+            // the control interface
             panic!("Sample stream not started");
         }
     }

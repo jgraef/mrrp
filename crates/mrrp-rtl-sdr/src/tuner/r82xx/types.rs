@@ -731,11 +731,12 @@ impl PllDivider {
         //
         // Nint = 4*Ni2c+Si2c+13
         // Ndiv = (Nint + Nfra)*2
-        // Nfra = SDM_IN[16] * 2^-1 + SDM_IN[15] * 2^-2 + ... + SDM_IN[2]* 2 ^-15 +
-        // SDM_IN[1] * 2^-16
+        // Nfra = SDM_IN[16] * 2^-1 + SDM_IN[15] * 2^-2 + ... + SDM_IN[2]* 2
+        // ^-15 + SDM_IN[1] * 2^-16
         //
-        // the librtlsdr code for calculating sdm is pretty whack. you just need to take
-        // the fractional bits and multiply by 2**16 to get them to places [15:0].
+        // the librtlsdr code for calculating sdm is pretty whack. you just need
+        // to take the fractional bits and multiply by 2**16 to get them
+        // to places [15:0].
         //
         // Michele Bavaro does this [here](https://michelebavaro.blogspot.com/2014/05/gnss-carrier-phase-rtlsdr-and.html)
         // and we use that for our test.
@@ -827,11 +828,11 @@ mod tests {
 
     #[test]
     pub fn test_pll_divider() {
-        // r82xx_set_ppl: freq=30425000, vco_freq=1947200000, nint=33, vco_fra=1, ni=05,
-        // si=00, n_sdm=4000
+        // r82xx_set_ppl: freq=30425000, vco_freq=1947200000, nint=33,
+        // vco_fra=1, ni=05, si=00, n_sdm=4000
         //
-        // r82xx_set_ppl: freq=101625000, vco_freq=3252000000, nint=56, vco_fra=1,
-        // ni=0a, si=03, n_sdm=8000
+        // r82xx_set_ppl: freq=101625000, vco_freq=3252000000, nint=56,
+        // vco_fra=1, ni=0a, si=03, n_sdm=8000
 
         /// librtlsdr's SDM calculation is wrong. we test against
         /// [Michele Bavaro's](https://michelebavaro.blogspot.com/2014/05/gnss-carrier-phase-rtlsdr-and.html)

@@ -190,12 +190,15 @@ impl Register {
     pub fn w_value(&self) -> u16 {
         match self {
             Register::Demod { page: _, address } => {
-                // This is not documented in the datasheet. It mentions under vendor commands
-                // that this should just be the "Reg's offset".
+                // This is not documented in the datasheet. It mentions under
+                // vendor commands that this should just be the
+                // "Reg's offset".
                 //
-                // I tried reading IIC_repeat, but got an "endpoint stalled" error.
+                // I tried reading IIC_repeat, but got an "endpoint stalled"
+                // error.
                 //
-                // `rtlsdr_demod_read_reg` in `librtlsdr` transforms this address as follows
+                // `rtlsdr_demod_read_reg` in `librtlsdr` transforms this
+                // address as follows
                 //
                 // also couldn't find anything about this in the linux drivers
                 //

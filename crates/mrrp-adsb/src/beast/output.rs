@@ -155,8 +155,8 @@ impl PacketDecode for OutputPacketType {
                 })
             }
             Self::Unknown(byte) => {
-                // todo: during development we want to know all packet types we receive.
-                // normally this should return None
+                // todo: during development we want to know all packet types we
+                // receive. normally this should return None
                 todo!("beast: unknown packet type: 0x{byte:02x}");
             }
         }
@@ -223,7 +223,8 @@ impl<R: AsyncRead> Stream for Reader<R> {
                 }
             }
             else {
-                // if there is no data in the receiver buffer, we need to receive some
+                // if there is no data in the receiver buffer, we need to
+                // receive some
                 this.receive_buffer.reset();
 
                 let mut read_buf = ReadBuf::new(&mut this.receive_buffer.buffer);
@@ -233,7 +234,8 @@ impl<R: AsyncRead> Stream for Reader<R> {
                     Poll::Ready(Ok(())) => {
                         let num_bytes_read = read_buf.filled().len();
 
-                        // if no data was received, the underlying reader reached EOF
+                        // if no data was received, the underlying reader
+                        // reached EOF
                         if num_bytes_read == 0 {
                             return Poll::Ready(None);
                         }
@@ -315,8 +317,9 @@ impl PacketDecoder {
                     // we already read the packet type
 
                     if self.read_incomplete_escape {
-                        // we read an escape before, but we don't know what follows yet.
-                        // note: this whole block only handles the case that we read an escape at
+                        // we read an escape before, but we don't know what
+                        // follows yet. note: this whole
+                        // block only handles the case that we read an escape at
                         // the end of the buffer earlier.
                         self.read_incomplete_escape = false;
 
@@ -343,7 +346,8 @@ impl PacketDecoder {
                                 byte = next_byte;
                             }
                             else {
-                                // we read an escape, but the buffer is drained, so we need to
+                                // we read an escape, but the buffer is drained,
+                                // so we need to
                                 // remember this
                                 self.read_incomplete_escape = true;
                                 break;
@@ -367,8 +371,8 @@ impl PacketDecoder {
                     }
                 }
                 else {
-                    // if we read an escape here, this is a double escape, meaning we're reading
-                    // garbage
+                    // if we read an escape here, this is a double escape,
+                    // meaning we're reading garbage
                     if byte == ESCAPE {
                         todo!("expected packet type, but read escape -> garbage");
                     }
@@ -378,14 +382,15 @@ impl PacketDecoder {
                 }
             }
             else if byte == ESCAPE {
-                // we didn't receive a packet escape yet, but the current byte is one.
+                // we didn't receive a packet escape yet, but the current byte
+                // is one.
                 self.leading_escape_read = true;
                 self.packet_type = None;
                 self.buffer_write_pos = 0;
             }
             else {
-                // we didn't receive a packet escape yet, and the current byte isn't one.
-                // this is a protocol error.
+                // we didn't receive a packet escape yet, and the current byte
+                // isn't one. this is a protocol error.
                 todo!("garbage");
                 // todo: we might want to return a specific (recoverable) error
             }

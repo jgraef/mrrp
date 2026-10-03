@@ -37,8 +37,8 @@ impl<'a> RadioDockView<'a> {
     pub fn show(self, ui: &mut egui::Ui) {
         match &mut self.state.inner {
             StateInner::Uninitialized => {
-                // newly created dock, or loaded from file. either way we need to spawn a task
-                // to enumerate devices
+                // newly created dock, or loaded from file. either way we need
+                // to spawn a task to enumerate devices
 
                 self.state.inner = StateInner::Enumerating {
                     task: BackgroundTask::spawn(async move {
@@ -57,8 +57,9 @@ impl<'a> RadioDockView<'a> {
                         // something went wrong. open an error dialog
                         ui.push_error(error);
 
-                        // we don't want to keep spinning (and opening error dialogs), so we
-                        // switch to the enumerated state with no devices available.
+                        // we don't want to keep spinning (and opening error
+                        // dialogs), so we switch to the
+                        // enumerated state with no devices available.
                         self.state.inner = StateInner::Enumerated {
                             devices: vec![],
                             selection: None,
@@ -129,8 +130,9 @@ impl<'a> RadioDockView<'a> {
                     }
                 }
 
-                // we can't move a `&mut` to `self.state.inner` and a `&_` to to devices into
-                // the closure passed to `horizontal`, so we only move the relevant bools.
+                // we can't move a `&mut` to `self.state.inner` and a `&_` to to
+                // devices into the closure passed to
+                // `horizontal`, so we only move the relevant bools.
                 let enable_connect = selection.is_some();
                 let (connect_clicked, cancel_clicked) = ui
                     .with_layout(egui::Layout::right_to_left(egui::Align::BOTTOM), |ui| {
@@ -198,8 +200,9 @@ impl<'a> RadioDockView<'a> {
                         // something went wrong. open an error dialog
                         ui.push_error(error);
 
-                        // we don't want to keep spinning (and opening error dialogs), so we
-                        // switch to the uninitialized state
+                        // we don't want to keep spinning (and opening error
+                        // dialogs), so we switch to the
+                        // uninitialized state
                         self.state.inner = StateInner::Uninitialized;
                     }
                     Some(Ok(device)) => {
@@ -232,7 +235,8 @@ impl<'a> RadioDockView<'a> {
                                 .insignificant_digits(3)
                                 .desired_width(ui.available_width())
                                 .style({
-                                    // todo: remove this. instead let the user just configure a font
+                                    // todo: remove this. instead let the user
+                                    // just configure a font
                                     // file - maybe through a
                                     // theme config
                                     let font_family = FontFamily::Name("dseg".into());

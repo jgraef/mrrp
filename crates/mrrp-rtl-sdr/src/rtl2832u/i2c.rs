@@ -224,10 +224,11 @@ impl Rtl2832u {
     pub async fn enable_i2c_repeater(&mut self) -> Result<I2cRepeaterGuard<'_>, Error> {
         // this prevents interference between the ADCs and I2C
         //
-        // we can't find where librtlsdr does this - they might just not do it. but we
-        // always had issues accessing the I2C bus until we tried this. The I2C repeater
-        // is supposed to be off for a reason, that is not well documented, but it might
-        // be that it interferes with the ADCs. When we don't do this, sometimes
+        // we can't find where librtlsdr does this - they might just not do it.
+        // but we always had issues accessing the I2C bus until we tried
+        // this. The I2C repeater is supposed to be off for a reason,
+        // that is not well documented, but it might be that it
+        // interferes with the ADCs. When we don't do this, sometimes
         // enabling the repeater fails. Other times a I2C write fails.
         let restore_adc = self.read_register::<DEMOD_CTL>().await?;
         self.write_register_update::<DEMOD_CTL>(|demod_ctl| {

@@ -153,8 +153,9 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.is_pending.is_pending() {
-            // the inner stream was pending and we set a flag indicating this. this flag
-            // will be reset by the waker passed to the poll method.
+            // the inner stream was pending and we set a flag indicating this.
+            // this flag will be reset by the waker passed to the
+            // poll method.
 
             // return silence
             Some(0.0)
@@ -172,15 +173,16 @@ where
             // poll read_sample future to get one sample
             match Pin::new(&mut self.read_samples.read_sample()).poll(&mut cx) {
                 Poll::Pending => {
-                    // stream is pending. remember this so we don't constantly poll the stream
+                    // stream is pending. remember this so we don't constantly
+                    // poll the stream
                     self.is_pending.set_pending();
 
                     // return silence
                     Some(0.0)
                 }
                 Poll::Ready(Err(EofError::Other(error))) => {
-                    // send error to any result receiver to inidicate that the stream finished with
-                    // an error
+                    // send error to any result receiver to inidicate that the
+                    // stream finished with an error
                     if let Some(result_sender) = self.result_sender.take() {
                         let _ = result_sender.send(Err(error));
                     }
@@ -191,8 +193,8 @@ where
                 Poll::Ready(Err(EofError::Eof { .. })) => {
                     // read_sample returned eof, so the stream finished.
 
-                    // send Ok(()) to any result receiver to indicate the stream finished without
-                    // errors
+                    // send Ok(()) to any result receiver to indicate the stream
+                    // finished without errors
                     if let Some(result_sender) = self.result_sender.take() {
                         let _ = result_sender.send(Ok(()));
                     }
@@ -243,8 +245,8 @@ where
         Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => Err(Error::Stream(error)),
         Err(_) => {
-            // todo: investigate why rodio seems to drop the source just before the stream
-            // is exhausted
+            // todo: investigate why rodio seems to drop the source just before
+            // the stream is exhausted
             Ok(())
             //tracing::warn!("rodio stream dropped");
             //Err(Error::Dropped)
@@ -253,8 +255,8 @@ where
 }
 
 fn global_output_stream() -> Result<&'static rodio::MixerDeviceSink, rodio::DeviceSinkError> {
-    // note: OnceLock or LazyLock don't work here (yet) because creation can fail
-    // and we can't clone the error.
+    // note: OnceLock or LazyLock don't work here (yet) because creation can
+    // fail and we can't clone the error.
 
     static OUTPUT_STREAM: Mutex<Option<&'static rodio::MixerDeviceSink>> = Mutex::new(None);
 

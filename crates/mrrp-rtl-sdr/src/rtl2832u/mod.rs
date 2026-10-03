@@ -400,9 +400,10 @@ impl Rtl2832u {
 
         // poweron demod
 
-        // I don't know what this does (see comment on DEMOD_CTL_1). It's 0x02 on
-        // powerup, and librtlsdr writes 0x22. I don't see why they would enable IrDA
-        // remote wakeup, so maybe it enables low current XTL mode?
+        // I don't know what this does (see comment on DEMOD_CTL_1). It's 0x02
+        // on powerup, and librtlsdr writes 0x22. I don't see why they
+        // would enable IrDA remote wakeup, so maybe it enables low
+        // current XTL mode?
         //
         // the linux driver clears bits 2 and 3 at startup, but doesn't use it
         // otherwise.
@@ -434,11 +435,11 @@ impl Rtl2832u {
         })
         .await?;
 
-        // librtlsdr mentions clearing DDC shift registers starting at 0x16, but these
-        // are not documented.
+        // librtlsdr mentions clearing DDC shift registers starting at 0x16, but
+        // these are not documented.
         //
-        // they already cleared 0x16, 0x17, and pfset_iffreq starts is at 0x19, 0x1a,
-        // 0x1b
+        // they already cleared 0x16, 0x17, and pfset_iffreq starts is at 0x19,
+        // 0x1a, 0x1b
 
         // clear ddc offset
         self.write_register_with::<reg::demod::UNK_DDC_OFFSET>(|ddc_offset| {
@@ -470,12 +471,12 @@ impl Rtl2832u {
 
         // disable DAGC, librtlsdr says this has no effect
         //
-        // this does "work". i think you have to enable UNK_DAGC.enable_dagc first.
-        // otherwise we got a device stalled error setting this.
+        // this does "work". i think you have to enable UNK_DAGC.enable_dagc
+        // first. otherwise we got a device stalled error setting this.
         //
         // it did finally got rid of the frequency shift ~~completely. only
-        // UNK_DAGC.enable_dagc only got rid of most of it, but about 500 Hz shift
-        // remained.~~ nvm, 500 Hz remain
+        // UNK_DAGC.enable_dagc only got rid of most of it, but about 500 Hz
+        // shift remained.~~ nvm, 500 Hz remain
         self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
             en_dagc.set_endagc(false);
         })
@@ -492,8 +493,8 @@ impl Rtl2832u {
 
         // disable PID (packet identifier) filter
         self.write_register_with::<reg::demod::PID_CTL>(|pid_ctl| {
-            // we think we need to turn off PID filter output and set the mode to accept
-            // rejected and error packets
+            // we think we need to turn off PID filter output and set the mode
+            // to accept rejected and error packets
             pid_ctl.set_err_pass(true);
             pid_ctl.set_mode(true);
             pid_ctl.set_enable(false);
@@ -519,11 +520,11 @@ impl Rtl2832u {
         })
         .await?;
 
-        // librtlsdr comments this as disabling TP_CK0. this pin is mentioned in the
-        // datasheet but nothing else on it.
+        // librtlsdr comments this as disabling TP_CK0. this pin is mentioned in
+        // the datasheet but nothing else on it.
         //
-        // linux dvbt has a register layout with some bits, but it's not clear what
-        // they're about
+        // linux dvbt has a register layout with some bits, but it's not clear
+        // what they're about
         //
         // linux sdr just sets them during e4k tuner setup
         self.write_register_with::<reg::demod::REG_MON_REG_MONSEL_REG_GPE>(|reg| {
@@ -555,9 +556,10 @@ impl Rtl2832u {
         }
 
         if options.poweroff_demod {
-            // `rtlsdr_deinit_baseband` sets DEMOD_CTL to 0x20, meaning PLL, ADC I/Q are
-            // disabled, but the reset flag is inverted, so it's released. I think the PLL
-            // enable actually determines if the demod chip is powered.
+            // `rtlsdr_deinit_baseband` sets DEMOD_CTL to 0x20, meaning PLL, ADC
+            // I/Q are disabled, but the reset flag is inverted, so
+            // it's released. I think the PLL enable actually
+            // determines if the demod chip is powered.
 
             // disable demod PLL, ADC I and Q
             self.write_register_update::<reg::sys::DEMOD_CTL>(|demod_ctl| {
@@ -576,7 +578,8 @@ impl Rtl2832u {
             self.write_register::<reg::sys::GPO>(0x18.into()).await?;
             self.write_register::<reg::sys::GPOE>(0x19.into()).await?;
 
-            // the datasheet says this resets to 0x0e on startup, but it's really 0x06
+            // the datasheet says this resets to 0x0e on startup, but it's
+            // really 0x06
             //
             // that means pin 3 is reset to be an output.
             self.write_register::<reg::sys::GPD>(0x06.into()).await?;
@@ -620,9 +623,9 @@ impl Rtl2832u {
 
         // enable in-phase ADC input
         //
-        // this has not been touched before, but we know the lower nibble has to be
-        // 0xd. should we use `write_register_update` anyway? would be nice if
-        // we knew what that lower nibble actually encodes.
+        // this has not been touched before, but we know the lower nibble has to
+        // be 0xd. should we use `write_register_update` anyway? would
+        // be nice if we knew what that lower nibble actually encodes.
         self.write_register_with::<reg::demod::ADC_ENABLE>(|adc_enable| {
             // librtlsdr comments:
             //
@@ -631,17 +634,18 @@ impl Rtl2832u {
             // rtlsdr_demod_write_reg(dev, 0, 0x08, 0x4d, 1);
             // ```
             //
-            // but they have bit 6 (ad_en_reg1, adc_q) on, and bit 7 (and_en_reg, adc_i)
-            // off. this corresponds to what the datasheet says should be set
-            // for IF mode. so their comment is just wrong.
+            // but they have bit 6 (ad_en_reg1, adc_q) on, and bit 7
+            // (and_en_reg, adc_i) off. this corresponds to what the
+            // datasheet says should be set for IF mode. so their
+            // comment is just wrong.
             //
             // tl;dr: turn ADC I branch only on for zero-if.
             //
             adc_enable.set_en_q(true);
             adc_enable.set_en_i(is_zero_if);
 
-            // idk what this is. it's this at startup and librtlsdr sets this, whenever they
-            // toggle ADC inputs
+            // idk what this is. it's this at startup and librtlsdr sets this,
+            // whenever they toggle ADC inputs
             adc_enable.set_bit_range(3, 0, 0xd);
         })
         .await?;
@@ -652,10 +656,11 @@ impl Rtl2832u {
     pub async fn set_if_frequency(&mut self, frequency: f32) -> Result<(), Error> {
         let value = pset_iffreq_from_hz(frequency, self.crystal_frequency);
 
-        // note: we made the pset_iffreq register 32bit for convenience, but there might
-        // be something important in the upper bits (DDC offset?). these bits
-        // are also not 0 at startup, but we think DDC offset is to be initialized to 0
-        // anyway. either way, a proper update here will avoid bugs.
+        // note: we made the pset_iffreq register 32bit for convenience, but
+        // there might be something important in the upper bits (DDC
+        // offset?). these bits are also not 0 at startup, but we think
+        // DDC offset is to be initialized to 0 anyway. either way, a
+        // proper update here will avoid bugs.
 
         self.write_register_update::<reg::demod::PSET_IFFREQ>(|pset_iffreq| {
             pset_iffreq.set_pset_iffreq(value);
@@ -733,8 +738,8 @@ impl Rtl2832u {
 
         // maybe this doesn't to anything? not sure anymore
         //
-        // after we commented this out, disabling dagc (the register write above)
-        // returned a device stalled error.
+        // after we commented this out, disabling dagc (the register write
+        // above) returned a device stalled error.
         self.write_register_with::<reg::demod::EN_DAGC>(|en_dagc| {
             en_dagc.set_endagc(enable);
         })
@@ -816,11 +821,11 @@ pub enum IfMode {
 pub fn pset_iffreq_from_hz(if_frequency: f32, crystal_frequency: f32) -> u32 {
     // librtlsdr does this with u32's but we're pretty sure that overflows.
     //
-    // example: r82xx if is 3570000, multiplied by 4194304 is at least 44 bits. the
-    // division then would yield incorrect results, no?
+    // example: r82xx if is 3570000, multiplied by 4194304 is at least 44 bits.
+    // the division then would yield incorrect results, no?
     //
-    // and since we're multiplying by 4194304 (2**22) floating-point arithmetic is
-    // well-suited here.
+    // and since we're multiplying by 4194304 (2**22) floating-point arithmetic
+    // is well-suited here.
 
     let f = -(if_frequency * 4194304.0 / crystal_frequency).floor();
     (f as i32).cast_unsigned() & 0x003f_ffff
@@ -896,7 +901,8 @@ mod tests {
 
         // from instrumented rtl_tcp:
         //
-        // rtlsdr_set_if_freq: freq=1815000, rtl_xtal=28800000, pset_if_freq=3bf778
+        // rtlsdr_set_if_freq: freq=1815000, rtl_xtal=28800000,
+        // pset_if_freq=3bf778
         assert_eq!(
             pset_iffreq_from_hz(1815000.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
             0x003b_f778

@@ -748,10 +748,12 @@ impl AltitudeCode {
     }
 
     pub fn decode(&self) -> Option<Altitude> {
-        // note: 11 bits altitude with 25 feet resolution and -1000 feet offset gives a
-        // max value of 50175, so we need a i32 for the decoded altitude
+        // note: 11 bits altitude with 25 feet resolution and -1000 feet offset
+        // gives a max value of 50175, so we need a i32 for the decoded
+        // altitude
 
-        // todo: adsb_deku considers AC=0 and AC=0x1fff to be invalid, but is it?
+        // todo: adsb_deku considers AC=0 and AC=0x1fff to be invalid, but is
+        // it?
         if self.0 == 0 || self.0 == 0b1_1111_1111_1111 {
             None
         }
@@ -1240,8 +1242,8 @@ impl ExtendedSquitterNonTransponder {
                 }
             }
             CodeFormat::TISB_AND_ADSR_MANAGEMENT => {
-                // format not specified in 1090 MOPS. it seems to exist, but i can't find
-                // information on it.
+                // format not specified in 1090 MOPS. it seems to exist, but i
+                // can't find information on it.
                 ExtendedSquitterNonTransponder::TisbAndAdsrManagement {
                     data: buffer.get_bytes(),
                     parity_interrogator: Parity(buffer.get_bytes()),
@@ -1256,13 +1258,14 @@ impl ExtendedSquitterNonTransponder {
                 }
             }
             CodeFormat::ADSB_REBROADCAST => {
-                // todo: almost same message format as DF=17, but some bits modified (see
-                // 2.2.18)
+                // todo: almost same message format as DF=17, but some bits
+                // modified (see 2.2.18)
                 //
                 // Identify the ICAO/Mode A Flag (IMF)
                 // - IMF=0 -> rebroadcast is identified by 24bit ICAO address
-                // - IMF=1 -> rebroadcast data is identified by an anonymous 24-bit address or
-                //   ground vehicle address or fixed obstruction address
+                // - IMF=1 -> rebroadcast data is identified by an anonymous
+                //   24-bit address or ground vehicle address or fixed
+                //   obstruction address
                 ExtendedSquitterNonTransponder::AdsbRebroadcast {
                     address_announced: IcaoAddress::from_bytes(buffer.get_bytes()),
                     adsb_message: adsb::Message::decode(buffer)?,

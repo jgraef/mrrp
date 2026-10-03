@@ -63,19 +63,22 @@ async fn main() -> Result<(), Error> {
     // convert u8 to f32
     let converted = radio_source.convert::<Complex<f32>>();
 
-    // Downsample the signal, but to avoid aliasing we first need to pass it through
-    // a lowpass filter that only allows the desired frequencies through.
+    // Downsample the signal, but to avoid aliasing we first need to pass it
+    // through a lowpass filter that only allows the desired frequencies
+    // through.
     //
-    // To downsample we just discard all but one sample every `DECIMATION` samples.
+    // To downsample we just discard all but one sample every `DECIMATION`
+    // samples.
     //
     // Since computing the low-pass filter is somewhat expensive and we would be
     // throwing away most of it anyway, this step is combined in one filter.
     //
-    // The low-pass filter used is just taking the average. While it's a very simple
-    // filter, it's frequency response is actually not that good.
+    // The low-pass filter used is just taking the average. While it's a very
+    // simple filter, it's frequency response is actually not that good.
     let lowpass_filtered = AverageDecimate::new(converted, DECIMATION);
 
-    // Map the complex signal to a real amplitude by taking the norm of the samples.
+    // Map the complex signal to a real amplitude by taking the norm of the
+    // samples.
     let audio = lowpass_filtered.map(|complex_sample| complex_sample.norm());
     println!("audio_sample_rate: {}", audio.sample_rate());
 
@@ -89,7 +92,8 @@ async fn main() -> Result<(), Error> {
     let playback_future = play_audio(audio, args.volume);
     pin_mut!(playback_future);
 
-    // Every 2 seconds we'll print the number of samples we have processed so far.
+    // Every 2 seconds we'll print the number of samples we have processed so
+    // far.
     let mut interval = tokio::time::interval(Duration::from_secs(2));
 
     loop {

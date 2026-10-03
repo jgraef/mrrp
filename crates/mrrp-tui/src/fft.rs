@@ -58,8 +58,8 @@ impl Fft {
 
         // we do no normalization here. it will be done later.
 
-        // center frequency will be in bin 0. right of center upto n/2 - 1. rest is left
-        // of center, so we need to swap halves.
+        // center frequency will be in bin 0. right of center upto n/2 - 1. rest
+        // is left of center, so we need to swap halves.
         // we could also do this in the visualization.
         let (left, right) = self.buffer.split_at_mut(self.size / 2);
         for (left, right) in left.iter_mut().zip(right.iter_mut()) {

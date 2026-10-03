@@ -115,7 +115,8 @@ impl SdrRuntime {
         match command {
             Command::AddSource { id, mut source } => {
                 async fn start_source(source: &mut dyn Source) -> Result<(), Error> {
-                    // todo: we don't have config right now, so hard-code sample rate
+                    // todo: we don't have config right now, so hard-code sample
+                    // rate
                     source.set_sample_rate(2_400_000.0).await?;
                     source.start().await?;
                     Ok(())
@@ -177,15 +178,17 @@ impl SdrRuntime {
         //
         // todo: we really should do this on a separate thread.
         //
-        // we would need to be able to send this buffer to another thread. options:
+        // we would need to be able to send this buffer to another thread.
+        // options:
         //
         // 1. immediately copy to another buffer
-        // 2. steal buffer. could use a double-buffer (though this might to work well),
-        //    or a buffer-pool. once the stolen buffer is free, we can put it into the
-        //    pool. buffers that were stolen get replaced with buffers from the pool.
-        //    but at that point we might just use the system allocator as a pool lol
-        // 3. put buffer into a RefCell. while reading sources we would just skip any
-        //    source whose buffer is being fft'd
+        // 2. steal buffer. could use a double-buffer (though this might to work
+        //    well), or a buffer-pool. once the stolen buffer is free, we can
+        //    put it into the pool. buffers that were stolen get replaced with
+        //    buffers from the pool. but at that point we might just use the
+        //    system allocator as a pool lol
+        // 3. put buffer into a RefCell. while reading sources we would just
+        //    skip any source whose buffer is being fft'd
         //
         // i guess this is one of those cases where we just have to look at the
         // performance instead of guessing which works best.
@@ -242,8 +245,9 @@ impl Sources {
             },
         );
 
-        // a task might be waiting for data, but will not be woken by any of the exiting
-        // sources (if there are any). so we also need to wake if there is a new souce.
+        // a task might be waiting for data, but will not be woken by any of the
+        // exiting sources (if there are any). so we also need to wake
+        // if there is a new souce.
         self.waker.wake_by_ref();
     }
 
@@ -351,8 +355,9 @@ impl<'a> Future for HandleSources<'a> {
                     continue;
                 }
 
-                // todo: this expect might fail if we reduce the requested amount between calls
-                // to this. we should handle this case.
+                // todo: this expect might fail if we reduce the requested
+                // amount between calls to this. we should
+                // handle this case.
                 let mut remaining_buffer_capacity = sources
                     .buffer_size
                     .checked_sub(buffered_source.buffer.len())
@@ -394,7 +399,8 @@ impl<'a> Future for HandleSources<'a> {
                         // check if the buffer has been filled
                         remaining_buffer_capacity -= num_read;
                         if remaining_buffer_capacity == 0 {
-                            // would be nice if we could return the source and/or buffer here too,
+                            // would be nice if we could return the source
+                            // and/or buffer here too,
                             // but we don't think we can.
 
                             return Poll::Ready(id);

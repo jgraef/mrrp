@@ -17,7 +17,8 @@ pub struct ErrorMessageState {
 impl ErrorMessageState {
     pub fn fill_from_context(&mut self, ctx: &egui::Context) {
         let queue = ctx.data_mut(|data| {
-            // why does get_temp_mut_or_default need the type to be Clone??? argh
+            // why does get_temp_mut_or_default need the type to be Clone???
+            // argh
             data.get_temp_mut_or_default::<ErrorQueue>(egui::Id::NULL)
                 .clone()
         });
@@ -98,7 +99,8 @@ pub trait PushErrorExt: Sized {
 impl PushErrorExt for &egui::Context {
     fn push_error_message(self, error: ErrorMessage) {
         let queue = self.data_mut(|data| {
-            // why does get_temp_mut_or_default need the type to be Clone??? argh
+            // why does get_temp_mut_or_default need the type to be Clone???
+            // argh
             data.get_temp_mut_or_default::<ErrorQueue>(egui::Id::NULL)
                 .clone()
         });

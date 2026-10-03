@@ -478,8 +478,8 @@ impl PulseAcceptor {
                 }
             }
             PulseAcceptor::Porch { remaining } => {
-                // note: we can't use edge-detect here, since the following signal might have
-                // the same frequency
+                // note: we can't use edge-detect here, since the following
+                // signal might have the same frequency
 
                 /*match filters.porch.scan(sample) {
                     Some(Edge::Falling) => return Poll::Ready(AcceptedPulse::Porch),

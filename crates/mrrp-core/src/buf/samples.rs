@@ -117,13 +117,14 @@ impl<S> Samples<S> {
 
     #[inline]
     pub fn is_unique(&self) -> bool {
-        // note: this only works if we never use weak references and don't expose the
-        // underlying Arc, so nobody can obtain any weak references.
-        // if there are weak references, this function is useless anyway, since between
-        // calling this and acting on the result another use could upgrade a weak ref.
-        // yes we could check if there are no weak references, but what are you supposed
-        // to do when there are some? e.g. if you want to do cow: do you clone and
-        // invalidate the weak reference, or not?
+        // note: this only works if we never use weak references and don't
+        // expose the underlying Arc, so nobody can obtain any weak
+        // references. if there are weak references, this function is
+        // useless anyway, since between calling this and acting on the
+        // result another use could upgrade a weak ref. yes we could
+        // check if there are no weak references, but what are you supposed
+        // to do when there are some? e.g. if you want to do cow: do you clone
+        // and invalidate the weak reference, or not?
         Arc::strong_count(&self.buffer) == 1
     }
 

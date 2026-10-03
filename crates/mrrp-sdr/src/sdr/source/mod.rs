@@ -172,8 +172,8 @@ impl Source for MockSource {
         &mut self,
         sample_rate: f32,
     ) -> Pin<Box<dyn Future<Output = Result<(), Error>> + Send + '_>> {
-        // changing the sample rate doesn't change anything on this source, because it's
-        // just white noise anyway
+        // changing the sample rate doesn't change anything on this source,
+        // because it's just white noise anyway
         let _ = sample_rate;
         Box::pin(async { Ok(()) })
     }

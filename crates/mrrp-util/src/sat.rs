@@ -64,7 +64,13 @@ impl DopplerCorrection {
         // calculate timing information
         let num_samples_per_interval =
             (predict_interval.as_secs_f32() * sample_rate).floor() as usize;
-        let effective_predict_interval = num_samples_per_interval as f32 * sample_rate;
+        let effective_predict_interval = num_samples_per_interval as f32 / sample_rate;
+
+        tracing::debug!(
+            ?num_intervals,
+            ?num_samples_per_interval,
+            ?effective_predict_interval
+        );
 
         // calculate exact timestamps for which we want satellite states
         let times = (0..num_intervals)
@@ -125,7 +131,7 @@ impl SignalGenerator for DopplerCorrection {
         // or should we just calculate the delta time per sample ahead of time
         // and use that? our concern was that this would accumulate error.
         let time = self.start_time
-            + Duration::from_secs_f32(self.sample_index as f32 * self.sinusoid.sample_rate());
+            + Duration::from_secs_f32(self.sample_index as f32 / self.sinusoid.sample_rate());
 
         // current state we're at
         let mut current_state = &self.satellite_states[self.state_index];

@@ -218,7 +218,8 @@ impl Demodulator {
                         Ok(bit)
                     }
                     else {
-                        // rtl_adsb.c does change the previous bits, but I don't get how that works.
+                        // rtl_adsb.c does change the previous bits, but I don't
+                        // get how that works.
                         // Wouldn't that break the next bit reads?
                         //
                         // <https://github.com/rtlsdrblog/rtl-sdr-blog/blob/240bd0e1e6d9f64361b6949047468958cd08aa31/src/rtl_adsb.c#L300>

@@ -77,8 +77,9 @@ where
                 }
 
                 if this.buffer.buffer.len() > buffer.remaining() {
-                    // our buffer size is larger than the remaining space in the destination buffer,
-                    // so we'll read to our buffer.
+                    // our buffer size is larger than the remaining space in the
+                    // destination buffer, so we'll read to
+                    // our buffer.
                     assert_eq!(this.buffer.read_pos, 0);
                     assert_eq!(this.buffer.write_pos, 0);
 
@@ -90,16 +91,18 @@ where
                         Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
                         Poll::Ready(Ok(num_samples)) => {
                             if num_samples == 0 {
-                                // the read_buf wasn't filled with any bytes, so this is an eof.
+                                // the read_buf wasn't filled with any bytes, so
+                                // this is an eof.
                                 break;
                             }
                         }
                     }
                 }
                 else {
-                    // the destination buffer is larger than our buffer. instead of first reading to
-                    // our buffer and then copying to the destination buffer, we can read directly
-                    // to the destination buffer
+                    // the destination buffer is larger than our buffer. instead
+                    // of first reading to our buffer and
+                    // then copying to the destination buffer, we can read
+                    // directly to the destination buffer
 
                     let filled_before = buffer.filled().len();
                     match this.inner.poll_read_samples(cx, buffer) {
@@ -174,8 +177,8 @@ mod tests {
         let mut buffered = Cursor::new(&samples[..]).buffered(50);
         let mut destination = vec![0; 70];
 
-        // since the destination buffer is larger than the internal buffer this should
-        // read straight to the destination buffer
+        // since the destination buffer is larger than the internal buffer this
+        // should read straight to the destination buffer
         buffered
             .read_samples(&mut destination[..])
             .now_or_never()
@@ -197,8 +200,8 @@ mod tests {
         let mut buffered = Cursor::new(&samples[..]).buffered(50);
         let mut destination = vec![0; 20];
 
-        // since the destination buffer is smaller than the internal buffer this should
-        // read first into the internal buffer
+        // since the destination buffer is smaller than the internal buffer this
+        // should read first into the internal buffer
         buffered
             .read_samples(&mut destination[..])
             .now_or_never()

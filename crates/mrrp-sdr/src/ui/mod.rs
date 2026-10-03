@@ -22,9 +22,9 @@ pub fn run_app(directories: Directories, _config: Config, command: Args) -> Resu
     let egui_persist_path = directories.state_dir().join("egui.json");
     tracing::debug!(?egui_persist_path);
 
-    // create and enter tokio runtime. this way we still have full control over the
-    // main thread. the ui has to run an event loop on the main thread, so we can't
-    // give it to tokio.
+    // create and enter tokio runtime. this way we still have full control over
+    // the main thread. the ui has to run an event loop on the main thread,
+    // so we can't give it to tokio.
     //
     // but we still can use the full tokio runtime now, to e.g. spawn futures.
     let tokio_runtime = tokio::runtime::Runtime::new()?;

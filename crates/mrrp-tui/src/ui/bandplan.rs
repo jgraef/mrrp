@@ -69,14 +69,16 @@ impl Bandplan {
 
     #[inline]
     pub fn get_many(&self, frequency: u32) -> BandplanIter<'_> {
-        // if we want a reversible iterator we need to call the full range method
+        // if we want a reversible iterator we need to call the full range
+        // method
         self.range(frequency..=frequency)
     }
 
     pub fn range(&self, range: impl RangeBounds<u32>) -> BandplanIter<'_> {
-        // we search for both start and end indices, so we can construct a double ended
-        // iterator. i think if we don't need this we could just seach for start index
-        // and iterate until band.start > end_frequency
+        // we search for both start and end indices, so we can construct a
+        // double ended iterator. i think if we don't need this we could
+        // just seach for start index and iterate until band.start >
+        // end_frequency
 
         let start_frequency = match range.start_bound() {
             Bound::Included(frequency) => Some(*frequency),
@@ -121,9 +123,10 @@ impl Bandplan {
     }
 
     fn start_index(&self, start_frequency: u32) -> usize {
-        // we're actually looking for the start index for bands that end just one after
-        // the start frequency. this excludes any bands that end on the start frequency
-        // (the band end frequency is always exclusive)
+        // we're actually looking for the start index for bands that end just
+        // one after the start frequency. this excludes any bands that
+        // end on the start frequency (the band end frequency is always
+        // exclusive)
         let start_frequency = start_frequency + 1;
 
         let mut start_index = self
@@ -131,12 +134,12 @@ impl Bandplan {
             .binary_search_by_key(&start_frequency, |(band_end, _band_index)| *band_end)
             .unwrap_or_else(identity);
 
-        // if there are multiple bands with this end frequency the binary search will
-        // return an arbitrary one, so we just scan back until we find one with
-        // a different start frequency.
-        // self.by_end is sorted secondarily by index, so the actual band index can only
-        // become smaller while doing this. so all bands that end in our frequency range
-        // will be included.
+        // if there are multiple bands with this end frequency the binary search
+        // will return an arbitrary one, so we just scan back until we
+        // find one with a different start frequency.
+        // self.by_end is sorted secondarily by index, so the actual band index
+        // can only become smaller while doing this. so all bands that
+        // end in our frequency range will be included.
         while start_index > 0 && self.by_end[start_index - 1].0 == start_frequency {
             start_index -= 1;
         }

@@ -167,8 +167,9 @@ impl TryFrom<[i16; 16]> for FirFilter {
             let x = value[i * 2 + 8].cast_unsigned();
             let y = value[i * 2 + 9].cast_unsigned();
 
-            // the upper 4 bits must either be 0 or f depending on the sign of the i12.
-            // we check if these bits correspond to the msb of the i12.
+            // the upper 4 bits must either be 0 or f depending on the sign of
+            // the i12. we check if these bits correspond to the msb
+            // of the i12.
             if x & 0xf80 != 0xf8 && x & 0xf80 != 0 {
                 return Err(InvalidFilter::CoefficientOutOfRange { index: i * 2 });
             }

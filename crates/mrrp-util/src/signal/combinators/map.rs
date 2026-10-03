@@ -211,14 +211,17 @@ where
         }
         else if num_samples_out < MIN_BUFFER {
             // fall back to using stack-allocated intermediate buffer
-            // otherwise a caller like read_exact will provide smaller and smaller buffers,
-            // until this can't use it as an intermediate buffer anymore.
+            // otherwise a caller like read_exact will provide smaller and
+            // smaller buffers, until this can't use it as an
+            // intermediate buffer anymore.
             //
-            // however this is only a problem if the input samples are larger than the
-            // output samples. we do it in either case here though.
+            // however this is only a problem if the input samples are larger
+            // than the output samples. we do it in either case here
+            // though.
             //
-            // and furthermore MIN_BUFFER should not be constant, as this edge case really
-            // depends on the size difference and alignment. so this needs fixing someway.
+            // and furthermore MIN_BUFFER should not be constant, as this edge
+            // case really depends on the size difference and
+            // alignment. so this needs fixing someway.
             let mut intermediate_buffer = [<R::Sample as Zeroable>::zeroed(); MIN_BUFFER];
             let mut read_buf = ReadBuf::new(&mut intermediate_buffer[..num_samples_out]);
 

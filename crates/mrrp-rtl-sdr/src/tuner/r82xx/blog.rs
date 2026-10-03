@@ -229,14 +229,14 @@ impl Tuner for BlogTuner {
 
         // toggle upconverter on or off
         //
-        // note: since `UPCONVERTER_GPIO_ENABLE` is `false`, the boolean expression can
-        // be shortened to `!use_upconverter`.
+        // note: since `UPCONVERTER_GPIO_ENABLE` is `false`, the boolean
+        // expression can be shortened to `!use_upconverter`.
         self.upconverter_pin
             .write(rtl2832u, use_upconverter ^ !UPCONVERTER_GPIO_ENABLE)
             .await?;
 
-        // if we're using the upconverter we need to adjust the center frequency that we
-        // tune the R82xx to
+        // if we're using the upconverter we need to adjust the center frequency
+        // that we tune the R82xx to
         if use_upconverter {
             center_frequency += 28800000.0;
         }
@@ -251,10 +251,11 @@ impl Tuner for BlogTuner {
         //
         // todo: we should discard the transaction explicitely, if this fails.
         //
-        // todo: the tracking filter/open_d settings are overwritten just below. but
-        // since set_center_frequency flushes registers when checking PLL lock, they
-        // will be set for a short moment. either we set tracking filter after
-        // PLL, so the below overwrite will go into the same batch, or we add a argument
+        // todo: the tracking filter/open_d settings are overwritten just below.
+        // but since set_center_frequency flushes registers when
+        // checking PLL lock, they will be set for a short moment.
+        // either we set tracking filter after PLL, so the below
+        // overwrite will go into the same batch, or we add a argument
         // to the function to overwrite tracking filter/open_d.
         transaction.set_center_frequency(center_frequency).await?;
 

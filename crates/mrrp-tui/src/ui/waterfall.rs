@@ -54,8 +54,8 @@ pub struct WaterfallState {
 
 impl Default for WaterfallState {
     fn default() -> Self {
-        // in dBFS, pulled these out of my ass. they will get updated anyway. just don't
-        // divide by 0, mkay.
+        // in dBFS, pulled these out of my ass. they will get updated anyway.
+        // just don't divide by 0, mkay.
         let min_z = -80.0;
         let max_z = -70.0;
 
@@ -375,13 +375,13 @@ impl NewLine {
 
     fn into_line(mut self) -> Option<Line> {
         if self.count > 0 {
-            // z is the energy for that frequency over line.count * sample_rate / len(line).
-            // convert to power in dBFS.
-            // todo: this needs some serious verification lol. (yeah it is wrong, also check
-            // the initial fft normalization)
+            // z is the energy for that frequency over line.count * sample_rate
+            // / len(line). convert to power in dBFS.
+            // todo: this needs some serious verification lol. (yeah it is
+            // wrong, also check the initial fft normalization)
 
-            // according to [this][1] we can divide by bin with to get the "dB power
-            // spectral density" instead of "dB power"
+            // according to [this][1] we can divide by bin with to get the "dB
+            // power spectral density" instead of "dB power"
             //
             // and we need to divide by the length of the sampled signal ([2])
             //
@@ -389,15 +389,16 @@ impl NewLine {
             // [2]: https://stackoverflow.com/questions/20165193/fft-normalization
 
             // dB power spectral density
-            // dividing by bin width and num samples, cancles out the num samples from both
-            // terms
+            // dividing by bin width and num samples, cancles out the num
+            // samples from both terms
 
             // let normalize = 1.0 / (self.count as f32 * self.bin_width *
             // self.samples.len() as f32);
             let normalize = 1.0 / (self.count as f32 * self.frequency_band.bandwidth() as f32);
 
             // dB power
-            //let normalize = 1.0 / (self.count as f32 * self.samples.len() as f32);
+            //let normalize = 1.0 / (self.count as f32 * self.samples.len() as
+            // f32);
 
             for z in &mut self.samples {
                 *z = 10.0 * (*z * normalize).log10();
@@ -606,10 +607,12 @@ impl Cache {
             self.canvas_width = Some(width);
         }
 
-        // this just makes sure that if we happen to render an older line that somehow
-        // (impossible!) doesn't exist yet, we make space for it.
+        // this just makes sure that if we happen to render an older line that
+        // somehow (impossible!) doesn't exist yet, we make space for
+        // it.
         //
-        // haha, I had the comparision the wrong way it it quickly filled all memory :D
+        // haha, I had the comparision the wrong way it it quickly filled all
+        // memory :D
         while line_index >= self.lines.len() {
             self.lines.push_back(Default::default());
         }

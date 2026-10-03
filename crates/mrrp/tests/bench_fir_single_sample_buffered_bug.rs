@@ -37,16 +37,16 @@ use rand::rngs::SmallRng;
 fn bench_fir_single_sample_buffered_bug() {
     // Bug showed while benchmarking:
     //
-    // Benchmarking buffering/fir single-sample buffered: Warming up for 3.0000 s
-    // thread 'main' panicked at
-    // /home/emma/code/mrrp/mrrp/src/buf/uninit_slice.rs:105:9: assertion `left ==
-    // right` failed   left: 1  right: 16383
+    // Benchmarking buffering/fir single-sample buffered: Warming up for 3.0000
+    // s thread 'main' panicked at
+    // /home/emma/code/mrrp/mrrp/src/buf/uninit_slice.rs:105:9: assertion `left
+    // == right` failed   left: 1  right: 16383
     //
     // extracted from benches/buffering.rs
     //
-    // fixed by: when copying from the internal buffer to the destination buffer,
-    // the length of the destination buffer slice was not limited to the amount
-    // available.
+    // fixed by: when copying from the internal buffer to the destination
+    // buffer, the length of the destination buffer slice was not limited to
+    // the amount available.
 
     let num_samples = 0x100000;
 

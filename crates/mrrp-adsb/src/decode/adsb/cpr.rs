@@ -289,8 +289,8 @@ impl BaseAlgorithm {
         println!("n_r_lat_even={}", nl_r_lat_even);
         println!("n_r_lat_odd={}", nl_r_lat_odd);
 
-        // nl is a whole number and we only use floats for convenience. the value is
-        // floored though, so using `==` should be fine.
+        // nl is a whole number and we only use floats for convenience. the
+        // value is floored though, so using `==` should be fine.
         if nl_r_lat_even != nl_r_lat_odd {
             return Err(DecodeError::MessagesFromDifferentLongitudeZones {
                 nl_lat_even: nl_r_lat_even,
@@ -582,12 +582,13 @@ impl<T: Ord> Decoder<T> {
         }
 
         // now we can decode :)
-        // note: we don't filter stale CPRs here, since the decoding will just fail if
-        // its from different zones.
+        // note: we don't filter stale CPRs here, since the decoding will just
+        // fail if its from different zones.
         other_bin_and_most_recent
             .and_then(|(other_bin, most_recent)| {
-                // if we have both even and odd position frames, we can try to determine the
-                // position without a local reference
+                // if we have both even and odd position frames, we can try to
+                // determine the position without a local
+                // reference
 
                 // first check if both CPRs are either airborne or surface
                 if other_bin.vertical_status == vertical_status {
@@ -619,8 +620,8 @@ impl<T: Ord> Decoder<T> {
                 }
             })
             .or_else(|| {
-                // either we don't have both even and odd, or the global decode failed
-                // (different zones or vertical status)
+                // either we don't have both even and odd, or the global decode
+                // failed (different zones or vertical status)
                 reference.map(|reference| {
                     match vertical_status {
                         VerticalStatus::Airborne => AIRBORNE.decode_local(cpr, reference),

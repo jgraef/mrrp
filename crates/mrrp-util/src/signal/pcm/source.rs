@@ -73,13 +73,13 @@ where
             // how many bytes are still in our remainder buffer from before
             let remainder = this.remainder_buffer.get();
 
-            // we're reading at least 1 sample, so the buffer must be larger than any
-            // remainder
+            // we're reading at least 1 sample, so the buffer must be larger
+            // than any remainder
             assert!(remainder.len() < body.len());
 
             // skip the first couple of bytes for the remainder.
-            // we copy the remainder into the buffer later, because `poll_read` might return
-            // `Pending`
+            // we copy the remainder into the buffer later, because `poll_read`
+            // might return `Pending`
             let mut read_buf_bytes =
                 tokio::io::ReadBuf::uninit(&mut body.as_mut_slice()[remainder.len()..]);
 
@@ -101,8 +101,8 @@ where
             // new remainder length
             let n_remainder = n_bytes_filled % size_of::<S>();
 
-            // todo: benchmark if that if is worth it, or use hints (requires unstable
-            // feature)
+            // todo: benchmark if that if is worth it, or use hints (requires
+            // unstable feature)
             if !remainder.is_empty() {
                 // fill in the first couple of bytes from remainder buffer
                 body[..remainder.len()].clone_from_slice(remainder);
@@ -118,12 +118,13 @@ where
 
             buffer.set_filled(buffer.filled().len() + n_samples);
 
-            // we need special handling in case the underlying byte stream returns less than
-            // a full sample. in that case we can't return now because we only
-            // filled our remainder buffer, but not any samples into the buffer provided by
+            // we need special handling in case the underlying byte stream
+            // returns less than a full sample. in that case we
+            // can't return now because we only filled our remainder
+            // buffer, but not any samples into the buffer provided by
             // the user. this would make the user assume we're at EOF, but we
-            // aren't. we can't return Poll::Pending, because the underlying byte stream
-            // didn't.
+            // aren't. we can't return Poll::Pending, because the underlying
+            // byte stream didn't.
             if n_samples > 0 {
                 return Poll::Ready(Ok(()));
             }

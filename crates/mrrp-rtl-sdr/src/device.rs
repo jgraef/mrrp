@@ -115,8 +115,8 @@ impl Device {
 
         // probe tuners
 
-        // either use the override from options, or the one provided by the device
-        // config, or the fallback - in that order.
+        // either use the override from options, or the one provided by the
+        // device config, or the fallback - in that order.
         let tuner_probe = options
             .override_tuner_probe
             .as_ref()
@@ -147,12 +147,14 @@ impl Device {
         let sample_rate = inner.rtl2832u.sample_rate().await?;
         tracing::debug!(?sample_rate, "initial sample rate");
 
-        // todo: we can't really figure out the initial center frequency, because e.g.
-        // the R82xx doesn't let us read the relevant registers.
+        // todo: we can't really figure out the initial center frequency,
+        // because e.g. the R82xx doesn't let us read the relevant
+        // registers.
         //
-        // we have considered writing the center frequency into unused rtl2832u's system
-        // memory. we would have to make sure that this memory is absolutely
-        // unused - which is hard, or impossible.
+        // we have considered writing the center frequency into unused
+        // rtl2832u's system memory. we would have to make sure that
+        // this memory is absolutely unused - which is hard, or
+        // impossible.
 
         Ok(Self {
             device_info,
@@ -284,8 +286,8 @@ impl Device {
                 .set_bandwidth(&mut *i2c_repeater_guard, actual_sample_rate)
                 .await?;
 
-            // after changing the tuner bandwidth, its if frequency changes, which means
-            // we're not tuned correctly anymore.
+            // after changing the tuner bandwidth, its if frequency changes,
+            // which means we're not tuned correctly anymore.
             if let Some(center_frequency) = self.center_frequency {
                 inner
                     .tuner
@@ -296,14 +298,14 @@ impl Device {
             i2c_repeater_guard.disable().await?;
         }
 
-        // set rtl2832u's if frequency, because tuner can change this when changing
-        // bandwidth.
+        // set rtl2832u's if frequency, because tuner can change this when
+        // changing bandwidth.
         inner.configure_if(self.if_offset).await?;
 
-        // librtlsdr sets the sample frequency correction here too. we don't support
-        // changing this yet, but this will set the two most significant bits to 0.
-        // these are unknown but librtlsdr sets them to 0 while doing this, and they
-        // start out as 0b10.
+        // librtlsdr sets the sample frequency correction here too. we don't
+        // support changing this yet, but this will set the two most
+        // significant bits to 0. these are unknown but librtlsdr sets
+        // them to 0 while doing this, and they start out as 0b10.
         inner
             .rtl2832u
             .set_sample_frequency_correction(self.frequency_correction)
@@ -313,10 +315,11 @@ impl Device {
         //
         // the bug with the frequency shift was probably because we did this in
         // `Rtl2832u::set_sample_rate`, and only if the value changed.
-        // we think this is actually necessary to apply the sample frequency correction.
-        // though we set it to 0, which is initially, we clear out a bit in that
-        // register. we think that bit might be automatic sample rate correction
-        // (however that would work), but the soft-reset needs to be done afterwards.
+        // we think this is actually necessary to apply the sample frequency
+        // correction. though we set it to 0, which is initially, we
+        // clear out a bit in that register. we think that bit might be
+        // automatic sample rate correction (however that would work),
+        // but the soft-reset needs to be done afterwards.
         inner.rtl2832u.set_soft_reset(true).await?;
         inner.rtl2832u.set_soft_reset(false).await?;
 
@@ -331,8 +334,9 @@ impl Device {
 
         let Inner { rtl2832u, tuner } = &mut *self.shared.lock_inner().await;
 
-        // librtlsdr sets the "exact" sample rate here. We think they basically convert
-        // from the encoded value back to Hz. But they also do some bit-manipulation.
+        // librtlsdr sets the "exact" sample rate here. We think they basically
+        // convert from the encoded value back to Hz. But they also do
+        // some bit-manipulation.
         {
             let mut i2c_repeater_guard = rtl2832u.enable_i2c_repeater().await?;
 

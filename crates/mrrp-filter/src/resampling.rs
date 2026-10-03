@@ -172,14 +172,15 @@ where
             return Poll::Ready(Ok(()));
         }
 
-        // the number of samples we can read so that after interpolation we have no read
-        // samples left.
+        // the number of samples we can read so that after interpolation we have
+        // no read samples left.
         //let num_samples_read = (buffer.remaining() -
         // *this.counter).div_ceil(*this.factor);
         let num_samples_read = buffer.remaining() / *this.factor;
         assert!(num_samples_read != 0);
 
-        // read to the very end of the buffer so we can interpolate from the start
+        // read to the very end of the buffer so we can interpolate from the
+        // start
         let buffer_unfilled = buffer.unfilled_mut();
         let read_start_pos = buffer_unfilled.len() - num_samples_read;
         let mut read_buf = ReadBuf::uninit(&mut buffer_unfilled[read_start_pos..]);
@@ -331,8 +332,9 @@ where
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
                 Poll::Ready(Ok(())) => {
-                    // note: we start overwriting from the beginning of the **newly** filled buffer,
-                    // since that's what we just read. even though this runs in
+                    // note: we start overwriting from the beginning of the
+                    // **newly** filled buffer, since that's
+                    // what we just read. even though this runs in
                     // a loop, we exit the loop as soon as we have filled the
                     // buffer with any number of decimated samples.
 
@@ -363,7 +365,8 @@ where
                     buffer.set_filled(write_pos);
 
                     if write_pos > 0 {
-                        // we produced at least one decimated sample, so we can return
+                        // we produced at least one decimated sample, so we can
+                        // return
                         return Poll::Ready(Ok(()));
                     }
                 }

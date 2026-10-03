@@ -44,9 +44,9 @@ impl<S> SamplesMut<S> {
 
     #[inline]
     pub fn freeze(mut self) -> Samples<S> {
-        // this could be done in O(1) if we used an Arc<UninitSlice> internally. We can
-        // just do get_mut_unchecked on it, since we are the only owner. but we would
-        // also have to do the growing ourselves.
+        // this could be done in O(1) if we used an Arc<UninitSlice> internally.
+        // We can just do get_mut_unchecked on it, since we are the only
+        // owner. but we would also have to do the growing ourselves.
         let length = self.len();
         let mut buffer = UninitSlice::<S>::arc_new(length);
         let buffer_mut = unsafe { Arc::get_mut_unchecked(&mut buffer) };
@@ -168,9 +168,10 @@ impl<S> SampleBufMut<S> for SamplesMut<S> {
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut UninitSlice<S> {
-        // this will make sure there's at least 1 byte capacity. usually there's much
-        // more spare capacity because of Vec's allocation policy. if you want to avoid
-        // reading small amounts you need to reserve enough capcity beforehand.
+        // this will make sure there's at least 1 byte capacity. usually there's
+        // much more spare capacity because of Vec's allocation policy.
+        // if you want to avoid reading small amounts you need to
+        // reserve enough capcity beforehand.
         self.reserve(1);
         self.spare_capacity_mut()
     }

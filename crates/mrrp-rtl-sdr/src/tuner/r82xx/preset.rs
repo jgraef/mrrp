@@ -863,8 +863,8 @@ mod tests {
     #[test]
     fn test_bandwidth_config() {
         // $ ./src/rtl_tcp -f 144000000 -s 2400000
-        // r82xx_set_freq: freq=144000000, upconvert_freq=144000000, lo_freq=145815000,
-        // int_freq=1815000
+        // r82xx_set_freq: freq=144000000, upconvert_freq=144000000,
+        // lo_freq=145815000, int_freq=1815000
 
         assert_eq!(
             bandwidth_setting(2400000.0).if_filter.if_frequency,
@@ -878,9 +878,10 @@ mod tests {
         // r82xx_set_mux: freq=30, open_d=08, rf_mux_ploy=02, tf_c=df, cap=00
         // r82xx_set_mux: freq=145, open_d=00, rf_mux_ploy=02, tf_c=14, cap=00
 
-        // note r82xx_set_mux takes min of the cap value in the array and one selected
-        // at init (P0, high), so it'll basically always use cap=00, but we only get the
-        // preset value here, so we can't test this.
+        // note r82xx_set_mux takes min of the cap value in the array and one
+        // selected at init (P0, high), so it'll basically always use
+        // cap=00, but we only get the preset value here, so we can't
+        // test this.
         let selected_cap = CrystalCapacitor::P0;
 
         let setting = frequency_setting(30000000.0);

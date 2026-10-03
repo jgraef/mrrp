@@ -102,8 +102,9 @@ where
     ) -> Poll<Result<usize, Self::Error>> {
         let writer = self.writer_mut()?;
         for sample in buffer {
-            // todo: should we return the error even if we have written some samples? we
-            // could return Ok(n) here if n > 0, otherwise Err(_).
+            // todo: should we return the error even if we have written some
+            // samples? we could return Ok(n) here if n > 0,
+            // otherwise Err(_).
             sample.write_samples(writer)?;
         }
         Poll::Ready(Ok(buffer.len()))

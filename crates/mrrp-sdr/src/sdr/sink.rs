@@ -15,11 +15,12 @@ impl SpectrumSink for SpectrumState {
     fn push<'a>(&mut self, frame: SpectrumFrame<&'a [f32]>) {
         let mut guard = self.update();
 
-        // ideally we would just clone the Samples and put it into the widget state, but
-        // that would make mrrp-widgets depend on mrrp, which we try to avoid
+        // ideally we would just clone the Samples and put it into the widget
+        // state, but that would make mrrp-widgets depend on mrrp, which
+        // we try to avoid
         //
-        // even better yet, we would expose an API that lets us write directly to the
-        // staging buffer
+        // even better yet, we would expose an API that lets us write directly
+        // to the staging buffer
 
         let data = guard.data_mut();
         data.clear();

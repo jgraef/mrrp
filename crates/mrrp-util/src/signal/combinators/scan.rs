@@ -178,14 +178,14 @@ where
 
                 for index in 0..filled.len() {
                     let sample_in = unsafe {
-                        // SAFETY: we're basically taking samples out of the buffer and
-                        // replacing them.
+                        // SAFETY: we're basically taking samples out of the
+                        // buffer and replacing them.
                         filled[index].assume_init_read()
                     };
 
                     // todo: handle panic in this.map.
-                    // so if a panic occurs here the following ranges are initialized
-                    // ..index
+                    // so if a panic occurs here the following ranges are
+                    // initialized ..index
                     // (index + 1)..buffer.initialized
                     let sample_out = this.scanner.scan(sample_in);
 

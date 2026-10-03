@@ -280,7 +280,8 @@ impl<S> Debug for Buffer<S> {
 
 impl<S> Drop for Buffer<S> {
     fn drop(&mut self) {
-        // everything in read_pos..write_pos is initialized, so we need to drop it
+        // everything in read_pos..write_pos is initialized, so we need to drop
+        // it
         unsafe {
             self.buffer[self.read_pos..self.write_pos].assume_init_drop();
         }

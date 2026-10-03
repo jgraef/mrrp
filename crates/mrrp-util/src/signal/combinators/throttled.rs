@@ -116,8 +116,8 @@ where
                 }
             }
             else {
-                // either we return Poll::Pending or the future will be terminated in the next
-                // loop iteration
+                // either we return Poll::Pending or the future will be
+                // terminated in the next loop iteration
 
                 ready!(this.delay.poll_unpin(cx));
             }

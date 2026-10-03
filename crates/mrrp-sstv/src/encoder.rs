@@ -99,8 +99,9 @@ where
                 if let Some(next_state) = state.next(Some(&this.mode)) {
                     let next_pulse = Pulse::from_state(&next_state, &this.mode, &this.frame_buffer);
 
-                    // this matches the phase of the new pulse with the phase of the old pulse. this
-                    // reduces unwanted frequencies caused by the transition
+                    // this matches the phase of the new pulse with the phase of
+                    // the old pulse. this reduces unwanted
+                    // frequencies caused by the transition
                     pulse_generator.set_pulse(next_pulse);
 
                     *state = next_state;

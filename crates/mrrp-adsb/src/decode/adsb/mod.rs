@@ -61,8 +61,8 @@ impl Message {
         let bits_6_to_8 = byte_0 & 0b111; // subtype code for some type codes
 
         let reserved = |buffer: &mut B| {
-            //tracing::debug!(?type_code, sub_type = ?bits_6_to_8, "reserved adsb-b
-            // message");
+            //tracing::debug!(?type_code, sub_type = ?bits_6_to_8, "reserved
+            // adsb-b message");
             Self::Reserved {
                 type_code,
                 sub_type: bits_6_to_8,
@@ -379,8 +379,9 @@ impl EmergencyPriorityStatusAndModeACode {
         EmergencyPriorityStatusAndModeACode {
             emergency_priority_status: EmergencyPriorityStatus(bytes[0] >> 5),
             mode_a_code: {
-                // todo: should this include the ident bit? or should it always be zero?
-                // (page 139). i think it should be the latter.
+                // todo: should this include the ident bit? or should it always
+                // be zero? (page 139). i think it should be the
+                // latter.
                 Squawk::from_u16_unchecked(decode_gillham_id13(
                     decode_frame_aligned_altitude_or_identity_code(&bytes[..]),
                 ))
@@ -1703,12 +1704,14 @@ impl AltitudeCode {
         // [This][1] says the 12 bits are the height in meters for GNSS.
         // This is unlikely as it can't encode anything above 4095 meters then.
         //
-        // MOPS doesn't say this is encoded any different than barometric. It doesn't
-        // even mention which unit. So is it encoded just like barometric and in ft?
-        // Both adsb_deku and readsb decode it that way.
+        // MOPS doesn't say this is encoded any different than barometric. It
+        // doesn't even mention which unit. So is it encoded just like
+        // barometric and in ft? Both adsb_deku and readsb decode it
+        // that way.
         //
-        // 11 bits altitude with 25 feet resolution and -1000 feet offset gives a
-        // max value of 50175, so we need a i32 for the decoded altitude
+        // 11 bits altitude with 25 feet resolution and -1000 feet offset gives
+        // a max value of 50175, so we need a i32 for the decoded
+        // altitude
         //
         // [1]: https://mode-s.org/1090mhz/content/ads-b/3-airborne-position.html
 
@@ -2220,7 +2223,8 @@ mod tests {
                 );
                 assert_eq!(status.mode_a_code, expected_squawk);
 
-                // the message we used for testing here has some stuff in the reserved bits ????
+                // the message we used for testing here has some stuff in the
+                // reserved bits ????
                 assert_eq!(status.reserved, 0xc1825196);
             }
             _ => panic!("unexpected frame: {frame:?}"),

@@ -80,8 +80,8 @@ where
         .map(|band| ::pm_remez::Band::new(band.start, band.end))
         .collect::<Result<Vec<_>, _>>()?;
 
-    // work around that get the frequency response at the band edge of the closest
-    // band, if the given frequency doesn't fall inside band.
+    // work around that get the frequency response at the band edge of the
+    // closest band, if the given frequency doesn't fall inside band.
     //
     // this might get fixed ([issue][1])
     //

@@ -48,8 +48,8 @@ async fn main() -> Result<(), Error> {
     let converted = radio_source.convert::<Complex<f32>>();
 
     // decimate down to 200 kHz by averaging.
-    // the following FIR filter is better, but more expensive, so we decimate by a
-    // factor of 6 first.
+    // the following FIR filter is better, but more expensive, so we decimate by
+    // a factor of 6 first.
     //let baseband = AverageDecimate::new(baseband, 6);
 
     // use Remez to design a linear-phase lowpass filter

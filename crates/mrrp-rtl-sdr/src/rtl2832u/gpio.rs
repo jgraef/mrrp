@@ -240,8 +240,8 @@ impl GpioPin {
         rtl2832u: &mut Rtl2832u,
         pre_enable_hook: impl AsyncFnOnce(&mut Rtl2832u) -> Result<(), Error>,
     ) -> Result<OutputPin, Error> {
-        // todo: do we have to disable the output first, so that it isn't in an invalid
-        // state once we configure it as output?
+        // todo: do we have to disable the output first, so that it isn't in an
+        // invalid state once we configure it as output?
 
         // configure pin as output
 

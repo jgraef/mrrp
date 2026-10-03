@@ -128,8 +128,9 @@ where
                     })
                     .ok()
                     .map(|snapshot| {
-                        // currently we only care about the actual state, but we intend to store
-                        // more metadata in the snapshot, like timestamp, version number, etc.
+                        // currently we only care about the actual state, but we
+                        // intend to store more metadata
+                        // in the snapshot, like timestamp, version number, etc.
                         snapshot.app_state
                     })
             })
@@ -155,8 +156,9 @@ where
         }
         if let Some(sample_rate) = args.sample_rate {
             if sample_rate % 2 == 1 {
-                // todo: we currently can't calculate the start and end frequency of the signal
-                // correctly in this case.
+                // todo: we currently can't calculate the start and end
+                // frequency of the signal correctly in this
+                // case.
                 bail!("Sample rate must be divisble by 2");
             }
 
@@ -179,8 +181,8 @@ where
         let sample_reader =
             SampleReader::new(rtl_sdr.samples().await?, args.fft_size, args.fft_overlap);
 
-        // initialize the terminal. don't use `ratatui::init` as we don't want their
-        // panic hook
+        // initialize the terminal. don't use `ratatui::init` as we don't want
+        // their panic hook
         crossterm::terminal::enable_raw_mode()?;
         execute!(stdout(), crossterm::terminal::EnterAlternateScreen)?;
         execute!(stdout(), crossterm::event::EnableMouseCapture)?;

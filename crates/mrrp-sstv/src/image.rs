@@ -89,7 +89,8 @@ where
 
 impl FrameBufferMut for RgbImage {
     fn set_size(&mut self, width: usize, height: usize) {
-        //*self = RgbImage::new(width.try_into().unwrap(), height.try_into().unwrap());
+        //*self = RgbImage::new(width.try_into().unwrap(),
+        //*self height.try_into().unwrap());
         *self = RgbImage::from_fn(
             width.try_into().unwrap(),
             height.try_into().unwrap(),

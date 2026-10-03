@@ -113,8 +113,9 @@ impl TunerProbe for R82xxProbe {
 
             let mut i2c_device = rtl2832u.try_open_i2c(model.i2c_address())?.with_repeater();
 
-            // According to datasheet this is 0x96, but the chip sends data from LSB
-            // to MSB, while the RTL2832U decodes it the other way.
+            // According to datasheet this is 0x96, but the chip sends data from
+            // LSB to MSB, while the RTL2832U decodes it the other
+            // way.
 
             if let Ok(data) = i2c_device.read(rtl2832u, 1).await
                 && data[0] == 0x69
@@ -148,8 +149,9 @@ pub struct R82xx {
 
 impl R82xx {
     pub fn new(i2c_device: I2cDevice, model: Model) -> Self {
-        // librtlsdr has a commented-out `r82xx_xtal_check` in `r82xx_init`. I think it
-        // selects the appropriate capacitor and drive for the crystal.
+        // librtlsdr has a commented-out `r82xx_xtal_check` in `r82xx_init`. I
+        // think it selects the appropriate capacitor and drive for the
+        // crystal.
 
         let crystal_config = CrystalConfig {
             capacitor: CrystalCapacitor::P0,
@@ -232,7 +234,8 @@ impl<'a> Transaction<'a> {
                 // R82xx sends bytes with bits reversed.
                 let value = data[usize::from(i)].reverse_bits();
 
-                // Don't deref_mut into registers directly to avoid setting the dirty bit.
+                // Don't deref_mut into registers directly to avoid setting the
+                // dirty bit.
                 self.registers.set_no_dirty(i, value);
 
                 // also write into backing storage
@@ -333,10 +336,11 @@ impl<'a> Transaction<'a> {
     pub fn initialize(&mut self) {
         tracing::debug!(tuner = ?self.r82xx.model, "initializing");
 
-        // TODO: do we want to remove this and instead explicitely initialize registers
-        // via setters? we should also remove anything that is overwritten immediately
-        // after. we would still have to keep this to initialize some bits that are
-        // never changed. though librtlsdr uses this in a few places.
+        // TODO: do we want to remove this and instead explicitely initialize
+        // registers via setters? we should also remove anything that is
+        // overwritten immediately after. we would still have to keep
+        // this to initialize some bits that are never changed. though
+        // librtlsdr uses this in a few places.
         self.registers[5..NUM_REGISTERS].copy_from_slice(&INITIAL);
 
         // the following initialization is derived from `r82xx_set_tv_standard`
@@ -352,11 +356,12 @@ impl<'a> Transaction<'a> {
         // but they *always* set the vga to a fixed 16 dB in r82xx_freq
         self.set_vga_gain(VgaGain::from_code(0x08).unwrap());
 
-        // when they set the vga gain in r82xx_freq they also always enable the ADC
+        // when they set the vga gain in r82xx_freq they also always enable the
+        // ADC
         //
         // todo: is this ADC even needed when we set the VGA gain via code? our
-        // understanding is that this ADC reads the VAGC pin. if that is the case, move
-        // this into `set_vga_gain`.
+        // understanding is that this ADC reads the VAGC pin. if that is the
+        // case, move this into `set_vga_gain`.
         self.registers.set_unk_adc_enable(false);
 
         // VCO band
@@ -368,10 +373,11 @@ impl<'a> Transaction<'a> {
         self.registers.set_pdet1_gain(0);
 
         // todo: calibration
-        // here during calibration librtlsdr will call r82xx_set_pll, which will set
-        // sel_div.
+        // here during calibration librtlsdr will call r82xx_set_pll, which will
+        // set sel_div.
 
-        // this also done in r82xx_set_pll, which we'll hardcode here for testing
+        // this also done in r82xx_set_pll, which we'll hardcode here for
+        // testing
         //
         // /* set VCO current = 100 */
         // /* rc = r82xx_write_reg_mask(priv, 0x12, 0x80, 0xe0); */
@@ -426,9 +432,9 @@ impl<'a> Transaction<'a> {
         // channel filter extension on
         self.registers.set_filter_ext(true);
 
-        // librtlsdr comments this as "r30[5]:1 ext at lna max-1", but only sets the msb
-        // of pdet_clk to 1, while the rest is still `0b_1010` from initialization.
-        // this is now split from pdet_clk
+        // librtlsdr comments this as "r30[5]:1 ext at lna max-1", but only sets
+        // the msb of pdet_clk to 1, while the rest is still `0b_1010`
+        // from initialization. this is now split from pdet_clk
         self.registers.set_ext_enable(true);
 
         // pwd loop-through off
@@ -445,8 +451,8 @@ impl<'a> Transaction<'a> {
         self.registers.set_unk_rf_poly_filter_current(0b11);
 
         // Enable RF filter power
-        // librtlsdr doesn't do this explicitely here, but it's in the initialized
-        // register bytes.
+        // librtlsdr doesn't do this explicitely here, but it's in the
+        // initialized register bytes.
         self.registers.set_pwd_rffilt(true);
 
         // the following is from `r82xx_sysfreq_sel`
@@ -472,16 +478,17 @@ impl<'a> Transaction<'a> {
         // note the write mask, so discharge_mode, mixer_src and vco_out are not
         // changed.
         //
-        // mixer_top is always 0x24, except DVBT freqiencies 506000000, 666000000,
-        // 818000000
+        // mixer_top is always 0x24, except DVBT freqiencies 506000000,
+        // 666000000, 818000000
         self.registers.set_pdet3_gain(2);
         self.registers.set_unk_lna_top_p1(false);
 
-        // lna_vth_l = 0x53;		/* lna vth 0.84	,  vtl 0.64 */ for ISDBT they use another
-        // value rc = r82xx_write_reg(priv, 0x0d, lna_vth_l);
+        // lna_vth_l = 0x53;		/* lna vth 0.84	,  vtl 0.64 */ for ISDBT they use
+        // another value rc = r82xx_write_reg(priv, 0x0d, lna_vth_l);
         //
-        // => LNA_VTH_H = 0x05, 0b0101 => 0.873V - you'll get 0.84V with rounded step
-        // => LNA_VTH_L = 0x03, 0b0011 => 0.660V - you'll get 0.64V with rounded step
+        // => LNA_VTH_H = 0x05, 0b0101 => 0.873V - you'll get 0.84V with rounded
+        // step => LNA_VTH_L = 0x03, 0b0011 => 0.660V - you'll get 0.64V
+        // with rounded step
         //
         // asserts are here to check if their rounding makes a difference.
 
@@ -494,8 +501,9 @@ impl<'a> Transaction<'a> {
         // mixer_vth_l = 0x75;		/* mixer vth 1.04, vtl 0.84 */
         // rc = r82xx_write_reg(priv, 0x0e, mixer_vth_l);
         //
-        // => MIX_VTH_H = 0x07, 0b0111 => 1.086 - you'll get 1.04 with rounded step
-        // => MIX_VTH_L = 0x05, 0b0101 => 0.873V - you'll get 0.84V with rounded step
+        // => MIX_VTH_H = 0x07, 0b0111 => 1.086 - you'll get 1.04 with rounded
+        // step => MIX_VTH_L = 0x05, 0b0101 => 0.873V - you'll get 0.84V
+        // with rounded step
         //
         let mixer_vth_h = voltage_to_lna_vth(1.04);
         self.registers.set_mixvth_h(mixer_vth_h);
@@ -509,14 +517,15 @@ impl<'a> Transaction<'a> {
         // mask = 0b0110_0000
         //
         // so set PWD_LNA1 = 0(on). this is also labelled `air_in` in librtlsdr.
-        // but we think it's just that they only turn the LNA on for the air_in, and
-        // `cable_1_in`, or `cable_2_in` switch to the other inputs on the R828D.
+        // but we think it's just that they only turn the LNA on for the air_in,
+        // and `cable_1_in`, or `cable_2_in` switch to the other inputs
+        // on the R828D.
         //
-        // and bit 6 to 0, but it is initialized as that and is fixed to that in the
-        // datasheet. this seems to be another input `cable_1_in`
+        // and bit 6 to 0, but it is initialized as that and is fixed to that in
+        // the datasheet. this seems to be another input `cable_1_in`
         //
-        // note that the R820T only has one RF_in. The R828D has 3 inputs: air_in
-        // (RF_in), cable_1_in, cable_2_in
+        // note that the R820T only has one RF_in. The R828D has 3 inputs:
+        // air_in (RF_in), cable_1_in, cable_2_in
         //
         // note: this is now merged into a `select_rf_input`
         //self.registers.set_pwd_lna1(false); // LNA power on
@@ -541,8 +550,8 @@ impl<'a> Transaction<'a> {
 
         // set div_buf_cur
         //
-        // RTL-SDR Blog Hack. Improve L-band performance by setting PLL drop out to 2.0v
-        // div_buf_cur = 0xa0;
+        // RTL-SDR Blog Hack. Improve L-band performance by setting PLL drop out
+        // to 2.0v div_buf_cur = 0xa0;
         // rc = r82xx_write_reg_mask(priv, 0x17, div_buf_cur, 0x30);
         //
         // this write is masked with 0x30, so it just sets 0b10.
@@ -623,8 +632,9 @@ impl<'a> Transaction<'a> {
         if let Ok(selected) = self.selected_rf_input()
             && selected == input
         {
-            // early exit if we wouldn't change anything. this would not cause a register
-            // write anyway, but we don't want to spam the logs
+            // early exit if we wouldn't change anything. this would not cause a
+            // register write anyway, but we don't want to spam the
+            // logs
             return;
         }
 
@@ -680,8 +690,8 @@ impl<'a> Transaction<'a> {
     pub async fn set_center_frequency(&mut self, center_frequency: f32) -> Result<(), Error> {
         let lo_frequency = center_frequency + self.if_frequency;
 
-        // todo: this configures the tracking filter, so why would this use the LO
-        // frequency?
+        // todo: this configures the tracking filter, so why would this use the
+        // LO frequency?
         //
         // we think the crystal config might depend on the LO frequency, but the
         // tracking filter should depend on the RF frequency.
@@ -705,15 +715,17 @@ impl<'a> Transaction<'a> {
         // r82xx_set_vga_gain always sets it to 16.3 dB
         // rc = r82xx_write_reg_mask(priv, 0x0c, 0x08, 0x9f); // 16.3 dB
         //
-        // but when you toggle on tuner agc, it'll set vga to manual 0x0b. so librtlsdr
-        // will just change the vga gain when you change frequency? sounds like a bug.
+        // but when you toggle on tuner agc, it'll set vga to manual 0x0b. so
+        // librtlsdr will just change the vga gain when you change
+        // frequency? sounds like a bug.
         //
         // also code 0x8 is 16 dB, not 16.3 dB
         //assert_eq!(self.registers.vga_code(), 0x08);
 
         //
-        // this also turns on the ADC (unk_adc_enable=false). the reg init array has
-        // this true, so we set this to false (enable) in initialize.
+        // this also turns on the ADC (unk_adc_enable=false). the reg init array
+        // has this true, so we set this to false (enable) in
+        // initialize.
         //
         //self.registers.set_unk_adc_enable(false); // on,
         //assert!(!self.registers.unk_adc_enable());
@@ -760,8 +772,8 @@ impl<'a> Transaction<'a> {
     }
 
     pub fn set_gain_preset(&mut self, gain: TunerGain) -> Result<(), Error> {
-        // note: librtlsdr doesn't really use vga gain. it sets it to 0x0b for auto, and
-        // 0x08 for manual
+        // note: librtlsdr doesn't really use vga gain. it sets it to 0x0b for
+        // auto, and 0x08 for manual
 
         match gain {
             TunerGain::Auto => {
@@ -799,8 +811,9 @@ impl<'a> Transaction<'a> {
         //
         // we don't think librtlsdr ever sets anything but 0pF/high here
         //
-        // also pretty sure that switch in `r82xx_set_mux` just selects the minimum of
-        // both, considering the values they have in `freq_ranges`.
+        // also pretty sure that switch in `r82xx_set_mux` just selects the
+        // minimum of both, considering the values they have in
+        // `freq_ranges`.
         let effective_cystal_config = CrystalConfig {
             capacitor: capacitor.min(self.r82xx.crystal_config.capacitor),
             drive: self.r82xx.crystal_config.drive,
@@ -828,8 +841,8 @@ impl<'a> Transaction<'a> {
         // /* set pll autotune = 128kHz */
         // rc = r82xx_write_reg_mask(priv, 0x1a, 0x00, 0x0c);
         //
-        // but this also set in initialize, and librtlsdr changes this at the end of the
-        // function
+        // but this also set in initialize, and librtlsdr changes this at the
+        // end of the function
         self.registers
             .set_pll_auto_clk(PllAutoTuneClockRate::Khz128.into());
         self.flush().await?;
@@ -850,7 +863,8 @@ impl<'a> Transaction<'a> {
         // /* RTL-SDR Blog Modification: Set VCO current to MAX */
         // rc = r82xx_write_reg_mask(priv, 0x12, 0x06, 0xff);
         //
-        // so the original code didn't touch the other bits and set vco_current to 0b100
+        // so the original code didn't touch the other bits and set vco_current
+        // to 0b100
         //
         // vco_current = 0b000 (set to 0b000 in initialize)
         // dis_dither = false (false in reg init array)
@@ -872,9 +886,9 @@ impl<'a> Transaction<'a> {
 
         let sel_div = SelDiv::from_frequency(lo_frequency);
 
-        // todo: librtlsdr adjusts the sel_div value using vco_fine_tune, though we
-        // haven't actually observed this taking effect (we tuned a bit while logging
-        // some values in r82xx_set_pll).
+        // todo: librtlsdr adjusts the sel_div value using vco_fine_tune, though
+        // we haven't actually observed this taking effect (we tuned a
+        // bit while logging some values in r82xx_set_pll).
 
         self.registers.set_sel_div(sel_div.into());
 
@@ -913,8 +927,8 @@ impl<'a> Transaction<'a> {
         {
             // check PLL lock
 
-            // librtlsdr has commented-out delays. they start at 10ms and are increased by
-            // 1ms after each check
+            // librtlsdr has commented-out delays. they start at 10ms and are
+            // increased by 1ms after each check
             const RETRY_INTERVAL: Duration = Duration::from_millis(10);
             // librtlsdr only checks at most twice
             const MAX_ATTEMPTS: usize = 5;
@@ -960,12 +974,13 @@ impl<'a> Transaction<'a> {
         self.shutdown_ours();
 
         {
-            // todo: this will check if we shutdown the r82xx with our more verbose method
-            // the same way that librtlsdr would. if not we log warnings and run the
-            // librtlsdr sequence.
+            // todo: this will check if we shutdown the r82xx with our more
+            // verbose method the same way that librtlsdr would. if
+            // not we log warnings and run the librtlsdr sequence.
             //
-            // the dongle gets funky when standby is not done right. but it seems to
-            // work pretty well now. we'll leave this here for a while
+            // the dongle gets funky when standby is not done right. but it
+            // seems to work pretty well now. we'll leave this here
+            // for a while
 
             let mut any_difference = false;
             for (i, expected) in SHUTDOWN_REGISTERS.iter().copied() {
@@ -1037,12 +1052,13 @@ impl<'a> Transaction<'a> {
 
         // 0x11
 
-        // todo: this is set to 0x68 for standby, but it's also initialized that way.
-        // the spreadsheet lists ldo5vh and pwd_ldo_5v here that seem power-related, but
-        // we never switch them(?). need to investigate these.
+        // todo: this is set to 0x68 for standby, but it's also initialized that
+        // way. the spreadsheet lists ldo5vh and pwd_ldo_5v here that
+        // seem power-related, but we never switch them(?). need to
+        // investigate these.
         //
-        // also librtlsdr sets pwd_ldo_5v=0 for standby, but according to spreadsheet,
-        // this means on.
+        // also librtlsdr sets pwd_ldo_5v=0 for standby, but according to
+        // spreadsheet, this means on.
 
         self.registers.set_pw_ldo_a(0);
         self.registers.set_unk_cp_cur(0);
@@ -1054,7 +1070,8 @@ impl<'a> Transaction<'a> {
         self.registers.set_open_d(false);
 
         // 0x19
-        // librtlsdr sets ring_pw (0x19 [3:2]) to 0b11, but it's initialized as that.
+        // librtlsdr sets ring_pw (0x19 [3:2]) to 0b11, but it's initialized as
+        // that.
         self.registers.set_pwd_rffilt(false); // turn off RF filter power
         self.registers.set_unk_rf_poly_filter_current(0);
 

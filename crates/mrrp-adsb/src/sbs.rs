@@ -74,8 +74,9 @@ impl<R: AsyncRead> Stream for Reader<R> {
             let this = self.as_mut().project();
 
             if let Some(line) = this.receive_buffer.next_line() {
-                // note: SBS seems to use `\r\n` for newlines, but we split lines at either. so
-                // we accept `\r` or `\n`, and `\r\n` will produce an empty line, which we
+                // note: SBS seems to use `\r\n` for newlines, but we split
+                // lines at either. so we accept `\r` or `\n`,
+                // and `\r\n` will produce an empty line, which we
                 // ignore.
                 //
                 // note: readsb also sends empty lines as heartbeat messages

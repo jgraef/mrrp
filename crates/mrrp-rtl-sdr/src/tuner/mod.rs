@@ -480,8 +480,8 @@ pub mod gain {
         pub fn from_db(gain: f32, available_gains: &[f32]) -> Self {
             let index = closest_gain(gain, available_gains);
 
-            // if `gains` is empty, this will return `None`. Should we return an error in
-            // that case?
+            // if `gains` is empty, this will return `None`. Should we return an
+            // error in that case?
             let index = index.unwrap_or_default();
 
             Self(index)
@@ -522,13 +522,14 @@ pub mod gain {
                 if index_after == available_gains.len() {
                     // value is larger than the last gain entry, so return that.
                     //
-                    // there's the edge case that the gains array is empty. in that case we return
-                    // `None`
+                    // there's the edge case that the gains array is empty. in
+                    // that case we return `None`
                     index_after.checked_sub(1)
                 }
                 else if let Some(index_before) = index_after.checked_sub(1) {
-                    // value is less than `index_after`, but greater than `index_before`. check
-                    // which one is closer
+                    // value is less than `index_after`, but greater than
+                    // `index_before`. check which one is
+                    // closer
                     let distance_before = gain - available_gains[index_before];
                     let distance_after = available_gains[index_after] - gain;
                     assert!(distance_before > 0.0);
@@ -542,7 +543,8 @@ pub mod gain {
                     }
                 }
                 else {
-                    // value is smaller than the first gain entry, so return that
+                    // value is smaller than the first gain entry, so return
+                    // that
                     Some(index_after)
                 }
             }
