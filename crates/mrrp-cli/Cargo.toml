@@ -9,7 +9,7 @@ repository.workspace = true
 anyhow.workspace = true
 bytes.workspace = true
 chrono.workspace = true
-clap.workspace = true
+clap = { workspace = true, features = ["env"] }
 directories = "6.0.0"
 dotenvy.workspace = true
 futures-util.workspace = true

@@ -9,19 +9,18 @@ use mrrp_sat::{
     Geodetic,
     pass::{
         CompletePass,
-        PassDetector,
         PassEvent,
+        PassEvents,
+        PassEventsOptions,
     },
-    satellite::{
-        OrbitPropagationCache,
-        ReferenceState,
-        Satellite,
-    },
+    satellite::Satellite,
 };
 use tabled::{
     Table,
     Tabled,
 };
+
+use crate::TableStyle;
 
 #[derive(Clone, Debug, clap::Args)]
 pub struct Options {
@@ -62,69 +61,47 @@ impl Default for Options {
     }
 }
 
-pub fn list(satellite: &Satellite, location: Geodetic, options: Options) -> Result<(), Error> {
-    let mut time = options.start_time.unwrap_or_else(Utc::now);
-    let mut times = vec![];
-
-    let mut orbit_propagation_cache = OrbitPropagationCache::default();
-    let mut pass_detector = PassDetector::new(
-        options.min_elevation,
-        ReferenceState::from_geodetic(location),
-    );
-
+pub fn list(
+    satellite: &Satellite,
+    location: Geodetic,
+    options: Options,
+    table_style: TableStyle,
+) -> Result<(), Error> {
     let mut rows = vec![];
 
-    while options.limit.is_none_or(|limit| rows.len() < limit) {
-        // fill times buffer with next batch of timestamps
-        fill_times(
-            &mut time,
-            options.end_time,
-            options.predict_interval,
-            options.batch_size,
-            &mut times,
-        );
+    let passes = PassEvents::new(
+        satellite,
+        location,
+        PassEventsOptions {
+            start_time: options.start_time,
+            predict_interval: options.predict_interval,
+            batch_size: options.batch_size,
+            min_elevation: options.min_elevation,
+        },
+    );
 
-        // if fill_times returns with an empty buffer, we are past
-        // `options.end_time`
-        if times.is_empty() {
-            break;
-        }
-
-        // predict satellite states
-        let satellite_states = satellite.predict_state(&times, &mut orbit_propagation_cache)?;
-
-        for state in &satellite_states {
-            match pass_detector.push(*state) {
-                Some(PassEvent::End(complete)) => {
-                    rows.push(TableRow::from(complete));
+    for result in passes {
+        match result? {
+            PassEvent::End(complete) => {
+                if options
+                    .end_time
+                    .is_some_and(|end_time| complete.start.state.time() > end_time)
+                    || options.limit.is_some_and(|limit| limit >= rows.len())
+                {
+                    break;
                 }
-                _ => {}
+
+                rows.push(TableRow::from(complete));
             }
+            _ => {}
         }
     }
 
-    println!("{}", Table::new(&rows));
+    let mut table = Table::new(&rows);
+    table.with(table_style);
+    println!("{}", table);
 
     Ok(())
-}
-
-fn fill_times(
-    time: &mut DateTime<Utc>,
-    end_time: Option<DateTime<Utc>>,
-    predict_interval: Duration,
-    batch_size: usize,
-    buffer: &mut Vec<DateTime<Utc>>,
-) {
-    buffer.clear();
-    buffer.reserve(batch_size);
-
-    for _ in 0..batch_size {
-        if end_time.is_some_and(|end_time| *time > end_time) {
-            break;
-        }
-        buffer.push(*time);
-        *time += Duration::from_secs_f32(predict_interval.as_secs_f32());
-    }
 }
 
 #[derive(Debug, Tabled)]

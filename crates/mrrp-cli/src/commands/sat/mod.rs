@@ -18,6 +18,7 @@ use std::{
 use anyhow::{
     Error,
     anyhow,
+    bail,
 };
 use chrono::{
     DateTime,
@@ -59,27 +60,25 @@ use mrrp_util::{
 
 pub use self::config::Config;
 use crate::{
+    Context,
     commands::rtl_sdr::open::DeviceArgs,
-    files::{
-        Files,
-        create_parent_dir_if_not_exists,
-    },
+    files::create_parent_dir_if_not_exists,
 };
 
-pub async fn run(args: Args, files: Files) -> Result<(), Error> {
-    let config = files.config()?.sat;
-    let data_dir = files.data_dir();
+pub async fn run(context: Context<Args>) -> Result<(), Error> {
+    let data_dir = context.files.data_dir();
+    let config = context.config.sat;
 
     // open satellite data
     let mut satellites = SatelliteDatabase::open(data_dir.join("satellites.json"))?;
 
     // perform update if necessary, but skip this invoked with update command
-    let updater = Updater::new(&data_dir);
-    if !matches!(&args.command, Command::Update) && !args.no_auto_update {
+    let updater = Updater::new(&data_dir, config.min_update_interval);
+    if !matches!(&context.args.command, Command::Update) && !context.args.no_auto_update {
         updater.perform_auto_update(&mut satellites).await?;
     }
 
-    match args.command {
+    match context.args.command {
         Command::Update => {
             tracing::info!("Performing forced update");
             updater.perform_update(&mut satellites).await?;
@@ -142,32 +141,28 @@ pub async fn run(args: Args, files: Files) -> Result<(), Error> {
             sat_id,
             nominal_frequency,
             start_time,
+            file_start_time,
             predict_interval,
             output,
             input,
         } => {
-            let start_time = start_time.map(Ok).unwrap_or_else(|| {
-                // use file creation time
-                let metadata = std::fs::metadata(&input)?;
-                let created = metadata.created()?;
-                Ok::<DateTime<Utc>, Error>(created.into())
-            })?;
+            let start_time = match (start_time, file_start_time) {
+                (Some(start_time), false) => start_time,
+                (None, true) => {
+                    // use file creation time
+                    let metadata = std::fs::metadata(&input)?;
+                    let created = metadata.created()?;
+                    created.into()
+                }
+                _ => {
+                    bail!(
+                        "Start time must be specified either via --start-time or --file-start-time."
+                    );
+                }
+            };
 
-            let location = config
-                .station
-                .as_ref()
-                .ok_or_else(|| anyhow!("Station not configured"))?
-                .location;
-
-            tracing::debug!(%sat_id, nominal_frequency, ?input, ?output, "Correcting doppler");
-
-            let satellite = satellites
-                .get(
-                    satellites
-                        .get_by_id(&sat_id)
-                        .ok_or_else(|| anyhow!("Satellite not found: {sat_id}"))?,
-                )
-                .unwrap();
+            let location = get_location(&config)?;
+            let satellite = get_satellite(&satellites, &sat_id)?;
 
             correct_doppler(
                 satellite,
@@ -184,25 +179,14 @@ pub async fn run(args: Args, files: Files) -> Result<(), Error> {
             sat_id,
             mut options,
         } => {
-            let location = config
-                .station
-                .as_ref()
-                .ok_or_else(|| anyhow!("Station not configured"))?
-                .location;
-
-            let satellite = satellites
-                .get(
-                    satellites
-                        .get_by_id(&sat_id)
-                        .ok_or_else(|| anyhow!("Satellite not found: {sat_id}"))?,
-                )
-                .unwrap();
-
             if options.end_time.is_none() && options.limit.is_none() {
                 options.limit = Some(20);
             }
 
-            passes::list(satellite, location, options)?;
+            let location = get_location(&config)?;
+            let satellite = get_satellite(&satellites, &sat_id)?;
+
+            passes::list(satellite, location, options, context.global.table_style)?;
         }
         Command::CapturePasses {
             output,
@@ -233,6 +217,30 @@ pub async fn run(args: Args, files: Files) -> Result<(), Error> {
     }
 
     Ok(())
+}
+
+fn get_location(config: &Config) -> Result<Geodetic, Error> {
+    let location = *config
+        .location
+        .as_ref()
+        .ok_or_else(|| anyhow!("Station not configured"))?;
+
+    Ok(location)
+}
+
+fn get_satellite<'a>(
+    satellites: &'a Satellites,
+    sat_id: &SatelliteId,
+) -> Result<&'a Satellite, Error> {
+    let satellite = satellites
+        .get(
+            satellites
+                .get_by_id(&sat_id)
+                .ok_or_else(|| anyhow!("Satellite not found: {sat_id}"))?,
+        )
+        .unwrap();
+
+    Ok(satellite)
 }
 
 /// Satellite tracking
@@ -284,10 +292,12 @@ enum Command {
         nominal_frequency: f32,
 
         /// Start time of the capture.
-        ///
-        /// If omitted the file creation time will be used.
         #[clap(short = 't', long)]
         start_time: Option<DateTime<Utc>>,
+
+        /// Use file creation time as start time.
+        #[clap(short = 'T', long)]
+        file_start_time: bool,
 
         /// How often the orbit propagation should run.
         ///
@@ -477,7 +487,7 @@ async fn correct_doppler(
     let input = input.as_ref();
     let output = output.as_ref();
 
-    tracing::debug!(sat=satellite.name(), tle=?satellite.tle(), "Correcting doppler");
+    tracing::debug!(sat=%satellite.id(), tle=?satellite.tle(), "Correcting doppler");
 
     // open source file
     let source = WavSource::<_, Complex<i16>>::from_path(&input)?.convert::<Complex<f32>>();

@@ -21,13 +21,12 @@ pub struct Updater {
 }
 
 impl Updater {
-    pub fn new(data_dir: impl AsRef<Path>) -> Self {
+    pub fn new(data_dir: impl AsRef<Path>, min_update_interval: TimeDelta) -> Self {
         let last_update_time_path = data_dir.as_ref().join("last_update.txt");
 
         Self {
             last_update_time_path,
-            // todo: make this configurable
-            min_update_interval: TimeDelta::days(1),
+            min_update_interval,
         }
     }
 

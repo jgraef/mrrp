@@ -8,12 +8,32 @@ use serde::{
     Serialize,
 };
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
-    pub station: Option<StationConfig>,
+    pub location: Option<Geodetic>,
 
     #[serde(default)]
     pub tracker: TrackerConfig,
+
+    #[serde(
+        default = "default_min_update_interval",
+        deserialize_with = "crate::util::deserialize_human_time_delta"
+    )]
+    pub min_update_interval: TimeDelta,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            location: None,
+            tracker: Default::default(),
+            min_update_interval: default_min_update_interval(),
+        }
+    }
+}
+
+fn default_min_update_interval() -> TimeDelta {
+    TimeDelta::days(14)
 }
 
 impl Config {
@@ -22,15 +42,10 @@ impl Config {
             look_back: self.tracker.look_back,
             look_ahead: self.tracker.look_ahead,
             time_resolution: self.tracker.time_resolution,
-            base_station: self.station.as_ref().map(|station| station.location),
+            base_station: self.location,
             min_elevation: self.tracker.min_elevation,
         }
     }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct StationConfig {
-    pub location: Geodetic,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

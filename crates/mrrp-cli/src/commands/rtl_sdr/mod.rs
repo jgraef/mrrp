@@ -38,6 +38,7 @@ use tokio::{
 };
 
 use crate::{
+    Context,
     commands::rtl_sdr::{
         gpio::{
             GpioCommand,
@@ -60,8 +61,8 @@ use crate::{
     },
 };
 
-pub async fn run(args: Args) -> Result<(), Error> {
-    match args.command {
+pub async fn run(context: Context<Args>) -> Result<(), Error> {
+    match context.args.command {
         Command::List => {
             for device_info in mrrp_rtl_sdr::enumerate_devices().await? {
                 println!("{device_info:#?}");

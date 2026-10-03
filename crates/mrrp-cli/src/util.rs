@@ -1,9 +1,16 @@
 use std::{
+    borrow::Cow,
     str::FromStr,
     sync::OnceLock,
+    time::Duration,
 };
 
+use chrono::TimeDelta;
 use num_traits::float::FloatCore;
+use serde::{
+    Deserialize,
+    Deserializer,
+};
 use tokio_util::sync::CancellationToken;
 
 pub fn parse_degrees_as_radians<T>(s: &str) -> Result<T, T::Err>
@@ -44,4 +51,20 @@ pub async fn run_til_shutdown<R>(fut: impl Future<Output = R>) -> Option<R> {
         _ = cancellation_token.cancelled() => None,
         output = fut => Some(output),
     }
+}
+
+pub fn deserialize_human_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s: Cow<'de, str> = Deserialize::deserialize(deserializer)?;
+    humantime::parse_duration(&s).map_err(serde::de::Error::custom)
+}
+
+pub fn deserialize_human_time_delta<'de, D>(deserializer: D) -> Result<TimeDelta, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let duration = deserialize_human_duration(deserializer)?;
+    TimeDelta::from_std(duration).map_err(serde::de::Error::custom)
 }
