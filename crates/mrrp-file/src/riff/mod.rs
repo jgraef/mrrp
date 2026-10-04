@@ -14,7 +14,10 @@ use byteorder::{
     ReadBytesExt,
 };
 
-use crate::riff::four_cc::FourCC;
+use crate::{
+    riff::four_cc::FourCC,
+    util::limit::LimitReader,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -64,26 +67,26 @@ where
     }
 
     pub fn list<'a>(&'a mut self, chunk_ref: ChunkRef) -> Result<ListReader<'a, R>, Error> {
-        self.reader.seek(SeekFrom::Start(chunk_ref.offset))?;
+        let mut limited =
+            LimitReader::new_seek(&mut self.reader, chunk_ref.offset, chunk_ref.size.into())?;
 
-        let list_id = ListId::read(&mut self.reader)?;
+        let list_id = ListId::read(&mut limited)?;
         tracing::debug!(?chunk_ref, ?list_id, "list");
 
         Ok(ListReader {
-            reader: Reader::new(LimitReader::new(
-                &mut self.reader,
-                chunk_ref.offset,
-                chunk_ref.size.into(),
-            )),
+            reader: Reader::new(limited),
             skip: 0,
             list_id,
         })
     }
 
     pub fn data<'a>(&'a mut self, chunk_ref: ChunkRef) -> Result<DataReader<'a, R>, Error> {
-        self.reader.seek(SeekFrom::Start(chunk_ref.offset))?;
         Ok(DataReader {
-            inner: LimitReader::new(&mut self.reader, chunk_ref.offset, chunk_ref.size.into()),
+            inner: LimitReader::new_seek(
+                &mut self.reader,
+                chunk_ref.offset,
+                chunk_ref.size.into(),
+            )?,
         })
     }
 }
@@ -251,59 +254,5 @@ where
     #[inline]
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
         self.inner.seek(pos)
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct LimitReader<R> {
-    inner: R,
-    offset: u64,
-    size: u64,
-}
-
-impl<R> LimitReader<R> {
-    pub fn new(inner: R, offset: u64, size: u64) -> Self {
-        Self {
-            inner,
-            offset,
-            size,
-        }
-    }
-}
-
-impl<R> Read for LimitReader<R>
-where
-    R: Read + Seek,
-{
-    fn read(&mut self, buf: &mut [u8]) -> Result<usize, std::io::Error> {
-        let position = self.inner.stream_position()?;
-        let remaining = (self.size + self.offset).saturating_sub(position);
-
-        let n_limited = buf.len().min(remaining.try_into().unwrap_or(usize::MAX));
-
-        self.inner.read(&mut buf[..n_limited])
-    }
-}
-
-impl<R> Seek for LimitReader<R>
-where
-    R: Seek,
-{
-    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        let offset = match pos {
-            SeekFrom::Start(offset) => Some(self.offset + offset),
-            SeekFrom::End(offset) => (self.offset + self.size).checked_add_signed(offset),
-            SeekFrom::Current(offset) => self.inner.stream_position()?.checked_add_signed(offset),
-        };
-
-        if let Some(offset) = offset
-            && offset >= self.offset
-            && offset < self.offset + self.size
-        {
-            self.inner.seek(SeekFrom::Start(offset))
-        }
-        else {
-            Err(std::io::ErrorKind::UnexpectedEof.into())
-        }
     }
 }
