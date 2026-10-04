@@ -15,6 +15,8 @@ use chrono::{
     Utc,
 };
 
+use crate::util::SourceInfo;
+
 pub fn parse_path(path: impl AsRef<Path>) -> Result<FileInfo, Error> {
     let path = path.as_ref();
     let file_name = path
@@ -75,11 +77,20 @@ pub fn parse_file_name(file_name: &str) -> Result<FileInfo, Error> {
     })
 }
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct FileInfo {
     pub recording_type: RecordingType,
     pub center_frequency: u32,
     pub timestamp: DateTime<Local>,
+}
+
+impl FileInfo {
+    pub fn source_info(&self) -> SourceInfo {
+        SourceInfo {
+            frequency: self.center_frequency as f32,
+            start_time: DateTime::<Utc>::from(self.timestamp),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

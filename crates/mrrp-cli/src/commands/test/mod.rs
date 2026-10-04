@@ -1,4 +1,5 @@
 pub mod ariss;
+pub mod miq;
 
 use std::{
     fs::File,
@@ -96,6 +97,7 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
             tracing::info!(?output, "writing image");
             image.save(&output)?;
         }
+        Command::Miq(args) => miq::run(args, context).await?,
     }
 
     Ok(())
@@ -130,6 +132,7 @@ enum Command {
 
         input: PathBuf,
     },
+    Miq(miq::Args),
 }
 
 async fn render_waterfall<R>(
