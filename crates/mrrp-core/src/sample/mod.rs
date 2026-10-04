@@ -1,4 +1,5 @@
 mod conversion;
+pub mod encoding;
 mod types;
 
 pub use num_complex::Complex;
