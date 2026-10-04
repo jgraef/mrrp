@@ -14,12 +14,16 @@ This project consists of a number of different crates:
 
 - `mrrp`: This just pulls in and re-exports some other crates to make it easier for application development and prototyping.
 - `mrrp-adsb`: Mode-S / ADS-B demodulation and decoding.
+- `mrrp-audio`: Read/Write WAVE files, play audio.
+- `mrrp-cli`: Command-line interface
+ - `rtl-sdr`: Interface RTL-SDR dongles. Debugging, `rtl_tcp` with fan-out.
+ - `sat`: List satellite passes, correct doppler shift in files, etc.
 - `mrrp-core`: Defines the main traits and types for DSP.
+- `mrrp-file`: File formats (WIP)
 - `mrrp-filter`: Signal filtering and filter synthesis.
 - `mrrp-hamlib`: WIP hamlib rigctl client and server.
 - `mrrp-modem`: General-purpose modulation & demodulations (e.g. FM).
 - `mrrp-rtl-sdr`: From-scratch RTL-SDR driver in async Rust.
-- `mrrp-rtl-sdr-test`: Test CLI for `mrrp-rtl-sdr`. This will become a more useful CLI program for using RTL-SDRs - similar to that librtlsdr offers.
 - `mrrp-rtl-tcp`: Client and server implementation of the `rtl_tcp` protocol.
 - `mrrp-sat`: Satellite tracking
 - `mrrp-sdr`: SDR GUI application
