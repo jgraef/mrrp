@@ -51,6 +51,15 @@ async fn main() -> Result<(), Error> {
             })
             .await?
         }
+        Command::Test(args) => {
+            commands::test::run(Context {
+                args,
+                global,
+                files,
+                config,
+            })
+            .await?
+        }
     }
 
     Ok(())
@@ -76,6 +85,7 @@ struct Args {
 enum Command {
     RtlSdr(commands::rtl_sdr::Args),
     Sat(commands::sat::Args),
+    Test(commands::test::Args),
 }
 
 #[derive(Clone, Debug, clap::Args)]

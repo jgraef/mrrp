@@ -6,6 +6,7 @@ members = [
     "crates/mrrp-audio",
     "crates/mrrp-cli",
     "crates/mrrp-core",
+    "crates/mrrp-file",
     "crates/mrrp-filter",
     "crates/mrrp-hamlib",
     "crates/mrrp-modem",
@@ -52,6 +53,7 @@ overflow-checks = true
 [workspace.dependencies]
 mrrp-audio = { path = "crates/mrrp-audio", default-features = false }
 mrrp-core = { path = "crates/mrrp-core", default-features = false }
+mrrp-file = { path = "crates/mrrp-file", default-features = false }
 mrrp-filter = { path = "crates/mrrp-filter", default-features = false }
 mrrp-modem = { path = "crates/mrrp-modem", default-features = false }
 mrrp-rtl-sdr = { path = "crates/mrrp-rtl-sdr", default-features = false }
