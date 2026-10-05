@@ -1,3 +1,7 @@
+pub mod qth;
+
+pub use qth::Qth;
+
 /// Geodetic coordinates
 ///
 /// Geodetic coordinates with altitude relative to the WGS84 ellipsoid.
@@ -12,6 +16,16 @@ pub struct Geodetic {
 
     /// Altitude in meters (above the WGS84 ellipsoid)
     pub altitude: f64,
+}
+
+impl Geodetic {
+    #[inline]
+    pub fn as_horizontal(&self) -> HorizontalGeodetic {
+        HorizontalGeodetic {
+            latitude: self.latitude,
+            longitude: self.longitude,
+        }
+    }
 }
 
 /// Horizontal geodetic coordinates
@@ -29,6 +43,7 @@ pub struct HorizontalGeodetic {
 }
 
 impl HorizontalGeodetic {
+    #[inline]
     pub fn with_altitude(&self, altitude: f64) -> Geodetic {
         Geodetic {
             latitude: self.latitude,
@@ -39,10 +54,8 @@ impl HorizontalGeodetic {
 }
 
 impl From<Geodetic> for HorizontalGeodetic {
+    #[inline]
     fn from(value: Geodetic) -> Self {
-        HorizontalGeodetic {
-            latitude: value.latitude,
-            longitude: value.longitude,
-        }
+        value.as_horizontal()
     }
 }

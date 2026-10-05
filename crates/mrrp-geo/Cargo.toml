@@ -7,7 +7,11 @@ repository.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"], optional = true }
+thiserror.workspace = true
 
 [features]
 default = []
 serde = ["dep:serde"]
+
+[dev-dependencies]
+approx = "0.5.1"
