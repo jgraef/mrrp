@@ -33,7 +33,7 @@ pub struct Options {
     #[clap(short = 'n', long)]
     pub limit: Option<usize>,
 
-    #[clap(short, long, default_value = "30s", value_parser = humantime::parse_duration)]
+    #[clap(short, long, default_value = "5s", value_parser = humantime::parse_duration)]
     pub predict_interval: Duration,
 
     #[clap(short = 'b', long, default_value = "1024")]
@@ -42,7 +42,7 @@ pub struct Options {
     #[clap(
         short = 'e',
         long,
-        default_value = "10",
+        default_value = "0",
         value_parser = crate::util::parse_degrees_as_radians::<f64>,
     )]
     pub min_elevation: f64,

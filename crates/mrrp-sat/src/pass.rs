@@ -179,6 +179,14 @@ impl<'a> PassEvents<'a> {
             pass_detector,
         }
     }
+
+    pub fn set_cache(&mut self, cache: OrbitPropagationCache) {
+        self.orbit_propagation_cache = cache;
+    }
+
+    pub fn get_cache(&self) -> OrbitPropagationCache {
+        self.orbit_propagation_cache.clone()
+    }
 }
 
 impl<'a> Iterator for PassEvents<'a> {

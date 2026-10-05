@@ -567,21 +567,28 @@ pub struct RelativeState {
 impl RelativeState {
     /// Azimuth in radians
     pub fn azimuth(&self) -> f64 {
-        // todo: verify this is correct
+        // since we're using North-Clockwise convention atan2(x, y) should be
+        // correct.
+        //
+        // cross-checked with gpredict, and it looks corrrect. but we output in
+        // range [-180°, 180°], while gpredict uses [0°, 360°].
+        //
+        // https://en.wikipedia.org/wiki/Atan2#East-counterclockwise,_north-clockwise_and_south-clockwise_conventions,_etc.
+
         self.position.x().atan2(self.position.y())
     }
 
     /// Elevation in radians
     pub fn elevation(&self) -> f64 {
-        let x = numeris::vector![self.position.x() + self.position.y()].norm();
-        let y = self.position.z();
-        (x / y).atan()
+        (self.position.z() / self.position.norm()).asin()
     }
 
+    /// Distance in m
     pub fn distance(&self) -> f64 {
         self.position.norm()
     }
 
+    /// Radial speed in m/s
     pub fn radial_speed(&self) -> f64 {
         self.position.normalize().dot(&self.velocity)
     }
