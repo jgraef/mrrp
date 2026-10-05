@@ -1,7 +1,12 @@
 use std::{
     fmt::Debug,
-    io::Write,
+    fs::File,
+    io::{
+        BufWriter,
+        Write,
+    },
     marker::PhantomData,
+    path::Path,
 };
 
 use serde::Serialize;
@@ -15,7 +20,7 @@ use crate::miq::{
     },
     stream::{
         IQ_TAG,
-        SampleFormat,
+        Sample,
         StreamEnd,
         StreamId,
         StreamInfo,
@@ -65,37 +70,45 @@ where
         })
     }
 
-    pub fn start_stream<E>(
+    pub fn start_stream<T, E>(
         &mut self,
-        sample_format: SampleFormat,
         stream_info: StreamInfo,
         encoder: E,
-    ) -> Result<StreamWriter<E>, Error> {
+    ) -> Result<StreamWriter<T, E>, Error>
+    where
+        T: Sample,
+        E: Encoder<T>,
+    {
         let stream_id = StreamId(self.next_stream_id);
         self.next_stream_id += 1;
 
         self.container.write_cbor_chunk(&StreamStart {
             stream_id,
-            sample_format,
+            sample_format: T::SAMPLE_FORMAT,
             samples: None,
             stream_info,
         })?;
 
-        Ok(StreamWriter { stream_id, encoder })
+        Ok(StreamWriter {
+            stream_id,
+            encoder,
+            _marker: PhantomData,
+        })
     }
 
     #[inline]
-    pub fn end_stream<E>(&mut self, stream_writer: StreamWriter<E>) -> Result<(), Error> {
+    pub fn end_stream<T, E>(&mut self, stream_writer: StreamWriter<T, E>) -> Result<(), Error> {
         self.container.write_cbor_chunk(&StreamEnd {
             stream_id: stream_writer.stream_id,
+            stream_info: Default::default(),
         })?;
         Ok(())
     }
 
     #[inline]
-    pub fn update_stream_info<E, U>(
+    pub fn update_stream_info<T, E, U>(
         &mut self,
-        stream_writer: &StreamWriter<E>,
+        stream_writer: &StreamWriter<T, E>,
         stream_info: StreamInfo<U>,
     ) -> Result<(), Error>
     where
@@ -108,9 +121,12 @@ where
         Ok(())
     }
 
-    pub fn iq_data<'a, E, T>(
+    // note: this is not pub, because we think the better API is to have
+    // `begin_write` on `StreamWriter`. but from a low-level API perspective,
+    // this just writes an IQ data chunk.
+    fn iq_data<'a, T, E>(
         &'a mut self,
-        stream_writer: &'a mut StreamWriter<E>,
+        stream_writer: &'a mut StreamWriter<T, E>,
     ) -> Result<IqWriter<'a, W, E, T>, Error> {
         // todo: this should return an IQ writer thingie. we might want that
         // thingie to have a type-parameter for the sample format. we would need
@@ -133,16 +149,39 @@ where
     }
 }
 
-#[derive(Debug)]
-pub struct StreamWriter<E> {
-    stream_id: StreamId,
-    encoder: E,
+impl Writer<BufWriter<File>> {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
+        Self::new(BufWriter::new(File::create(path)?))
+    }
 }
 
-impl<E> StreamWriter<E> {
+// todo: we would like to merge IqWriter into this. we can probably do this if
+// we don't use the BufferedChunkWriter, but manage the buffer in StreamWriter.
+// Then we can buffer here to avoid writing too few samples into a chunk. We
+// also want to flush the buffer by writing a chunk whenever the number of
+// buffered samples exceeds some limit.
+#[derive(Debug)]
+pub struct StreamWriter<T, E> {
+    stream_id: StreamId,
+    encoder: E,
+    _marker: PhantomData<fn(&[T])>,
+}
+
+impl<T, E> StreamWriter<T, E> {
     #[inline]
     pub fn stream_id(&self) -> StreamId {
         self.stream_id
+    }
+
+    #[inline]
+    pub fn start_write<'a, W>(
+        &'a mut self,
+        writer: &'a mut Writer<W>,
+    ) -> Result<IqWriter<'a, W, E, T>, Error>
+    where
+        W: Write,
+    {
+        writer.iq_data(self)
     }
 }
 

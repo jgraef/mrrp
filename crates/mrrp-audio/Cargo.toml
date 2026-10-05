@@ -6,11 +6,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-derive_more = { workspace = true, features = ["debug"] }
-hound = { version = "3.5.1", optional = true }
 mrrp-core.workspace = true
+mrrp-file = { workspace = true, features = ["wav"], optional = true }
 mrrp-util.workspace = true
-num-complex.workspace = true
 parking_lot = { workspace = true, optional = true }
 rodio = { version = "0.22.2", optional = true }
 thiserror.workspace = true
@@ -19,5 +17,5 @@ tokio = { workspace = true, features = ["rt", "sync"], optional = true }
 [features]
 default = ["full"]
 full = ["wav", "rodio"]
-wav = ["dep:hound"]
+wav = ["dep:mrrp-file"]
 rodio = ["dep:rodio", "dep:parking_lot", "dep:tokio"]

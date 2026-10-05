@@ -20,6 +20,10 @@
 //!
 //! `flags` and `size` are encoded as big endian.
 //!
+//! The contents of a chunk follow immediately after the header. The size of the
+//! contents is defined by `size`. The contents are padded to a length of a
+//! multiple of 8 bytes, but at least to a length of 8 bytes.
+//!
 //! ### Tags
 //!
 //! Tags define the chunk type and how the contents of the chunk are to be

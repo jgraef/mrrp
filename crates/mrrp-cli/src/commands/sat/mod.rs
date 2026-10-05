@@ -29,16 +29,16 @@ use clap::{
     Parser,
     Subcommand,
 };
-use mrrp_audio::{
-    WavSource,
-    write_stream_to_wav,
-};
 use mrrp_core::{
     sample::Complex,
     signal::{
         FiniteStream,
         GetSampleRate,
     },
+};
+use mrrp_file::wav::{
+    WavSource,
+    write_stream_to_wav,
 };
 use mrrp_sat::{
     Geodetic,

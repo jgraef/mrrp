@@ -1,9 +1,6 @@
 pub mod pcm;
 
-use std::io::{
-    Read,
-    Write,
-};
+use std::io::Write;
 
 // todo: this whole thing is very generic and useful outside of miq. in fact we
 // already have something very similar in `mrrp_util::signal::pcm`.
@@ -18,7 +15,7 @@ use std::io::{
 pub trait Encoder<T> {
     type Error;
 
-    fn write_samples<W>(&mut self, samples: &[T], output: &mut W) -> Result<(), Self::Error>
+    fn write_samples<W>(&mut self, samples: &[T], output: W) -> Result<(), Self::Error>
     where
         W: Write;
 }
@@ -26,7 +23,5 @@ pub trait Encoder<T> {
 pub trait Decoder<T> {
     type Error;
 
-    fn read_samples<R>(&mut self, buffer: &mut [T], data: &[u8]) -> Result<usize, Self::Error>
-    where
-        R: Read;
+    fn read_samples(&mut self, data: &[u8], buffer: &mut Vec<T>) -> Result<(), Self::Error>;
 }

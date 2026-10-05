@@ -79,8 +79,22 @@ bitflags! {
         /// This can be used to delete chunks by just setting a single bit. The chunk will still be physically there, but should be ignored by readers.
         const IGNORE = 0x00_00_00_02;
 
+        /// The chunk was patched.
+        ///
+        /// A patched chunk's contents should be ignored.
+        /// The first 8 bytes of the chunk's content have been overwritten with the offset to the replacement chunk.
+        /// This offset points to the start of a chunk header.
+        /// The replacement chunk must have the same tag as the patched chunk.
+        ///
+        /// This flag must not be used during streaming.
+        const PATCHED = 0x00_00_00_04;
+
         /// The chunk contains structured data encoded with CBOR
-        const CBOR = 0x00_00_00_04;
+        ///
+        /// This is just a hint and can be ignored. How a chunk is interpreted is defined by its tag alone.
+        /// Nevertheless for inspection and debugging by software, that might not know the meaning of a specific tag value,
+        /// it can be useful to know that a chunk contains CBOR.
+        const CBOR = 0x00_00_00_08;
     }
 }
 

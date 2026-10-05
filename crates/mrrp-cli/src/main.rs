@@ -55,6 +55,7 @@ async fn main() -> Result<(), Error> {
         Sat => sat,
         Test => test,
         Qth => qth,
+        Miq => miq,
     };
 
     Ok(())
@@ -82,6 +83,7 @@ enum Command {
     Sat(commands::sat::Args),
     Test(commands::test::Args),
     Qth(commands::qth::Args),
+    Miq(commands::miq::Args),
 }
 
 #[derive(Clone, Debug, clap::Args)]

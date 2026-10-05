@@ -175,6 +175,13 @@ where
             size: data.len().try_into().expect("chunk size overflow"),
         },
     )?;
+
     writer.write_all(data)?;
+
+    // pad chunk so that its length is a multiple if 8, but at least 8 bytes.
+    const PADDING: [u8; 8] = [0; _];
+    let padding = data.len().min(8).next_multiple_of(8);
+    writer.write_all(&PADDING[..padding])?;
+
     Ok(())
 }
