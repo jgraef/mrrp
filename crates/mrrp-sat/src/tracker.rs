@@ -19,6 +19,7 @@ use chrono::{
     TimeDelta,
     Utc,
 };
+use mrrp_geo::Geodetic;
 use serde::{
     Deserialize,
     Serialize,
@@ -26,7 +27,6 @@ use serde::{
 
 use crate::{
     error::Error,
-    geo::Geodetic,
     satellite::{
         OrbitPropagationCache,
         ReferenceState,

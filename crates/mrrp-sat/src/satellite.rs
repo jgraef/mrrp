@@ -21,6 +21,7 @@ use chrono::{
     DateTime,
     Utc,
 };
+use mrrp_geo::Geodetic;
 use numeris::{
     Quaternion,
     Vector3,
@@ -41,7 +42,6 @@ use serde::{
 
 use crate::{
     error::Error,
-    geo::Geodetic,
     satnogs::{
         self,
         NoradCatId,

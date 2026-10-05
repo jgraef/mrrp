@@ -2,14 +2,12 @@
 #![allow(dead_code)]
 
 mod error;
-mod geo;
 pub mod pass;
 pub mod satellite;
 pub mod satnogs;
 pub mod tracker;
 pub mod update;
 
-pub use crate::{
-    error::Error,
-    geo::Geodetic,
-};
+pub use mrrp_geo::Geodetic;
+
+pub use crate::error::Error;
