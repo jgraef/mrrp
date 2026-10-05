@@ -176,25 +176,35 @@ impl Qth {
 
         geodetic
     }
-}
 
-impl Display for Qth {
-    fn fmt(&self, mut f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        fmt_field_component(&mut f, self.field.longitude, FIELD_CHARS)?;
-        fmt_field_component(&mut f, self.field.latitude, FIELD_CHARS)?;
+    /// Helper that doesn't rely on std
+    ///
+    /// Can be used to format into a custom buffer or something. We wanted to
+    /// use this for serde::Serialize, but would need a stack-allocated string
+    /// buffer.
+    fn format<E>(&self, mut out: impl FnMut(char) -> Result<(), E>) -> Result<(), E> {
+        fmt_field_component(&mut out, self.field.longitude, FIELD_CHARS)?;
+        fmt_field_component(&mut out, self.field.latitude, FIELD_CHARS)?;
 
-        fmt_field_component(&mut f, self.square.longitude, SQUARE_CHARS)?;
-        fmt_field_component(&mut f, self.square.latitude, SQUARE_CHARS)?;
+        fmt_field_component(&mut out, self.square.longitude, SQUARE_CHARS)?;
+        fmt_field_component(&mut out, self.square.latitude, SQUARE_CHARS)?;
 
-        fmt_field_component(&mut f, self.subsquare.longitude, SUBSQUARE_CHARS)?;
-        fmt_field_component(&mut f, self.subsquare.latitude, SUBSQUARE_CHARS)?;
+        fmt_field_component(&mut out, self.subsquare.longitude, SUBSQUARE_CHARS)?;
+        fmt_field_component(&mut out, self.subsquare.latitude, SUBSQUARE_CHARS)?;
 
         if let Some(extended_square) = self.extended_square {
-            fmt_field_component(&mut f, extended_square.longitude, EXTENDED_SQUARE_CHARS)?;
-            fmt_field_component(&mut f, extended_square.latitude, EXTENDED_SQUARE_CHARS)?;
+            fmt_field_component(&mut out, extended_square.longitude, EXTENDED_SQUARE_CHARS)?;
+            fmt_field_component(&mut out, extended_square.latitude, EXTENDED_SQUARE_CHARS)?;
         }
 
         Ok(())
+    }
+}
+
+impl Display for Qth {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        self.format(move |c| f.write_char(c))
     }
 }
 
@@ -247,13 +257,13 @@ struct Pair {
 }
 
 #[inline]
-fn fmt_field_component(
-    f: &mut std::fmt::Formatter<'_>,
+fn fmt_field_component<E>(
+    mut out: impl FnMut(char) -> Result<(), E>,
     c: u8,
     chars: RangeInclusive<u8>,
-) -> Result<(), std::fmt::Error> {
+) -> Result<(), E> {
     let c: char = (c + chars.start()).into();
-    f.write_char(c)
+    out(c)
 }
 
 macro_rules! try_opt {
@@ -375,6 +385,40 @@ impl<'a> Parser<'a> {
             longitude,
             latitude,
         }))
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use std::borrow::Cow;
+
+    use serde::{
+        Deserialize,
+        Serialize,
+    };
+
+    use crate::Qth;
+
+    impl Serialize for Qth {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: serde::Serializer,
+        {
+            // todo: use format helper to do without allocation, but we need a
+            // stack-allocated string buffer.
+            let s = self.to_string();
+            serializer.serialize_str(&s)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Qth {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: serde::Deserializer<'de>,
+        {
+            let s: Cow<'de, str> = Deserialize::deserialize(deserializer)?;
+            s.parse().map_err(serde::de::Error::custom)
+        }
     }
 }
 

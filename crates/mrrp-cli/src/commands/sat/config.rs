@@ -1,4 +1,5 @@
 use chrono::TimeDelta;
+use mrrp_geo::Qth;
 use mrrp_sat::{
     Geodetic,
     tracker::TrackerOptions,
@@ -10,7 +11,7 @@ use serde::{
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
-    pub location: Option<Geodetic>,
+    pub location: Option<Location>,
 
     #[serde(default)]
     pub tracker: TrackerConfig,
@@ -42,8 +43,28 @@ impl Config {
             look_back: self.tracker.look_back,
             look_ahead: self.tracker.look_ahead,
             time_resolution: self.tracker.time_resolution,
-            base_station: self.location,
+            base_station: self.location.map(|location| location.to_geodetic()),
             min_elevation: self.tracker.min_elevation,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum Location {
+    Geodetic(Geodetic),
+    Qth {
+        qth: Qth,
+        #[serde(default)]
+        altitude: f64,
+    },
+}
+
+impl Location {
+    pub fn to_geodetic(&self) -> Geodetic {
+        match self {
+            Location::Geodetic(geodetic) => *geodetic,
+            Location::Qth { qth, altitude } => qth.geodetic().with_altitude(*altitude),
         }
     }
 }

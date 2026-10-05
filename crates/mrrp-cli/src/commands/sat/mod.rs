@@ -225,7 +225,7 @@ fn get_location(config: &Config) -> Result<Geodetic, Error> {
         .as_ref()
         .ok_or_else(|| anyhow!("Station not configured"))?;
 
-    Ok(location)
+    Ok(location.to_geodetic())
 }
 
 fn get_satellite<'a>(
