@@ -32,35 +32,30 @@ async fn main() -> Result<(), Error> {
     let Args { global, command } = Args::parse();
     let config = files.config()?;
 
-    match command {
-        Command::RtlSdr(args) => {
-            commands::rtl_sdr::run(Context {
-                args,
-                global,
-                files,
-                config,
-            })
-            .await?
-        }
-        Command::Sat(args) => {
-            commands::sat::run(Context {
-                args,
-                global,
-                files,
-                config,
-            })
-            .await?
-        }
-        Command::Test(args) => {
-            commands::test::run(Context {
-                args,
-                global,
-                files,
-                config,
-            })
-            .await?
-        }
+    macro_rules! subcommands {
+        {$($variant:ident => $mod:ident,)*} => {
+            match command {
+                $(
+                    Command::$variant(args) => {
+                        commands::$mod::run(Context {
+                            args,
+                            global,
+                            files,
+                            config,
+                        })
+                        .await?
+                    }
+                )*
+            }
+        };
     }
+
+    subcommands! {
+        RtlSdr => rtl_sdr,
+        Sat => sat,
+        Test => test,
+        Qth => qth,
+    };
 
     Ok(())
 }
@@ -86,6 +81,7 @@ enum Command {
     RtlSdr(commands::rtl_sdr::Args),
     Sat(commands::sat::Args),
     Test(commands::test::Args),
+    Qth(commands::qth::Args),
 }
 
 #[derive(Clone, Debug, clap::Args)]
