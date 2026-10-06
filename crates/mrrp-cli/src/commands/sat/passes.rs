@@ -69,6 +69,8 @@ pub fn list(
 ) -> Result<(), Error> {
     let mut rows = vec![];
 
+    tracing::info!(?satellite, ?options, "Listing passes");
+
     let passes = PassEvents::new(
         satellite,
         location,

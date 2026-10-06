@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use chrono::{
     DateTime,
+    TimeDelta,
     Utc,
 };
 
@@ -17,6 +18,12 @@ use crate::{
     },
 };
 
+/// Detects when a satellite passes overhead.
+///
+/// This is a bit more low-level than [`PassEvents`], i.e. it doesn't calculate
+/// the [`SatelliteState`]s itself, but you need to pass them in. It can be
+/// useful if you just want to use the state machine for pass detection, but
+/// nothing else.
 #[derive(Clone, Debug)]
 pub struct PassDetector {
     min_elevation: f64,
@@ -26,6 +33,7 @@ pub struct PassDetector {
 }
 
 impl PassDetector {
+    #[inline]
     pub fn new(min_elevation: f64, reference_state: ReferenceState) -> Self {
         Self {
             min_elevation,
@@ -35,6 +43,9 @@ impl PassDetector {
         }
     }
 
+    /// Pushes a [`SatelliteState`] into the pass-detection state machine.
+    ///
+    /// Returns [`PassEvent`] when a pass starts, is currently ongoing, or ends.
     pub fn push(&mut self, state: SatelliteState) -> Option<PassEvent> {
         let relative = state.relative(&self.reference_state);
         let state = PassState { state, relative };
@@ -91,33 +102,79 @@ impl PassDetector {
 
 #[derive(Clone, Copy, Debug)]
 pub enum PassEvent {
+    /// A satellite pass just started.
+    ///
+    /// This contains the first satellite state that is above the minimum
+    /// elevation.
     Start(PassState),
+
+    /// A satellite pass is currently ongoing.
+    ///
+    /// Contains the start state and some states that are being kept track of
+    /// (closest approach, max elevation).
     Ongoing(OngoingPassState),
+
+    /// A satellite pass has ended.
+    ///
+    /// Contains start and end state and some other notable states.
     End(CompletePass),
 }
 
 #[derive(Clone, Copy, Debug)]
 pub struct PassState {
+    /// The satellite state independent of an observer
     pub state: SatelliteState,
+
+    /// The satellite state relative to an observer.
+    ///
+    /// This contains distance and relative velocity to the satellite, which can
+    /// be use to compute helpful information such as azimuth, elevation,
+    /// free-space path loss and doppler shift.
     pub relative: RelativeState,
 }
 
+/// A complete satellite pass
 #[derive(Clone, Copy, Debug)]
 pub struct CompletePass {
+    /// First state at which the satellite was above min elevation.
     pub start: PassState,
+
+    /// Last state at which the satellite was above min elevation.
     pub end: PassState,
+
+    /// The state with the max elevation.
     pub max_elevation: PassState,
+
+    /// The state with the closest approach.
     pub closest_approach: PassState,
 }
 
+impl CompletePass {
+    /// Duration of the complete satellite pass.
+    #[inline]
+    pub fn duration(&self) -> TimeDelta {
+        self.end.state.time() - self.start.state.time()
+    }
+}
+
+/// A ongoing satellite pass.
+///
+/// `max_elevation` and `closest_approach` only take into account all states
+/// that have been seen yet.
 #[derive(Clone, Copy, Debug)]
 pub struct OngoingPassState {
+    /// First state at which the satellite whas above min elevation.
     pub start: PassState,
+
+    /// The state with the max elevation so far.
     pub max_elevation: PassState,
+
+    /// The state with the closest approach so far.
     pub closest_approach: PassState,
 }
 
 impl OngoingPassState {
+    #[inline]
     fn new(start: PassState) -> Self {
         Self {
             start,
@@ -136,6 +193,7 @@ pub struct PassEventsOptions {
 }
 
 impl Default for PassEventsOptions {
+    #[inline]
     fn default() -> Self {
         Self {
             start_time: None,
@@ -180,10 +238,12 @@ impl<'a> PassEvents<'a> {
         }
     }
 
+    #[inline]
     pub fn set_cache(&mut self, cache: OrbitPropagationCache) {
         self.orbit_propagation_cache = cache;
     }
 
+    #[inline]
     pub fn get_cache(&self) -> OrbitPropagationCache {
         self.orbit_propagation_cache.clone()
     }

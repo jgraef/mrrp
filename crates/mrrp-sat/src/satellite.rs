@@ -517,6 +517,7 @@ impl SatelliteState {
         }
     }
 
+    /// Calculate state relative to reference (e.g. an observer).
     pub fn relative(&self, reference: &ReferenceState) -> RelativeState {
         RelativeState {
             position: reference.q_itrf2enu * (self.position.itrf - reference.position.itrf),
@@ -527,7 +528,8 @@ impl SatelliteState {
 
 /// A reference state
 ///
-/// This is e.g. the position and velocity of the base station.
+/// This is e.g. the position and velocity of the base station. This is passed
+/// to [`SatelliteState::relative`] to get a [`RelativeState`].
 #[derive(Clone, Copy, Debug)]
 pub struct ReferenceState {
     /// Reference position in the International Terrestrial Reference Frame
@@ -538,7 +540,11 @@ pub struct ReferenceState {
     /// (ITRF)
     velocity: Vector3<f64>,
 
-    /// transform ITRF -> ENU
+    /// Quaternion that transforms ITRF to ENU
+    ///
+    /// This can be derived from the position ITRFCoord, but we precompute it in
+    /// here, because it is needed for every call to
+    /// [`SatelliteState::relative`]
     q_itrf2enu: Quaternion<f64>,
 }
 
