@@ -9,7 +9,7 @@ use crate::miq::container::chunk::{
 };
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct Header<S = String> {
+pub struct FileHeader<S = String> {
     // MIQ container version
     pub version: Version,
 
@@ -22,7 +22,7 @@ pub struct Header<S = String> {
     pub stream: bool,
 }
 
-impl<S> Tagged for Header<S> {
+impl<S> Tagged for FileHeader<S> {
     const TAG: Tag = Tag::MIQH;
 }
 

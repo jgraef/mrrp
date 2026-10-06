@@ -12,12 +12,3 @@ use crate::miq::container::header::{
 pub mod codec;
 pub mod container;
 pub mod stream;
-
-pub const SUBFORMAT: SubFormat<&'static str> = SubFormat {
-    id: "iq",
-    version: Version {
-        major: 0,
-        minor: 1,
-        patch: 0,
-    },
-};

@@ -16,24 +16,9 @@ use crate::miq::container::chunk::{
 pub enum Error {
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("CBOR error: {message}")]
-    Cbor { message: String },
-}
 
-impl From<ciborium::ser::Error<std::io::Error>> for Error {
-    fn from(value: ciborium::ser::Error<std::io::Error>) -> Self {
-        match value {
-            ciborium::ser::Error::Io(error) => {
-                // note: at time of writing this case should not happen, because
-                // we're serializing into a `Vec<u8>`, which
-                // does not return `Err`. Because ciborium uses
-                // the underlying `Write` impl on `Vec`, it does
-                // return results with `std::io::Error` though.
-                Self::Io(error)
-            }
-            ciborium::ser::Error::Value(message) => Self::Cbor { message },
-        }
-    }
+    #[error(transparent)]
+    Cbor(#[from] ciborium::ser::Error<std::io::Error>),
 }
 
 #[derive(Debug)]
@@ -180,7 +165,8 @@ where
 
     // pad chunk so that its length is a multiple if 8, but at least 8 bytes.
     const PADDING: [u8; 8] = [0; _];
-    let padding = data.len().min(8).next_multiple_of(8);
+    let padded_length = data.len().max(8).next_multiple_of(8);
+    let padding = padded_length - data.len();
     writer.write_all(&PADDING[..padding])?;
 
     Ok(())

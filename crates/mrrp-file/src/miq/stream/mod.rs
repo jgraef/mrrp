@@ -1,3 +1,4 @@
+pub mod reader;
 pub mod writer;
 
 use chrono::{
@@ -14,9 +15,24 @@ use serde::{
     Serialize,
 };
 
-use crate::miq::container::chunk::{
-    Tag,
-    Tagged,
+use crate::miq::container::{
+    chunk::{
+        Tag,
+        Tagged,
+    },
+    header::{
+        SubFormat,
+        Version,
+    },
+};
+
+pub const SUB_FORMAT: SubFormat<&'static str> = SubFormat {
+    id: "iq",
+    version: Version {
+        major: 0,
+        minor: 1,
+        patch: 0,
+    },
 };
 
 /// Stream ID
@@ -38,7 +54,7 @@ pub struct StreamStart<U = ()> {
     pub stream_info: StreamInfo<U>,
 }
 
-impl Tagged for StreamStart {
+impl<U> Tagged for StreamStart<U> {
     const TAG: Tag = Tag::from_bytes_unchecked(*b"SSTA");
 }
 
@@ -62,7 +78,7 @@ pub struct StreamEnd<U = ()> {
     pub stream_info: StreamInfo<U>,
 }
 
-impl Tagged for StreamEnd {
+impl<U> Tagged for StreamEnd<U> {
     const TAG: Tag = Tag::from_bytes_unchecked(*b"SEND");
 }
 
@@ -76,7 +92,7 @@ macro_rules! make_stream_info {
         // https://fprijate.github.io/tlborm/pat-push-down-accumulation.html
         make_stream_info!(@make_struct([$(([$($meta),*], $field, $ty, $as),)*], {}));
 
-        impl StreamInfo {
+        impl<U> StreamInfo<U> {
             /// Merge `other` into `self`.
             ///
             /// If a field in `self` is already set, it takes priority. Said differently: Any *empty* field is overwritten by the field from `other`.
@@ -108,6 +124,19 @@ macro_rules! make_stream_info {
                 $(
                     make_stream_info!(@field_empty(self, $field, $as))
                 )&&*
+            }
+
+            pub fn try_cast_userdata<V>(self) -> Result<StreamInfo<V>, StreamInfo<U>> {
+                if self.user_defined.is_none() {
+                    let mut new: StreamInfo<V> = Default::default();
+                    $(
+                        new.$field = self.$field;
+                    )*
+                    Ok(new)
+                }
+                else {
+                    Err(self)
+                }
             }
         }
 
@@ -208,12 +237,14 @@ pub enum SampleComponentFormat {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Agc {
     Enabled,
     Disabled,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum Pll {
     Locked,
     Unlocked,

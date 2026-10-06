@@ -12,14 +12,14 @@ use std::{
 use serde::Serialize;
 
 use crate::miq::{
-    SUBFORMAT,
-    codec::Encoder,
-    container::{
-        self,
-        writer::BufferedChunkWriter,
+    codec::{
+        Encoder,
+        Flush,
     },
+    container,
     stream::{
         IQ_TAG,
+        SUB_FORMAT,
         Sample,
         StreamEnd,
         StreamId,
@@ -36,18 +36,30 @@ pub enum Error {
 
     #[error(transparent)]
     Container(#[from] container::writer::Error),
+
+    #[error("{0}")]
+    Encoder(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
 
 impl Error {
-    pub fn from_encoder<E>(_error: E) -> Self {
-        todo!();
+    #[inline]
+    pub fn from_encoder<E>(error: E) -> Self
+    where
+        E: std::error::Error + Send + Sync + 'static,
+    {
+        Self::Encoder(Box::new(error))
     }
 }
 
+pub const DEFAULT_MIN_CHUNK_SIZE: usize = 0x1000;
+
 #[derive(Debug)]
 pub struct Writer<W> {
-    container: container::writer::Writer<W>,
+    container_writer: container::writer::Writer<W>,
     next_stream_id: u32,
+
+    /// See [`StreamWriter`].
+    min_chunk_size: usize,
 }
 
 impl<W> Writer<W>
@@ -55,50 +67,53 @@ where
     W: Write,
 {
     pub fn new(writer: W) -> Result<Self, Error> {
-        let mut container = container::writer::Writer::new(writer);
+        let mut container_writer = container::writer::Writer::new(writer);
 
         // write MIQ header
-        container.write_cbor_chunk(&container::header::Header {
+        container_writer.write_cbor_chunk(&container::header::FileHeader {
             version: container::VERSION,
-            sub_format: Some(SUBFORMAT),
+            sub_format: Some(SUB_FORMAT),
             stream: false,
         })?;
 
         Ok(Self {
-            container,
+            container_writer,
             next_stream_id: 1,
+            min_chunk_size: DEFAULT_MIN_CHUNK_SIZE,
         })
     }
 
-    pub fn start_stream<T, E>(
+    #[inline]
+    pub fn set_min_chunk_size(&mut self, min_chunk_size: usize) {
+        self.min_chunk_size = min_chunk_size;
+    }
+
+    pub fn start_stream<T, E, U>(
         &mut self,
-        stream_info: StreamInfo,
+        stream_info: StreamInfo<U>,
         encoder: E,
     ) -> Result<StreamWriter<T, E>, Error>
     where
         T: Sample,
         E: Encoder<T>,
+        U: Serialize,
     {
         let stream_id = StreamId(self.next_stream_id);
         self.next_stream_id += 1;
 
-        self.container.write_cbor_chunk(&StreamStart {
+        self.container_writer.write_cbor_chunk(&StreamStart {
             stream_id,
             sample_format: T::SAMPLE_FORMAT,
             samples: None,
             stream_info,
         })?;
 
-        Ok(StreamWriter {
-            stream_id,
-            encoder,
-            _marker: PhantomData,
-        })
+        Ok(StreamWriter::new(stream_id, encoder, self.min_chunk_size))
     }
 
     #[inline]
     pub fn end_stream<T, E>(&mut self, stream_writer: StreamWriter<T, E>) -> Result<(), Error> {
-        self.container.write_cbor_chunk(&StreamEnd {
+        self.container_writer.write_cbor_chunk(&StreamEnd::<()> {
             stream_id: stream_writer.stream_id,
             stream_info: Default::default(),
         })?;
@@ -114,38 +129,11 @@ where
     where
         U: Serialize,
     {
-        self.container.write_cbor_chunk(&StreamInfoChange {
+        self.container_writer.write_cbor_chunk(&StreamInfoChange {
             stream_id: stream_writer.stream_id,
             stream_info,
         })?;
         Ok(())
-    }
-
-    // note: this is not pub, because we think the better API is to have
-    // `begin_write` on `StreamWriter`. but from a low-level API perspective,
-    // this just writes an IQ data chunk.
-    fn iq_data<'a, T, E>(
-        &'a mut self,
-        stream_writer: &'a mut StreamWriter<T, E>,
-    ) -> Result<IqWriter<'a, W, E, T>, Error> {
-        // todo: this should return an IQ writer thingie. we might want that
-        // thingie to have a type-parameter for the sample format. we would need
-        // to put that type-param into a `StreamHandle<T>`. it would only be a
-        // `PhantomData` and otherwise the `StreamHandle` would contain the
-        // `StreamId`.
-
-        let mut chunk_writer = self
-            .container
-            .write_chunk_buffered(IQ_TAG, Default::default());
-
-        // write stream ID
-        chunk_writer.write_all(&stream_writer.stream_id.0.to_be_bytes())?;
-
-        Ok(IqWriter {
-            chunk_writer,
-            encoder: &mut stream_writer.encoder,
-            _marker: PhantomData,
-        })
     }
 }
 
@@ -164,41 +152,73 @@ impl Writer<BufWriter<File>> {
 pub struct StreamWriter<T, E> {
     stream_id: StreamId,
     encoder: E,
+    buffer: Vec<u8>,
+
+    /// If the underlying encoder supports flushing whenever we want, we will
+    /// flush once the buffer is at least `min_chunk_size` bytes full.
+    min_chunk_size: usize,
+
     _marker: PhantomData<fn(&[T])>,
 }
 
 impl<T, E> StreamWriter<T, E> {
     #[inline]
-    pub fn stream_id(&self) -> StreamId {
-        self.stream_id
+    fn new(stream_id: StreamId, encoder: E, min_chunk_size: usize) -> Self {
+        Self {
+            stream_id,
+            encoder,
+            buffer: Vec::with_capacity(min_chunk_size),
+            min_chunk_size,
+            _marker: PhantomData,
+        }
     }
 
     #[inline]
-    pub fn start_write<'a, W>(
-        &'a mut self,
-        writer: &'a mut Writer<W>,
-    ) -> Result<IqWriter<'a, W, E, T>, Error>
-    where
-        W: Write,
-    {
-        writer.iq_data(self)
+    pub fn stream_id(&self) -> StreamId {
+        self.stream_id
     }
 }
 
-#[derive(Debug)]
-pub struct IqWriter<'a, W, E, T> {
-    chunk_writer: BufferedChunkWriter<'a, W>,
-    encoder: &'a mut E,
-    _marker: PhantomData<fn(&[T])>,
-}
-
-impl<'a, W, E, T> IqWriter<'a, W, E, T>
+impl<E, T> StreamWriter<T, E>
 where
     E: Encoder<T>,
 {
-    pub fn write_samples(&mut self, samples: &[T]) -> Result<(), Error> {
-        self.encoder
-            .write_samples(samples, &mut self.chunk_writer)
-            .map_err(Error::from_encoder)
+    pub fn write_samples<'a, W>(
+        &mut self,
+        writer: &'a mut Writer<W>,
+        samples: &[T],
+    ) -> Result<(), Error>
+    where
+        W: Write,
+    {
+        let flush = self
+            .encoder
+            .write_samples(samples, &mut self.buffer)
+            .map_err(Error::from_encoder)?;
+
+        let flush = match flush {
+            Flush::Buffer => {
+                // don't flush
+                false
+            }
+            Flush::Flush => {
+                // must flush now
+                true
+            }
+            Flush::Any => {
+                // we may flush now. check if the buffer is already larger than
+                // some configurable limit
+                self.buffer.len() >= self.min_chunk_size
+            }
+        };
+
+        if flush {
+            writer
+                .container_writer
+                .write_data_chunk(IQ_TAG, Default::default(), &self.buffer)?;
+            self.buffer.clear();
+        }
+
+        Ok(())
     }
 }

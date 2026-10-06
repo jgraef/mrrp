@@ -1,4 +1,10 @@
-use std::path::PathBuf;
+use std::{
+    borrow::Cow,
+    path::{
+        Path,
+        PathBuf,
+    },
+};
 
 use anyhow::{
     Error,
@@ -8,10 +14,11 @@ use anyhow::{
 use clap::{
     Parser,
     Subcommand,
+    ValueEnum,
 };
 use futures_util::pin_mut;
 use mrrp_core::{
-    buf::SamplesMut,
+    buf::SampleBufMut,
     sample::{
         Complex,
         encoding::BigEndian,
@@ -20,9 +27,8 @@ use mrrp_core::{
 use mrrp_file::{
     miq::{
         codec::pcm::Pcm,
+        container::reader::Reader as MiqContainerReader,
         stream::{
-            SampleComponentFormat,
-            SampleFormat,
             StreamInfo,
             writer::Writer as MiqWriter,
         },
@@ -38,35 +44,111 @@ use crate::{
 
 pub async fn run(context: Context<Args>) -> Result<(), Error> {
     match context.args.command {
-        Command::Encode { output, input } => {
-            let info = sdrpp::parse_path(&input)?;
-            tracing::debug!(?info, "extracted info from file name");
-
-            if info.recording_type != RecordingType::Baseband {
-                bail!("Input file must be baseband");
-            }
-
-            let mut stream_info = info.stream_info();
-            //stream_info.sample_rate =
-
-            let input = WavSource::<_, Complex<i16>>::from_path(&input)?;
-            pin_mut!(input);
-
-            let mut output = MiqWriter::from_path(&output)?;
-            let mut stream_writer =
-                output.start_stream::<Complex<i16>, _>(stream_info, Pcm::<BigEndian>::default())?;
-
-            // todo: test if this works with a Vec with 0 initial capacity
-            let mut buffer = Vec::with_capacity(0x1000);
-            loop {
-                buffer.clear();
-                input.read_into_buf(&mut buffer).await?;
-                let mut iq_writer = stream_writer.start_write(&mut output)?;
-            }
-
-            // I really want a Vec<Sample> with limited size :/
-            assert_eq!(buffer.capacity(), 0x1000);
+        Command::Encode {
+            output,
+            input,
+            stream_info,
+            file_name_info,
+            force,
+        } => {
+            encode(output, input, stream_info, file_name_info, force).await?;
         }
+        Command::Inspect { file } => {
+            inspect(file)?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn encode(
+    output: Option<impl AsRef<Path>>,
+    input: impl AsRef<Path>,
+    stream_info_file: Option<impl AsRef<Path>>,
+    file_name_info_kind: Option<FileNameInfoKind>,
+    force: bool,
+) -> Result<(), Error> {
+    let mut stream_info: StreamInfo<toml::Value> = Default::default();
+
+    // extract stream info from file name
+    if let Some(file_name_info_kind) = file_name_info_kind {
+        match file_name_info_kind {
+            FileNameInfoKind::Sdrpp => {
+                let file_name_info = sdrpp::parse_path(&input)?;
+                tracing::debug!(?file_name_info, "extracted info from file name");
+                if file_name_info.recording_type != RecordingType::Baseband {
+                    bail!("Input file must be baseband");
+                }
+                stream_info.merge(file_name_info.stream_info());
+            }
+        }
+    }
+
+    // read stream info from file
+    if let Some(stream_info_file) = stream_info_file {
+        let file_stream_info: StreamInfo<toml::Value> =
+            toml::from_slice(&std::fs::read(&stream_info_file)?)?;
+        stream_info.merge(file_stream_info);
+    }
+
+    let output = if let Some(output) = output.as_ref() {
+        Cow::Borrowed(output.as_ref())
+    }
+    else {
+        let directory = input
+            .as_ref()
+            .parent()
+            .ok_or_else(|| anyhow!("Input file has no parent directory"))?;
+        let file_prefix = input
+            .as_ref()
+            .file_prefix()
+            .ok_or_else(|| anyhow!("Can't determine input file prefix"))?
+            .to_string_lossy();
+        let output = directory.join(format!("{file_prefix}.miq"));
+
+        if output.exists() && !force {
+            bail!("The derive output file already exists: {output:?}");
+        }
+
+        Cow::Owned(output)
+    };
+
+    let input = WavSource::<_, Complex<i16>>::from_path(&input)?;
+    pin_mut!(input);
+
+    let mut output = MiqWriter::from_path(&output)?;
+    let mut stream_writer =
+        output.start_stream::<Complex<i16>, _, _>(stream_info, Pcm::<BigEndian>::default())?;
+
+    let chunk_size = 0x10000; // 64 kB
+    let mut buffer = Vec::with_capacity(chunk_size);
+    loop {
+        buffer.clear();
+
+        input
+            .read_into_buf(&mut (&mut buffer).limit(chunk_size))
+            .await?;
+        if buffer.is_empty() {
+            break;
+        }
+
+        assert!(buffer.len() <= chunk_size, "{}", buffer.len());
+
+        stream_writer.write_samples(&mut output, &buffer)?;
+    }
+
+    Ok(())
+}
+
+fn inspect(file: impl AsRef<Path>) -> Result<(), Error> {
+    let mut reader = MiqContainerReader::from_path(&file)?;
+
+    let file_header = reader.read_file_header()?;
+    println!("{file_header:?}");
+
+    while let Some(chunk) = reader.try_read_chunk()? {
+        let chunk_header = chunk.chunk_header();
+        println!("{chunk_header:?}");
     }
 
     Ok(())
@@ -82,11 +164,34 @@ pub struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     Encode {
+        /// Output file
         #[clap(short, long)]
-        output: PathBuf,
+        output: Option<PathBuf>,
 
+        /// Input file (signed 16bit WAV)
         input: PathBuf,
+
+        /// Attach stream info from TOML file.
+        #[clap(short = 'i', long)]
+        stream_info: Option<PathBuf>,
+
+        /// Extract information from file name.
+        #[clap(short = 'I', long)]
+        file_name_info: Option<FileNameInfoKind>,
+
+        /// Overwrite output file if it already exists.
+        #[clap(short, long)]
+        force: bool,
     },
+    Inspect {
+        file: PathBuf,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum FileNameInfoKind {
+    #[clap(alias = "sdr++")]
+    Sdrpp,
 }
 
 mod sdrpp {
@@ -156,7 +261,7 @@ mod sdrpp {
     }
 
     impl FileInfo {
-        pub fn stream_info(&self) -> StreamInfo {
+        pub fn stream_info<U>(&self) -> StreamInfo<U> {
             StreamInfo {
                 center_frequency: Some(self.center_frequency as f32),
                 timestamp: Some(self.timestamp.to_utc()),

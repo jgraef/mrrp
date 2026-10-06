@@ -382,6 +382,26 @@ pub trait SampleBufMut<S> {
     }
 }
 
+impl<T, S> SampleBufMut<S> for &mut T
+where
+    T: SampleBufMut<S>,
+{
+    #[inline]
+    unsafe fn advance_mut(&mut self, amount: usize) {
+        unsafe { <T as SampleBufMut<S>>::advance_mut(*self, amount) }
+    }
+
+    #[inline]
+    fn remaining_mut(&self) -> usize {
+        <T as SampleBufMut<S>>::remaining_mut(*self)
+    }
+
+    #[inline]
+    fn chunk_mut(&mut self) -> &mut UninitSlice<S> {
+        <T as SampleBufMut<S>>::chunk_mut(*self)
+    }
+}
+
 impl<S> SampleBufMut<S> for &mut [S] {
     unsafe fn advance_mut(&mut self, amount: usize) {
         if amount > self.len() {
@@ -439,15 +459,18 @@ impl<B, S> SampleBufMut<S> for Limit<B, S>
 where
     B: SampleBufMut<S>,
 {
+    #[inline]
     unsafe fn advance_mut(&mut self, amount: usize) {
-        assert!(amount < self.limit);
+        assert!(amount <= self.limit);
         unsafe {
             self.inner.advance_mut(amount);
         }
+        self.limit -= amount;
     }
 
+    #[inline]
     fn remaining_mut(&self) -> usize {
-        self.limit
+        self.inner.remaining_mut().min(self.limit)
     }
 
     fn chunk_mut(&mut self) -> &mut UninitSlice<S> {

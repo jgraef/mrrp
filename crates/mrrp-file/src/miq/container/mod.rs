@@ -78,3 +78,129 @@ pub const VERSION: Version = Version {
     minor: 1,
     patch: 0,
 };
+
+#[cfg(test)]
+mod tests {
+    use std::io::Read;
+
+    use crate::miq::container::{
+        chunk::{
+            Flags,
+            Tag,
+        },
+        reader::Reader,
+        writer::Writer,
+    };
+
+    #[test]
+    fn write_read_single_chunk() {
+        let mut buf: Vec<u8> = vec![];
+
+        let mut writer = Writer::new(&mut buf);
+        writer
+            .write_data_chunk(
+                Tag::from_bytes(*b"TEST").unwrap(),
+                Default::default(),
+                b"Hello World!",
+            )
+            .unwrap();
+
+        let mut reader = Reader::new(&buf[..]);
+        let mut read_chunk = reader.read_chunk().unwrap();
+
+        let chunk_header = read_chunk.chunk_header();
+        assert_eq!(chunk_header.tag, Tag::from_bytes(*b"TEST").unwrap());
+        assert_eq!(chunk_header.flags, Flags::default());
+        assert_eq!(chunk_header.size, 12);
+
+        let mut chunk_data = vec![];
+        read_chunk.read_to_end(&mut chunk_data).unwrap();
+        assert_eq!(chunk_data, b"Hello World!")
+    }
+
+    #[test]
+    fn write_read_two_chunks() {
+        let mut buf: Vec<u8> = vec![];
+
+        let mut writer = Writer::new(&mut buf);
+        writer
+            .write_data_chunk(
+                Tag::from_bytes(*b"TES1").unwrap(),
+                Default::default(),
+                b"Hello",
+            )
+            .unwrap();
+        writer
+            .write_data_chunk(
+                Tag::from_bytes(*b"TES2").unwrap(),
+                Default::default(),
+                b" World!",
+            )
+            .unwrap();
+
+        let mut reader = Reader::new(&buf[..]);
+
+        let mut read_chunk = reader.read_chunk().unwrap();
+
+        let chunk_header = read_chunk.chunk_header();
+        assert_eq!(chunk_header.tag, Tag::from_bytes(*b"TES1").unwrap());
+        assert_eq!(chunk_header.flags, Flags::default());
+        assert_eq!(chunk_header.size, 5);
+
+        let mut chunk_data = vec![];
+        read_chunk.read_to_end(&mut chunk_data).unwrap();
+        assert_eq!(chunk_data, b"Hello");
+
+        let mut read_chunk = reader.read_chunk().unwrap();
+
+        let chunk_header = read_chunk.chunk_header();
+        assert_eq!(chunk_header.tag, Tag::from_bytes(*b"TES2").unwrap());
+        assert_eq!(chunk_header.flags, Flags::default());
+        assert_eq!(chunk_header.size, 7);
+
+        let mut chunk_data = vec![];
+        read_chunk.read_to_end(&mut chunk_data).unwrap();
+        assert_eq!(chunk_data, b" World!");
+    }
+
+    #[test]
+    fn write_read_second_chunk() {
+        let mut buf: Vec<u8> = vec![];
+
+        let mut writer = Writer::new(&mut buf);
+        writer
+            .write_data_chunk(
+                Tag::from_bytes(*b"TES1").unwrap(),
+                Default::default(),
+                b"Hello",
+            )
+            .unwrap();
+        writer
+            .write_data_chunk(
+                Tag::from_bytes(*b"TES2").unwrap(),
+                Default::default(),
+                b" World!",
+            )
+            .unwrap();
+
+        let mut reader = Reader::new(&buf[..]);
+
+        let read_chunk = reader.read_chunk().unwrap();
+
+        let chunk_header = read_chunk.chunk_header();
+        assert_eq!(chunk_header.tag, Tag::from_bytes(*b"TES1").unwrap());
+        assert_eq!(chunk_header.flags, Flags::default());
+        assert_eq!(chunk_header.size, 5);
+
+        let mut read_chunk = reader.read_chunk().unwrap();
+
+        let chunk_header = read_chunk.chunk_header();
+        assert_eq!(chunk_header.tag, Tag::from_bytes(*b"TES2").unwrap());
+        assert_eq!(chunk_header.flags, Flags::default());
+        assert_eq!(chunk_header.size, 7);
+
+        let mut chunk_data = vec![];
+        read_chunk.read_to_end(&mut chunk_data).unwrap();
+        assert_eq!(chunk_data, b" World!");
+    }
+}
