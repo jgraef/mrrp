@@ -197,13 +197,7 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
         } => {
             create_parent_dir_if_not_exists(&output)?;
 
-            let satellite = satellites
-                .get(
-                    satellites
-                        .get_by_id(&sat_id)
-                        .ok_or_else(|| anyhow!("Satellite not found: {sat_id}"))?,
-                )
-                .unwrap();
+            let satellite = get_satellite(&satellites, &sat_id)?;
 
             // todo
             //let device = device.open_device().await?;
@@ -316,30 +310,20 @@ enum Command {
         input: PathBuf,
     },
     ListPasses {
+        #[clap(flatten)]
+        options: passes::Options,
+
         /// Satellite ID
         ///
         /// # TODO
         ///
         /// There's currently no good way to find this satellite ID. It's the ID
         /// from the SatNOGS API.
-        #[clap(short, long)]
         sat_id: SatelliteId,
-
-        #[clap(flatten)]
-        options: passes::Options,
     },
     CapturePasses {
         #[clap(short, long, default_value = ".")]
         output: PathBuf,
-
-        /// Satellite ID
-        ///
-        /// # TODO
-        ///
-        /// There's currently no good way to find this satellite ID. It's the ID
-        /// from the SatNOGS API.
-        #[clap(short, long)]
-        sat_id: SatelliteId,
 
         /// The center frequency to capture.
         #[clap(short = 'f', long)]
@@ -351,6 +335,14 @@ enum Command {
 
         #[clap(flatten)]
         device: DeviceArgs,
+
+        /// Satellite ID
+        ///
+        /// # TODO
+        ///
+        /// There's currently no good way to find this satellite ID. It's the ID
+        /// from the SatNOGS API.
+        sat_id: SatelliteId,
     },
 }
 

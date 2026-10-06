@@ -86,7 +86,7 @@ pub fn list(
                 if options
                     .end_time
                     .is_some_and(|end_time| complete.start.state.time() > end_time)
-                    || options.limit.is_some_and(|limit| limit >= rows.len())
+                    || options.limit.is_some_and(|limit| rows.len() >= limit)
                 {
                     break;
                 }
@@ -97,9 +97,14 @@ pub fn list(
         }
     }
 
-    let mut table = Table::new(&rows);
-    table.with(table_style);
-    println!("{}", table);
+    if rows.is_empty() {
+        println!("No passes found");
+    }
+    else {
+        let mut table = Table::new(&rows);
+        table.with(table_style);
+        println!("{}", table);
+    }
 
     Ok(())
 }
