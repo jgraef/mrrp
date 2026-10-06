@@ -15,9 +15,8 @@ dotenvy.workspace = true
 futures-util.workspace = true
 hexyl = "0.17.0"
 humantime = "2.3.0"
-mrrp-audio = { workspace = true, default-features = false, features = ["wav"] }
 mrrp-core.workspace = true
-mrrp-file.workspace = true
+mrrp-file = { workspace = true, features = ["miq", "wav", "riff"] }
 mrrp-geo.workspace = true
 mrrp-rtl-sdr.workspace = true
 mrrp-rtl-tcp.workspace = true

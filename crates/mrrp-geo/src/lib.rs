@@ -59,3 +59,11 @@ impl From<Geodetic> for HorizontalGeodetic {
         value.as_horizontal()
     }
 }
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Orientation {
+    pub azimuth: f64,
+    pub elevation: f64,
+    pub skew: f64,
+}

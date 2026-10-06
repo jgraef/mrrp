@@ -17,16 +17,13 @@
 #[cfg(feature = "rodio")]
 pub mod rodio;
 #[cfg(feature = "wav")]
-pub mod wav;
-
-#[cfg(feature = "rodio")]
-pub use rodio::play_audio;
-
-#[cfg(feature = "wav")]
-pub use crate::wav::{
+pub use mrrp_file::wav::{
+    self,
     sink::{
         WavSink,
         write_stream_to_wav,
     },
     source::WavSource,
 };
+#[cfg(feature = "rodio")]
+pub use rodio::play_audio;

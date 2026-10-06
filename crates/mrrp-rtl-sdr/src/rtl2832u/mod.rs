@@ -283,6 +283,9 @@ impl Rtl2832u {
         let bits = value.as_bits();
         let data = bits.into_bytes();
 
+        // todo: shouldn't we check if the value is unchanged by this write, and
+        // in that case, not write?
+
         self.write(R::ADDRESS, data.as_ref()).await?;
 
         value.shadow_write(&mut self.shadow_map);
