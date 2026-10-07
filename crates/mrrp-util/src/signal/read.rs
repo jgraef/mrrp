@@ -13,6 +13,7 @@ use std::{
 
 use bytemuck::Pod;
 use futures_core::ready;
+use futures_util::FutureExt;
 use mrrp_core::{
     buf::{
         SampleBuf,
@@ -74,11 +75,28 @@ pub trait AsyncReadSamplesExt: AsyncReadSamples {
         }
     }
 
+    /// Read a single sample if not EOF.
+    ///
+    /// If the stream is EOF, returns `None`.
+    ///
+    /// # TODO
+    ///
+    /// Better name
+    #[inline]
+    fn read_sample_or_eof(&mut self) -> ReadSampleOrEof<'_, Self>
+    where
+        Self: Unpin,
+    {
+        ReadSampleOrEof {
+            read_sample: self.read_sample(),
+        }
+    }
+
     /// Read IQ samples into a buffer.
     ///
     /// This will call
     /// [`poll_read_samples`][AsyncReadSamples::poll_read_samples] exactly once,
-    /// and return the number of bytes read. This is cancellation-safe.
+    /// and return the number of samples read. This is cancellation-safe.
     #[inline]
     fn read_samples<'a>(&'a mut self, buffer: &'a mut [Self::Sample]) -> ReadSamples<'a, Self>
     where
@@ -396,6 +414,33 @@ where
                     Poll::Ready(Ok(sample))
                 }
             }
+        }
+    }
+}
+
+#[derive(Debug)]
+#[must_use]
+pub struct ReadSampleOrEof<'a, R>
+where
+    R: ?Sized,
+{
+    read_sample: ReadSample<'a, R>,
+}
+
+impl<'a, R> Future for ReadSampleOrEof<'a, R>
+where
+    R: AsyncReadSamples + ?Sized,
+{
+    type Output = Result<Option<R::Sample>, R::Error>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        match self.read_sample.poll_unpin(cx) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Ok(sample)) => Poll::Ready(Ok(Some(sample))),
+            Poll::Ready(Err(EofError::Eof {
+                num_samples_read: _,
+            })) => Poll::Ready(Ok(None)),
+            Poll::Ready(Err(EofError::Other(error))) => Poll::Ready(Err(error)),
         }
     }
 }
