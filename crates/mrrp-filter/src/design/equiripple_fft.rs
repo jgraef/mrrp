@@ -215,7 +215,7 @@ pub struct FilterDesign {
     pub fft_size: usize,
 }
 
-impl super::FilterDesign for FilterDesign {
+impl super::FilterDesign<f32> for FilterDesign {
     fn coefficients(&self) -> &[f32] {
         &self.coefficients
     }

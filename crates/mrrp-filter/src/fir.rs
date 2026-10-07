@@ -2,12 +2,10 @@ use std::{
     collections::VecDeque,
     ops::{
         Add,
-        AddAssign,
         Mul,
     },
 };
 
-use mrrp_core::sample::Sample;
 use mrrp_util::signal::{
     ScanInPlaceWith,
     Scanner,
@@ -16,7 +14,6 @@ use num_traits::{
     Float,
     FloatConst,
     FromPrimitive,
-    Zero,
 };
 
 #[derive(Clone, Debug)]
@@ -64,66 +61,6 @@ where
 }
 
 pub type FirFiltered<R, S, C> = ScanInPlaceWith<R, FirFilter<S, C>>;
-
-// I wanted to implement a fast convolution on the delayed buffer and read
-// buffer, but it got too complicated lol
-#[allow(dead_code)]
-fn convolve_delayed<S, C>(coeffients: &[C], delayed: &mut Vec<S>, read: &mut [S]) -> usize
-where
-    S: Sample + Zero + AddAssign,
-    C: Copy + Mul<S, Output = S>,
-{
-    assert!(delayed.len() < coeffients.len());
-
-    // if we're missing samples in the delay buffer, we need to copy them over,
-    // because the read buffer will be overwritten.
-    let missing_in_delay = coeffients.len().saturating_sub(delayed.len() + 1);
-    delayed.extend_from_slice(&read[..missing_in_delay]);
-
-    let read_start = missing_in_delay;
-
-    let mut i = 0;
-
-    while i < delayed.len() {
-        let mut s = S::zero();
-        let mut c = coeffients.len() - 1;
-
-        for j in i..delayed.len() {
-            s += coeffients[c] * delayed[j];
-            c -= 1;
-        }
-
-        for j in 0..=i {
-            s += coeffients[c] * read[read_start + j];
-            c -= 1;
-        }
-
-        read[i] = s;
-
-        i += 1;
-    }
-
-    let mut i0 = 0;
-    let n = read.len() - missing_in_delay;
-    assert_eq!(i - i0 + 1, coeffients.len());
-
-    while i < n {
-        let mut s = S::zero();
-        let mut c = coeffients.len() - 1;
-
-        for j in i0..=i {
-            s += coeffients[c] * read[read_start + j];
-            c -= 1;
-        }
-
-        read[i] = s;
-
-        i += 1;
-        i0 += 1;
-    }
-
-    n
-}
 
 pub fn hann_window<T>(n: usize) -> impl Iterator<Item = T>
 where

@@ -1,3 +1,9 @@
+//! [Parks-McClellan algorithm][1]
+//!
+//! This is often called *equiripple*, or *remez* method.
+//!
+//! [1]: https://en.wikipedia.org/wiki/Parks%E2%80%93McClellan_filter_design_algorithm
+
 //mod implementation;
 
 use ::pm_remez::ParametersBuilder as _;
@@ -13,7 +19,7 @@ use crate::design::{
 };
 
 pub type Error = pm_remez::error::Error;
-pub type RemezDesign = pm_remez::PMDesign<f32>;
+pub type RemezDesign<C> = pm_remez::PMDesign<C>;
 
 #[derive(Clone, Copy, Debug)]
 pub struct RemezAlgorithm<L> {
@@ -45,12 +51,12 @@ impl Default for RemezAlgorithm<Estimate> {
     }
 }
 
-impl<F, L> DesignAlgorithm<F> for RemezAlgorithm<L>
+impl<F, L> DesignAlgorithm<F, f32> for RemezAlgorithm<L>
 where
     F: DesiredFrequencyResponse + IsSymmetric,
     L: ToConcreteFilterLength<F>,
 {
-    type Design = RemezDesign;
+    type Design = RemezDesign<f32>;
     type Error = Error;
 
     fn design_filter(&self, filter_specification: F) -> Result<Self::Design, Self::Error> {
@@ -61,13 +67,13 @@ where
     }
 }
 
-impl FilterDesign for RemezDesign {
-    fn coefficients(&self) -> &[f32] {
+impl<C> FilterDesign<C> for RemezDesign<C> {
+    fn coefficients(&self) -> &[C] {
         &self.impulse_response
     }
 }
 
-pub fn pm_remez<F, L>(filter_specification: F, filter_length: L) -> Result<RemezDesign, Error>
+pub fn pm_remez<F, L>(filter_specification: F, filter_length: L) -> Result<RemezDesign<f32>, Error>
 where
     F: DesiredFrequencyResponse + IsSymmetric,
     L: ToConcreteFilterLength<F>,
@@ -131,5 +137,5 @@ where
         Symmetry::Negative => pm_remez::Symmetry::Odd,
     });
 
-    pm_remez::pm_remez(&parameters)
+    pm_remez::pm_remez::<f32, _>(&parameters)
 }

@@ -60,18 +60,18 @@ pub trait EstimateFilterLength {
 
 /// Trait for algorithms that turn filter specifications into filter designs
 /// (i.e. their coefficients).
-pub trait DesignAlgorithm<F>
+pub trait DesignAlgorithm<F, C>
 where
     F: ?Sized,
 {
-    type Design: FilterDesign;
+    type Design: FilterDesign<C>;
     type Error;
 
     fn design_filter(&self, filter_specification: F) -> Result<Self::Design, Self::Error>;
 }
 
-pub trait FilterDesign {
-    fn coefficients(&self) -> &[f32];
+pub trait FilterDesign<C> {
+    fn coefficients(&self) -> &[C];
 
     #[inline]
     fn filter_length(&self) -> usize {
@@ -79,14 +79,17 @@ pub trait FilterDesign {
     }
 
     #[inline]
-    fn fir_filter<S>(&self) -> FirFilter<S, f32> {
+    fn fir_filter<S>(&self) -> FirFilter<S, C>
+    where
+        C: Clone,
+    {
         FirFilter::new(self.coefficients().to_owned())
     }
 }
 
-impl FilterDesign for Vec<f32> {
+impl<C> FilterDesign<C> for Vec<C> {
     #[inline]
-    fn coefficients(&self) -> &[f32] {
+    fn coefficients(&self) -> &[C] {
         &self
     }
 

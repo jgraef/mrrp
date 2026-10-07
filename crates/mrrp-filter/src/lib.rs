@@ -3,6 +3,7 @@ pub mod biquad;
 pub mod design;
 pub mod fir;
 pub mod resampling;
+pub mod window;
 
 use std::{
     collections::VecDeque,
@@ -38,12 +39,6 @@ use crate::{
         Interpolate,
     },
 };
-
-pub trait MakeFilter<R> {
-    type Filter;
-
-    fn make_filter(&self, input: &R) -> Self::Filter;
-}
 
 /// Hilbert filter to recover an IQ signal from a real-valued signal
 ///
@@ -82,6 +77,11 @@ impl Scanner<f32> for HilbertFilter {
     }
 }
 
+/// Goetzel algorithm
+///
+/// # TODO
+///
+/// I don't think this is commonly considered and used as a filter.
 #[derive(Clone, Copy, Debug)]
 pub struct GoertzelFilter {
     exp_filter_frequency: Complex<f32>,
