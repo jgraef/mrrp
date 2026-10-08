@@ -71,6 +71,8 @@ impl Scanner<Complex<f32>> for AccessPhaseAndDifferentiate {
     }
 }
 
+/// FM demodulation using differentiation
+///
 /// [Slide 12](https://cci.usc.edu/wp-content/uploads/2017/09/CLASS-6-FM-modulation.pdf)
 #[derive(Clone, Copy, Debug)]
 pub struct DifferentiateAndDivide {

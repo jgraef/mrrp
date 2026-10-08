@@ -7,6 +7,7 @@
 //! - <http://www.barberdsp.com/downloads/Dayton%20Paper.pdf>
 //! - <https://web.archive.org/web/20120313215600/http://lionel.cordesses.free.fr/gpages/Cordesses.pdf>
 
+pub mod color;
 mod decoder;
 mod encoder;
 pub mod image;

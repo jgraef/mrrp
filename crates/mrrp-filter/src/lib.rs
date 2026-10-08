@@ -53,12 +53,18 @@ pub struct HilbertFilter {
 
 impl HilbertFilter {
     #[cfg(feature = "pm-remez")]
-    pub fn new(transition_bandwidth: f32, filter_length: usize) -> Self {
+    pub fn new(sample_rate: f32, transition_bandwidth: f32, filter_length: usize) -> Self {
         assert!(filter_length % 2 == 1, "filter length must be odd");
+
+        let transition_bandwidth = transition_bandwidth / sample_rate;
 
         // why does this use pm-remez again?
         let hilbert = pm_remez(
-            Hilbert::new(transition_bandwidth).assert_normalized(),
+            Hilbert {
+                allpass_begin: transition_bandwidth,
+                allpass_end: 0.5 - transition_bandwidth,
+            }
+            .assert_normalized(),
             filter_length,
         )
         .expect("failed to design hilbert filter");
@@ -126,31 +132,51 @@ impl Scanner<Complex<f32>> for GoertzelFilter {
 }
 
 #[derive(Clone, Debug)]
-pub struct MovingAverage<S> {
+pub struct MovingSum<S> {
     length: usize,
-    norm: f32,
     sum: S,
     delay: VecDeque<S>,
 }
 
-impl<S> MovingAverage<S>
+impl<S> MovingSum<S>
 where
     S: Zero,
 {
+    #[inline]
     pub fn new(length: usize) -> Self {
         assert!(length > 0);
         Self {
             length,
-            norm: 1.0 / (length as f32),
             sum: Zero::zero(),
             delay: VecDeque::with_capacity(length),
         }
     }
+
+    pub fn from_cutoff_frequency(cutoff_frequency: f32, sample_rate: f32) -> Self {
+        // https://dsp.stackexchange.com/a/14648
+
+        let cutoff_frequency = cutoff_frequency / sample_rate;
+        let n = ((0.196202 + cutoff_frequency.powi(2)).sqrt() / cutoff_frequency).round() as usize;
+        assert!(n >= 2);
+        Self::new(n)
+    }
 }
 
-impl<S> Scanner<S> for MovingAverage<S>
+impl<S> MovingSum<S> {
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
+    pub fn cutoff_frequency(&self, sample_rate: f32) -> f32 {
+        let cutoff_frequency = 0.442947 / ((self.length as f32).powi(2) - 1.0).sqrt();
+        cutoff_frequency * sample_rate
+    }
+}
+
+impl<S> Scanner<S> for MovingSum<S>
 where
-    S: Copy + AddAssign<S> + SubAssign<S> + Mul<f32, Output = S>,
+    S: Copy + AddAssign<S> + SubAssign<S>,
 {
     type Output = S;
 
@@ -163,7 +189,72 @@ where
         }
         self.delay.push_back(sample);
 
-        self.sum * self.norm
+        self.sum
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct MovingAverage<S> {
+    moving_sum: MovingSum<S>,
+    norm: f32,
+}
+
+impl<S> MovingAverage<S>
+where
+    S: Zero,
+{
+    #[inline]
+    pub fn new(length: usize) -> Self {
+        MovingSum::new(length).into()
+    }
+
+    #[inline]
+    pub fn from_cutoff_frequency(cutoff_frequency: f32, sample_rate: f32) -> Self {
+        MovingSum::from_cutoff_frequency(cutoff_frequency, sample_rate).into()
+    }
+}
+
+impl<S> MovingAverage<S> {
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.moving_sum.len()
+    }
+
+    #[inline]
+    pub fn cutoff_frequency(&self, sample_rate: f32) -> f32 {
+        self.moving_sum.cutoff_frequency(sample_rate)
+    }
+
+    #[inline]
+    pub fn into_moving_sum(self) -> MovingSum<S> {
+        self.moving_sum
+    }
+}
+
+impl<S> Scanner<S> for MovingAverage<S>
+where
+    S: Copy + AddAssign<S> + SubAssign<S> + Mul<f32, Output = S>,
+{
+    type Output = S;
+
+    fn scan(&mut self, sample: S) -> Self::Output {
+        self.moving_sum.scan(sample) * self.norm
+    }
+}
+
+impl<S> From<MovingSum<S>> for MovingAverage<S> {
+    fn from(value: MovingSum<S>) -> Self {
+        let norm = 1.0 / (value.len() as f32);
+        Self {
+            moving_sum: value,
+            norm,
+        }
+    }
+}
+
+impl<S> From<MovingAverage<S>> for MovingSum<S> {
+    fn from(value: MovingAverage<S>) -> Self {
+        value.moving_sum
     }
 }
 

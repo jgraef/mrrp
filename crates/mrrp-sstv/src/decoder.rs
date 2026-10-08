@@ -300,7 +300,7 @@ where
                             if *bit == 7 {
                                 // parity bit
 
-                                let vis_code = VisCode::new(*this.vis_code).unwrap();
+                                let vis_code = VisCode(*this.vis_code);
                                 let mode = this
                                     .select_mode
                                     .mode_specification_with_parity(vis_code, bit_value)?;

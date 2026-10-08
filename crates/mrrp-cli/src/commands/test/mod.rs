@@ -1,3 +1,5 @@
+pub mod sstv;
+
 use std::{
     fs::File,
     io::{
@@ -5,7 +7,10 @@ use std::{
         Read,
         Seek,
     },
-    path::PathBuf,
+    path::{
+        Path,
+        PathBuf,
+    },
 };
 
 use anyhow::Error;
@@ -55,6 +60,18 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
             let chunk_ref = reader.riff()?;
             print_chunk_info(&mut reader, chunk_ref, 0)?;
         }
+        Command::IssDemod { path } => {
+            iss_demod(path).await?;
+        }
+        Command::Sstv(args) => {
+            sstv::run(Context {
+                args,
+                global: context.global,
+                files: context.files,
+                config: context.config,
+            })
+            .await?;
+        }
     }
 
     Ok(())
@@ -70,5 +87,15 @@ pub struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Print chunks contained in a RIFF file.
-    ReadRiff { path: PathBuf },
+    ReadRiff {
+        path: PathBuf,
+    },
+    IssDemod {
+        path: PathBuf,
+    },
+    Sstv(sstv::Args),
+}
+
+async fn iss_demod(_path: impl AsRef<Path>) -> Result<(), Error> {
+    todo!();
 }
