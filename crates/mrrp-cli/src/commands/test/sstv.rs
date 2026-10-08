@@ -37,14 +37,19 @@ pub struct Args {
 }
 
 mod vis {
-    use anyhow::Error;
+    use anyhow::{
+        Error,
+        anyhow,
+    };
     use mrrp_core::signal::{
         AsyncReadSamples,
         GetSampleRate,
     };
     use mrrp_sstv::{
+        LEADER_TIME,
         LEADER_TONE,
         SYNC_TONE,
+        VIS_BIT_TIME,
         VIS_HIGH_TONE,
         VIS_LOW_TONE,
         modes::VisCode,
@@ -57,97 +62,194 @@ mod vis {
     use crate::commands::test::sstv::{
         Edge,
         attempt1::{
-            FrequencyDetect,
+            FrequencyCounter,
             ToneDetect,
         },
     };
 
-    pub async fn decode<S>(mut source: S) -> Result<VisCode, Error>
-    where
-        S: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
-        Error: From<S::Error>,
-    {
-        let sample_rate = source.sample_rate();
+    /// Detects calibration header with VIS code
+    ///
+    /// Note that this expects the demouldated frequencies as input. Depending
+    /// on whether the input signal is audio, or IQ, you have different options
+    /// on how to detect the frequency.
+    #[derive(Clone, Debug)]
+    pub struct VisDetect {
+        /// sample rate
+        ///
+        /// we only need this in the constructor to calculate tone lengths, but
+        /// we need this atm for debugging
+        sample_rate: f32,
 
-        let mut coarse_frequency = FrequencyDetect::new(50.0, sample_rate);
-        let mut leader_detect = ToneDetect::new(LEADER_TONE, 50.0, 75.0);
-        let mut low_detect = ToneDetect::new(VIS_LOW_TONE, 50.0, 75.0);
-        let mut high_detect = ToneDetect::new(VIS_HIGH_TONE, 50.0, 75.0);
-        let mut start_stop_detect = ToneDetect::new(SYNC_TONE, 50.0, 75.0);
+        // tone detectors
+        leader_detect: ToneDetect,
+        vis_low_detect: ToneDetect,
+        vis_high_detect: ToneDetect,
+        vis_start_stop_detect: ToneDetect,
 
-        let mut leader_detected = 0;
-        let mut bit_start_time = None;
-        let mut vis_code = 0;
-        let mut bit = 0;
-        let mut parity = false;
-        let bit_len = (0.03 * sample_rate).round() as usize;
-        let mut bit_votes = 0;
-        let mut leader_start_time = 0;
+        // tone lengths (in samples)
+        min_leader_length: usize,
+        vis_bit_length: usize,
 
-        let mut i: usize = 0;
-        while let Some(sample) = source.read_sample_or_eof().await? {
-            let t = i as f32 / sample_rate;
-            let frequency = coarse_frequency.scan(sample);
+        // state
+        sample_num: usize,
+        state: State,
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    struct State {
+        leader_count: usize,
+        leader_start_time: Option<usize>,
+        vis_bit_start_time: Option<usize>,
+        vis_code_buffer: u8,
+        vis_bit_count: usize,
+        vis_bit_votes: i32,
+    }
+
+    impl VisDetect {
+        pub fn new(sample_rate: f32) -> Self {
+            let leader_detect = ToneDetect::new(LEADER_TONE, 50.0, 75.0);
+            let vis_low_detect = ToneDetect::new(VIS_LOW_TONE, 50.0, 75.0);
+            let vis_high_detect = ToneDetect::new(VIS_HIGH_TONE, 50.0, 75.0);
+            let vis_start_stop_detect = ToneDetect::new(SYNC_TONE, 50.0, 75.0);
+
+            let min_leader_length = (LEADER_TIME * sample_rate * 0.75) as usize;
+            let vis_bit_length = (VIS_BIT_TIME * sample_rate) as usize;
+
+            Self {
+                leader_detect,
+                vis_low_detect,
+                vis_high_detect,
+                vis_start_stop_detect,
+                sample_rate,
+                min_leader_length,
+                vis_bit_length,
+                sample_num: 0,
+                state: Default::default(),
+            }
+        }
+
+        #[inline]
+        pub fn reset(&mut self) {
+            self.state = Default::default();
+        }
+    }
+
+    impl Scanner<f32> for VisDetect {
+        type Output = Option<VisCode>;
+
+        fn scan(&mut self, frequency: f32) -> Self::Output {
+            if self.state.vis_bit_count == 8 {
+                // reset
+                self.reset();
+            }
+
+            // this is only used for debugging
+            let t = self.sample_num as f32 / self.sample_rate;
             //println!("t={:.3}ms, f={frequency}", t * 1000.0);
 
-            let (_leader_state, leader_edge) = leader_detect.scan(frequency);
-
+            let (_leader_state, leader_edge) = self.leader_detect.scan(frequency);
             match leader_edge {
-                Some(Edge::Rising) => leader_start_time = i,
+                Some(Edge::Rising) => {
+                    // start of a leader pulse
+                    self.state.leader_start_time = Some(self.sample_num)
+                }
                 Some(Edge::Falling) => {
-                    let leader_time = i - leader_start_time;
-                    if leader_time as f32 / sample_rate > 0.25 {
+                    // end of a leader pulse. but we want to ignore leader
+                    // pulses that have wrong timings.
+
+                    let leader_start_time = self
+                        .state
+                        .leader_start_time
+                        .take()
+                        .expect("leader falling edge without prior raising edge");
+
+                    let leader_time = self.sample_num - leader_start_time;
+                    if leader_time > self.min_leader_length {
+                        self.state.leader_count += 1;
                         println!(
-                            "LEADER: t={:.3}ms, n={leader_detected}, dt={:.3}ms",
+                            "LEADER: t={:.3}ms, n={}, dt={:.3}ms",
                             t * 1000.0,
-                            leader_time as f32 / sample_rate * 1000.0
+                            self.state.leader_count,
+                            leader_time as f32 / self.sample_rate * 1000.0
                         );
-                        leader_detected += 1;
                     }
                 }
                 _ => {}
             }
 
-            if leader_detected >= 2 {
-                let (_start_stop_state, start_stop_edge) = start_stop_detect.scan(frequency);
+            // before the VIS code there will be 2 leader pulses
+            if self.state.leader_count >= 2 {
+                // the vis code is surrounded by 2 pulses, but the bits are not
+                // separated, so we have to rely on timing. at start
+                // `vis_bit_start_time` will be `None`, so look at the else case
+                // of the following if.
 
-                if let Some(bit_start_time) = &mut bit_start_time {
-                    if i - *bit_start_time > bit_len {
-                        *bit_start_time = i;
+                let (_start_stop_state, start_stop_edge) =
+                    self.vis_start_stop_detect.scan(frequency);
 
-                        vis_code >>= 1;
-                        if bit_votes > 0 {
-                            vis_code |= 0x80;
-                            parity = !parity;
+                if let Some(bit_start_time) = &mut self.state.vis_bit_start_time {
+                    // a bit has already started
+
+                    if self.sample_num - *bit_start_time >= self.vis_bit_length {
+                        // the current bit is complete
+
+                        *bit_start_time = self.sample_num;
+
+                        // vis code is least significant bit first. so we shift
+                        // right and write into the msb.
+                        self.state.vis_code_buffer >>= 1;
+
+                        // high tones vote positive, low tones vote negative.
+                        if self.state.vis_bit_votes > 0 {
+                            // high bit
+                            self.state.vis_code_buffer |= 0x80;
                         }
+                        // note: nothing to do for the low bit
+
                         println!(
-                            "VIS CODE so far: 0x{vis_code:02x}, t={:.3}ms, votes={bit_votes}",
-                            t * 1000.0
+                            "VIS CODE so far: 0x{:02x}, t={:.3}ms, votes={}",
+                            self.state.vis_code_buffer,
+                            t * 1000.0,
+                            self.state.vis_bit_votes
                         );
 
-                        bit_votes = 0;
-                        bit += 1;
+                        // reset votes
+                        self.state.vis_bit_votes = 0;
+                        // increment bit count
+                        self.state.vis_bit_count += 1;
                     }
 
-                    if bit == 8 {
-                        break;
+                    if self.state.vis_bit_count == 8 {
+                        // we accumulated 8 bits in the buffer.
+
+                        // todo: this contains the parity bit - although the
+                        // type invariant is that the msb is 0.
+                        let vis_code = VisCode::new_unchecked(self.state.vis_code_buffer);
+                        return Some(vis_code);
                     }
 
                     if let Some(Edge::Rising) = start_stop_edge {
+                        // normally the vis code is over here, but we get lots
+                        // of spurious detections
+
                         println!("VIS STOP: t={:.3}ms", t * 1000.0);
                         //break;
                     }
 
-                    let (low_state, low_edge) = low_detect.scan(frequency);
-                    let (high_state, high_edge) = high_detect.scan(frequency);
+                    // detect low or high bit tone
+                    let (low_state, low_edge) = self.vis_low_detect.scan(frequency);
+                    let (high_state, high_edge) = self.vis_high_detect.scan(frequency);
 
+                    // this just votes negative and or positive depending on
+                    // what tone was detected
                     if low_state {
-                        bit_votes -= 1
+                        self.state.vis_bit_votes -= 1
                     };
                     if high_state {
-                        bit_votes += 1
+                        self.state.vis_bit_votes += 1
                     };
 
+                    // only for debugging
                     if let Some(Edge::Falling) = low_edge {
                         println!("LOW: t={:.3}ms", t * 1000.0);
                     }
@@ -156,19 +258,38 @@ mod vis {
                     }
                 }
                 else if let Some(Edge::Falling) = start_stop_edge {
+                    // no bit has started yet, but we detected the falling edge
+                    // of the start pulse. so the first bit is starting now.
+
                     println!("VIS START: t={:.3}ms", t * 1000.0);
-                    bit_start_time = Some(i);
+                    self.state.vis_bit_start_time = Some(self.sample_num);
                 }
             }
 
-            i += 1;
+            self.sample_num += 1;
 
-            if bit == 8 {
-                break;
+            None
+        }
+    }
+
+    pub async fn decode<S>(mut source: S) -> Result<VisCode, Error>
+    where
+        S: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
+        Error: From<S::Error>,
+    {
+        let sample_rate = source.sample_rate();
+
+        let mut frequency_counter = FrequencyCounter::new(50.0, sample_rate);
+        let mut vis_detect = VisDetect::new(sample_rate);
+
+        while let Some(sample) = source.read_sample_or_eof().await? {
+            let frequency = frequency_counter.scan(sample);
+            if let Some(vis_code) = vis_detect.scan(frequency) {
+                return Ok(vis_code);
             }
         }
 
-        Ok(VisCode::new_unchecked(vis_code & 0x7f))
+        Err(anyhow!("No VIS header detected"))
     }
 }
 
@@ -183,10 +304,7 @@ mod attempt1 {
         AsyncReadSamples,
         GetSampleRate,
     };
-    use mrrp_filter::{
-        MovingAverage,
-        MovingSum,
-    };
+    use mrrp_filter::MovingSum;
     use mrrp_sstv::{
         CHANNEL_HIGH_TONE,
         CHANNEL_LOW_TONE,
@@ -211,9 +329,9 @@ mod attempt1 {
     {
         let sample_rate = source.sample_rate();
 
-        let mut coarse_frequency = FrequencyDetect::new(100.0, sample_rate);
+        let mut coarse_frequency = FrequencyCounter::new(100.0, sample_rate);
         let r = (CHANNEL_HIGH_TONE - CHANNEL_LOW_TONE) / 4.0;
-        let mut fine_frequency = FrequencyDetect::new(r, sample_rate);
+        let mut fine_frequency = FrequencyCounter::new(r, sample_rate);
         let mut sync_detect = ToneDetect::new(SYNC_TONE, 100.0, 110.0);
         //let mut porch_detect = ToneDetect::new(PORCH_TONE, 100.0, 120.0);
 
@@ -337,35 +455,36 @@ mod attempt1 {
         let image = image.resize_exact(
             ModeSpecification::R36.pixels_per_line as u32,
             image.height(),
-            FilterType::Nearest,
+            FilterType::Triangle,
         );
 
         Ok(image)
     }
 
     #[derive(Clone, Debug)]
-    pub struct FrequencyDetect {
-        input_lowpass: MovingAverage<f32>,
+    pub struct FrequencyCounter {
+        //input_lowpass: MovingAverage<f32>,
         output_lowpass: MovingSum<f32>,
         state: f32,
         frequency_resolution: f32,
         threshold: f32,
     }
 
-    impl FrequencyDetect {
+    impl FrequencyCounter {
         pub fn new(frequency_resolution: f32, sample_rate: f32) -> Self {
-            // 500 Hz lowpass to remove DC
-            let input_lowpass = MovingAverage::from_cutoff_frequency(100.0, sample_rate);
-            tracing::debug!(n = ?input_lowpass.len(), "dc block");
+            // lowpass to remove DC
+            //let input_lowpass = MovingAverage::from_cutoff_frequency(10.0,
+            // sample_rate); tracing::debug!(n =
+            // ?input_lowpass.len(), "dc block");
 
             // lowpass to retrieve a smooth signal from the zero-crossing
             // detection
             let lowpass_size = (sample_rate / frequency_resolution).floor() as usize;
-            tracing::debug!(?lowpass_size);
             let output_lowpass = MovingSum::new(lowpass_size);
+            tracing::debug!(size = ?lowpass_size, cutoff = output_lowpass.cutoff_frequency(sample_rate));
 
             Self {
-                input_lowpass,
+                //input_lowpass,
                 output_lowpass,
                 state: 0.0,
                 frequency_resolution,
@@ -374,11 +493,11 @@ mod attempt1 {
         }
     }
 
-    impl Scanner<f32> for FrequencyDetect {
+    impl Scanner<f32> for FrequencyCounter {
         type Output = f32;
 
-        fn scan(&mut self, mut sample: f32) -> Self::Output {
-            sample -= self.input_lowpass.scan(sample);
+        fn scan(&mut self, sample: f32) -> Self::Output {
+            //sample -= self.input_lowpass.scan(sample);
 
             let mut new_state = self.state;
             let mut pulse = 0.0;
