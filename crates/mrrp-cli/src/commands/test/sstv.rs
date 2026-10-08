@@ -3,17 +3,26 @@ use std::path::PathBuf;
 use anyhow::Error;
 use clap::Parser;
 use mrrp_audio::WavSource;
+use mrrp_sstv::modes::ModeSpecification;
 use mrrp_util::signal::AsyncReadSamplesExt;
 
 use crate::Context;
 
 pub async fn run(context: Context<Args>) -> Result<(), Error> {
-    let source = WavSource::<_, i16>::from_path(&context.args.path)?.convert::<f32>();
+    let mut source = WavSource::<_, i16>::from_path(&context.args.path)?.convert::<f32>();
     tracing::info!(spec = ?source.inner().spec(), "input");
+
+    let vis_code = vis::decode(&mut source).await?;
+    assert_eq!(vis_code, ModeSpecification::R36.vis_code);
 
     let image = attempt1::decode(source).await?;
 
-    tracing::info!(width = image.width(), height = image.height(), "output");
+    tracing::info!(
+        width = image.width(),
+        height = image.height(),
+        ?vis_code,
+        "output"
+    );
     image.save(context.args.output)?;
 
     Ok(())
@@ -25,6 +34,142 @@ pub struct Args {
     output: PathBuf,
 
     path: PathBuf,
+}
+
+mod vis {
+    use anyhow::Error;
+    use mrrp_core::signal::{
+        AsyncReadSamples,
+        GetSampleRate,
+    };
+    use mrrp_sstv::{
+        LEADER_TONE,
+        SYNC_TONE,
+        VIS_HIGH_TONE,
+        VIS_LOW_TONE,
+        modes::VisCode,
+    };
+    use mrrp_util::signal::{
+        AsyncReadSamplesExt,
+        Scanner,
+    };
+
+    use crate::commands::test::sstv::{
+        Edge,
+        attempt1::{
+            FrequencyDetect,
+            ToneDetect,
+        },
+    };
+
+    pub async fn decode<S>(mut source: S) -> Result<VisCode, Error>
+    where
+        S: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
+        Error: From<S::Error>,
+    {
+        let sample_rate = source.sample_rate();
+
+        let mut coarse_frequency = FrequencyDetect::new(50.0, sample_rate);
+        let mut leader_detect = ToneDetect::new(LEADER_TONE, 50.0, 75.0);
+        let mut low_detect = ToneDetect::new(VIS_LOW_TONE, 50.0, 75.0);
+        let mut high_detect = ToneDetect::new(VIS_HIGH_TONE, 50.0, 75.0);
+        let mut start_stop_detect = ToneDetect::new(SYNC_TONE, 50.0, 75.0);
+
+        let mut leader_detected = 0;
+        let mut bit_start_time = None;
+        let mut vis_code = 0;
+        let mut bit = 0;
+        let mut parity = false;
+        let bit_len = (0.03 * sample_rate).round() as usize;
+        let mut bit_votes = 0;
+        let mut leader_start_time = 0;
+
+        let mut i: usize = 0;
+        while let Some(sample) = source.read_sample_or_eof().await? {
+            let t = i as f32 / sample_rate;
+            let frequency = coarse_frequency.scan(sample);
+            //println!("t={:.3}ms, f={frequency}", t * 1000.0);
+
+            let (_leader_state, leader_edge) = leader_detect.scan(frequency);
+
+            match leader_edge {
+                Some(Edge::Rising) => leader_start_time = i,
+                Some(Edge::Falling) => {
+                    let leader_time = i - leader_start_time;
+                    if leader_time as f32 / sample_rate > 0.25 {
+                        println!(
+                            "LEADER: t={:.3}ms, n={leader_detected}, dt={:.3}ms",
+                            t * 1000.0,
+                            leader_time as f32 / sample_rate * 1000.0
+                        );
+                        leader_detected += 1;
+                    }
+                }
+                _ => {}
+            }
+
+            if leader_detected >= 2 {
+                let (_start_stop_state, start_stop_edge) = start_stop_detect.scan(frequency);
+
+                if let Some(bit_start_time) = &mut bit_start_time {
+                    if i - *bit_start_time > bit_len {
+                        *bit_start_time = i;
+
+                        vis_code >>= 1;
+                        if bit_votes > 0 {
+                            vis_code |= 0x80;
+                            parity = !parity;
+                        }
+                        println!(
+                            "VIS CODE so far: 0x{vis_code:02x}, t={:.3}ms, votes={bit_votes}",
+                            t * 1000.0
+                        );
+
+                        bit_votes = 0;
+                        bit += 1;
+                    }
+
+                    if bit == 8 {
+                        break;
+                    }
+
+                    if let Some(Edge::Rising) = start_stop_edge {
+                        println!("VIS STOP: t={:.3}ms", t * 1000.0);
+                        //break;
+                    }
+
+                    let (low_state, low_edge) = low_detect.scan(frequency);
+                    let (high_state, high_edge) = high_detect.scan(frequency);
+
+                    if low_state {
+                        bit_votes -= 1
+                    };
+                    if high_state {
+                        bit_votes += 1
+                    };
+
+                    if let Some(Edge::Falling) = low_edge {
+                        println!("LOW: t={:.3}ms", t * 1000.0);
+                    }
+                    else if let Some(Edge::Falling) = high_edge {
+                        println!("HIGH: t={:.3}ms", t * 1000.0);
+                    }
+                }
+                else if let Some(Edge::Falling) = start_stop_edge {
+                    println!("VIS START: t={:.3}ms", t * 1000.0);
+                    bit_start_time = Some(i);
+                }
+            }
+
+            i += 1;
+
+            if bit == 8 {
+                break;
+            }
+        }
+
+        Ok(VisCode::new_unchecked(vis_code & 0x7f))
+    }
 }
 
 mod attempt1 {

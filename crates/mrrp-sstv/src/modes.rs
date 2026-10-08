@@ -7,6 +7,7 @@
 
 use std::{
     collections::HashMap,
+    fmt::Debug,
     sync::OnceLock,
 };
 
@@ -21,7 +22,7 @@ pub enum ColorFormat {
     Gray,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct VisCode(u8);
 
 impl VisCode {
@@ -61,6 +62,13 @@ impl VisCode {
             ^ (self.0 >> 1)
             ^ self.0;
         parity & 1 != 0
+    }
+}
+
+impl Debug for VisCode {
+    #[inline]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "VisCode(0x{:02x})", self.0)
     }
 }
 
