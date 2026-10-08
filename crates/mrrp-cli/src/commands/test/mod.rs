@@ -1,3 +1,5 @@
+pub mod sstv;
+
 use std::{
     fs::File,
     io::{
@@ -55,6 +57,15 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
             let chunk_ref = reader.riff()?;
             print_chunk_info(&mut reader, chunk_ref, 0)?;
         }
+        Command::Sstv(args) => {
+            sstv::run(Context {
+                args,
+                global: context.global,
+                files: context.files,
+                config: context.config,
+            })
+            .await?;
+        }
     }
 
     Ok(())
@@ -70,5 +81,8 @@ pub struct Args {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Print chunks contained in a RIFF file.
-    ReadRiff { path: PathBuf },
+    ReadRiff {
+        path: PathBuf,
+    },
+    Sstv(sstv::Args),
 }

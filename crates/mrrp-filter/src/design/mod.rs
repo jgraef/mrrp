@@ -318,6 +318,7 @@ impl Hilbert {
     pub fn new(transition_bandwidth: f32) -> Self {
         Self {
             allpass_begin: 0.25 * transition_bandwidth,
+            // fixme: this doesn't work
             allpass_end: 0.5 - 0.25 * transition_bandwidth,
         }
     }

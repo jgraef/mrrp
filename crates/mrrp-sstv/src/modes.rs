@@ -14,6 +14,9 @@ use std::{
 pub enum ColorFormat {
     Gbr,
     Rgb,
+    /// # TODO
+    ///
+    /// Check the formats that claim to be YUV. They might be YCbCr. [nsstv](https://github.com/wambo3/nSSTV/blob/main/nSSTV/__init__.py#L597) might be a good reference to check what they're doing.
     Yuv,
     Gray,
 }
@@ -78,7 +81,7 @@ pub struct ModeSpecification {
 }
 
 impl ModeSpecification {
-    // N7CXI, 2000
+    // Martin M1
     pub const M1: Self = Self {
         name: "Martin M1",
         short_name: "M1",
@@ -94,7 +97,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x2c),
     };
 
-    /// N7CXI, 2000
+    /// Martin M2
     pub const M2: Self = Self {
         name: "Martin M2",
         short_name: "M2",
@@ -110,7 +113,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x28),
     };
 
-    /// KB4YZ, 1999
+    /// Martin M3
     pub const M3: Self = Self {
         name: "Martin M3",
         short_name: "M3",
@@ -126,7 +129,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x24),
     };
 
-    /// KB4YZ, 1999
+    /// Martin M4
     pub const M4: Self = Self {
         name: "Martin M4",
         short_name: "M4",
@@ -142,7 +145,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x20),
     };
 
-    /// N7CXI, 2000
+    /// Scottie S1
     pub const S1: Self = Self {
         name: "Scottie S1",
         short_name: "S1",
@@ -158,7 +161,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x3c),
     };
 
-    /// N7CXI, 2000
+    /// Scottie S2
     pub const S2: Self = Self {
         name: "Scottie S2",
         short_name: "S2",
@@ -174,7 +177,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x38),
     };
 
-    /// N7CXI, 2000
+    /// Scottie DX
     pub const SDX: Self = Self {
         name: "Scottie DX",
         short_name: "SDX",
@@ -190,7 +193,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x4c),
     };
 
-    /// N7CXI, 2000
+    /// Robot 72
     pub const R72: Self = Self {
         name: "Robot 72",
         short_name: "R72",
@@ -206,7 +209,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x0c),
     };
 
-    /// N7CXI, 2000
+    /// Robot 36
     pub const R36: Self = Self {
         name: "Robot 36",
         short_name: "R36",
@@ -222,7 +225,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x08),
     };
 
-    /// N7CXI, 2000
+    /// Robot 24
     pub const R24: Self = Self {
         name: "Robot 24",
         short_name: "R24",
@@ -238,7 +241,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x04),
     };
 
-    /// N7CXI, 2000
+    /// Robot 24 B/W
     pub const R24BW: Self = Self {
         name: "Robot 24 B/W",
         short_name: "R24Gray",
@@ -254,7 +257,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x0a),
     };
 
-    /// N7CXI, 2000
+    /// Robot 12 B/W
     pub const R12BW: Self = Self {
         name: "Robot 12 B/W",
         short_name: "R12Gray",
@@ -270,7 +273,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x06),
     };
 
-    /// N7CXI, 2000
+    /// Robot 8 B/W
     pub const R8BW: Self = Self {
         name: "Robot 8 B/W",
         short_name: "R8Gray",
@@ -286,7 +289,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x02),
     };
 
-    /// KB4YZ, 1999
+    /// Wraase SC-2 120
     pub const W2120: Self = Self {
         name: "Wraase SC-2 120",
         short_name: "W2120",
@@ -302,7 +305,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x3f),
     };
 
-    /// N7CXI, 2000
+    /// Wraase SC-2 180
     pub const W2180: Self = Self {
         name: "Wraase SC-2 180",
         short_name: "W2180",
@@ -318,7 +321,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x37),
     };
 
-    /// N7CXI, 2000
+    /// PD-50
     pub const PD50: Self = Self {
         name: "PD-50",
         short_name: "PD50",
@@ -334,7 +337,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x5d),
     };
 
-    /// N7CXI, 2000
+    /// PD-90
     pub const PD90: Self = Self {
         name: "PD-90",
         short_name: "PD90",
@@ -350,7 +353,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x63),
     };
 
-    /// N7CXI, 2000
+    /// PD-120
     pub const PD120: Self = Self {
         name: "PD-120",
         short_name: "PD120",
@@ -366,7 +369,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x5f),
     };
 
-    /// N7CXI, 2000
+    /// PD-160
     pub const PD160: Self = Self {
         name: "PD-160",
         short_name: "PD160",
@@ -382,7 +385,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x62),
     };
 
-    /// N7CXI, 2000
+    /// PD-180
     pub const PD180: Self = Self {
         name: "PD-180",
         short_name: "PD180",
@@ -398,7 +401,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x60),
     };
 
-    /// N7CXI, 2000
+    /// PD-240
     pub const PD240: Self = Self {
         name: "PD-240",
         short_name: "PD240",
@@ -414,7 +417,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x61),
     };
 
-    /// N7CXI, 2000
+    /// PD-290
     pub const PD290: Self = Self {
         name: "PD-290",
         short_name: "PD290",
@@ -430,7 +433,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x5e),
     };
 
-    /// N7CXI, 2000
+    /// Pasokon P3
     pub const P3: Self = Self {
         name: "Pasokon P3",
         short_name: "P3",
@@ -446,7 +449,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x71),
     };
 
-    /// N7CXI, 2000
+    /// Pasokon P5
     pub const P5: Self = Self {
         name: "Pasokon P5",
         short_name: "P5",
@@ -462,7 +465,7 @@ impl ModeSpecification {
         vis_code: VisCode(0x72),
     };
 
-    /// N7CXI, 2000
+    /// Pasokon P7
     pub const P7: Self = Self {
         name: "Pasokon P7",
         short_name: "P7",

@@ -61,6 +61,7 @@ mrrp-modem = { path = "crates/mrrp-modem", default-features = false }
 mrrp-rtl-sdr = { path = "crates/mrrp-rtl-sdr", default-features = false }
 mrrp-rtl-tcp = { path = "crates/mrrp-rtl-tcp", default-features = false }
 mrrp-sat = { path = "crates/mrrp-sat", default-features = false }
+mrrp-sstv = { path = "crates/mrrp-sstv", default-features = false }
 mrrp-util = { path = "crates/mrrp-util", default-features = false }
 mrrp-widgets = { path = "crates/mrrp-widgets", default-features = false }
 

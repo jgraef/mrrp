@@ -15,13 +15,17 @@ dotenvy.workspace = true
 futures-util.workspace = true
 hexyl = "0.17.0"
 humantime = "2.3.0"
-mrrp-audio = { workspace = true, default-features = false, features = ["wav"] }
+image = "0.25.10" # todo: for testing, remove
+mrrp-audio = { workspace = true, features = ["rodio", "wav"] }
 mrrp-core.workspace = true
 mrrp-file.workspace = true
+mrrp-filter = { workspace = true, features = ["pm-remez"] }
 mrrp-geo.workspace = true
+mrrp-modem.workspace = true
 mrrp-rtl-sdr.workspace = true
 mrrp-rtl-tcp.workspace = true
 mrrp-sat.workspace = true
+mrrp-sstv = { workspace = true, features = ["image"] }
 mrrp-util = { workspace = true, features = ["sat"] }
 num-traits.workspace = true
 parking_lot.workspace = true

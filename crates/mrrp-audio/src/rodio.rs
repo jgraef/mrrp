@@ -254,7 +254,7 @@ where
     }
 }
 
-fn global_output_stream() -> Result<&'static rodio::MixerDeviceSink, rodio::DeviceSinkError> {
+pub fn global_output_stream() -> Result<&'static rodio::MixerDeviceSink, rodio::DeviceSinkError> {
     // note: OnceLock or LazyLock don't work here (yet) because creation can
     // fail and we can't clone the error.
 

@@ -6,12 +6,16 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-image = { version = "0.25.10", default-features = false }
+image = { version = "0.25.10", default-features = false, optional = true }
 mrrp-core.workspace = true
 mrrp-filter.workspace = true
 mrrp-modem.workspace = true
 mrrp-util.workspace = true
+nalgebra = { workspace = true, default-features = false, features = ["macros"] }
 num-complex.workspace = true
 pin-project-lite.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+
+[features]
+image = ["dep:image"]

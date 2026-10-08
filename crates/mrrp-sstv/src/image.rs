@@ -1,8 +1,3 @@
-use image::{
-    Rgb,
-    RgbImage,
-};
-
 #[derive(Clone, Copy, Debug, Default)]
 pub enum Channel {
     #[default]
@@ -47,15 +42,16 @@ where
     }
 }
 
-impl FrameBuffer for RgbImage {
+#[cfg(feature = "image")]
+impl FrameBuffer for image::RgbImage {
     #[inline]
     fn width(&self) -> usize {
-        RgbImage::width(self).try_into().unwrap()
+        image::RgbImage::width(self).try_into().unwrap()
     }
 
     #[inline]
     fn height(&self) -> usize {
-        RgbImage::height(self).try_into().unwrap()
+        image::RgbImage::height(self).try_into().unwrap()
     }
 
     #[inline]
@@ -87,14 +83,15 @@ where
     }
 }
 
-impl FrameBufferMut for RgbImage {
+#[cfg(feature = "image")]
+impl FrameBufferMut for image::RgbImage {
     fn set_size(&mut self, width: usize, height: usize) {
         //*self = RgbImage::new(width.try_into().unwrap(),
         //*self height.try_into().unwrap());
-        *self = RgbImage::from_fn(
+        *self = image::RgbImage::from_fn(
             width.try_into().unwrap(),
             height.try_into().unwrap(),
-            |_x, _y| Rgb([0xff, 0, 0xff]),
+            |_x, _y| image::Rgb([0xff, 0, 0xff]),
         );
     }
 
