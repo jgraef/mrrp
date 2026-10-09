@@ -13,6 +13,7 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
     tracing::info!(spec = ?source.inner().spec(), "input");
 
     let vis_code = vis::decode(&mut source).await?;
+    let vis_code = vis_code.check_parity().expect("Parity check failed");
     assert_eq!(vis_code, ModeSpecification::R36.vis_code);
 
     let image = attempt1::decode(source).await?;
@@ -224,7 +225,7 @@ mod vis {
 
                         // todo: this contains the parity bit - although the
                         // type invariant is that the msb is 0.
-                        let vis_code = VisCode::new_unchecked(self.state.vis_code_buffer);
+                        let vis_code = VisCode(self.state.vis_code_buffer);
                         return Some(vis_code);
                     }
 

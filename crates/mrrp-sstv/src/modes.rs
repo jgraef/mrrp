@@ -23,45 +23,36 @@ pub enum ColorFormat {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
-pub struct VisCode(u8);
+pub struct VisCode(pub u8);
 
 impl VisCode {
     #[inline]
-    pub const fn new(value: u8) -> Option<Self> {
-        if value & 0x80 == 0 {
-            Some(Self(value))
+    pub fn get_bit(&self, i: u8) -> bool {
+        assert!(i < 8);
+        (self.0 >> i) & 1 != 0
+    }
+
+    pub fn parity(&self) -> bool {
+        let mut parity = false;
+        let mut code = self.0;
+
+        for _ in 0..8 {
+            parity ^= (code & 1) != 0;
+            code >>= 1;
         }
-        else {
+
+        parity
+    }
+
+    pub fn check_parity(self) -> Option<Self> {
+        // the parity including the parity bit must alwasy be 0
+        if self.parity() {
             None
         }
-    }
-
-    #[inline]
-    pub const fn new_unchecked(value: u8) -> Self {
-        Self(value)
-    }
-
-    #[inline]
-    pub fn get(&self) -> u8 {
-        self.0
-    }
-
-    #[inline]
-    pub fn get_bit(&self, bit: u8) -> bool {
-        assert!(bit < 7);
-        (self.0 >> bit) & 1 != 0
-    }
-
-    #[inline]
-    pub fn parity(&self) -> bool {
-        let parity = (self.0 >> 6)
-            ^ (self.0 >> 5)
-            ^ (self.0 >> 4)
-            ^ (self.0 >> 3)
-            ^ (self.0 >> 2)
-            ^ (self.0 >> 1)
-            ^ self.0;
-        parity & 1 != 0
+        else {
+            // if the parity check succeeds, remove the parity bit from the code
+            Some(Self(self.0 & 0x7f))
+        }
     }
 }
 
