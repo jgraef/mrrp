@@ -42,6 +42,7 @@ use crate::{
         Tuner,
         TunerProbe,
         gain::IntoTunerGain,
+        r82xx::blog,
     },
 };
 
@@ -397,6 +398,23 @@ impl Device {
     #[inline(always)]
     pub fn available_tuner_gains(&self) -> &[f32] {
         &self.tuner_gains
+    }
+
+    pub async fn set_bias_t(&mut self, enable: bool) -> Result<(), Error> {
+        // todo: should we move this into the Tuner? or a Peripherals trait that
+        // works like the tuner?
+
+        let Inner { rtl2832u, tuner } = &mut *self.shared.lock_inner().await;
+
+        let pin = tuner
+            .downcast_ref::<blog::BlogTuner>()
+            .and_then(|tuner| tuner.model().bias_t_pin())
+            .ok_or_else(|| Error::UnsupportedOperation)?;
+
+        let pin = rtl2832u.try_gpio(pin)?;
+        let _pin = pin.into_output_init(rtl2832u, enable).await?;
+
+        Ok(())
     }
 }
 

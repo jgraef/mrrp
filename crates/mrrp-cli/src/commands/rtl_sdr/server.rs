@@ -334,6 +334,10 @@ async fn handle_command(
             tracing::debug!(?command, "handling command");
             set_tuner_gain(device, gain::Index(index.try_into()?)).await?;
         }
+        Command::SetBiasT { enable } => {
+            tracing::debug!(?command, "handling command");
+            device.set_bias_t(enable).await?;
+        }
         _ => tracing::debug!(?command, "ignoring command"),
     }
 

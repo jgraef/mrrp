@@ -76,7 +76,7 @@ impl Rtl2832u {
     /// Returns an unconfigured GPIO pin
     ///
     /// This will try to acquire exclusive access to a GPIO pin. It returns
-    /// `Err(GpioPinBudy)`, if the pin is already in use.
+    /// `Err(GpioPinBusy)`, if the pin is already in use.
     ///
     /// # Panic
     ///

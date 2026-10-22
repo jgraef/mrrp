@@ -131,7 +131,6 @@ pub mod enumerate;
 pub mod rtl2832u;
 pub mod tuner;
 
-use crate::tuner::AnyTunerError;
 pub use crate::{
     device::{
         Device,
@@ -142,6 +141,10 @@ pub use crate::{
         enumerate_devices,
     },
     tuner::gain::TunerGain,
+};
+use crate::{
+    rtl2832u::gpio::GpioPinBusy,
+    tuner::AnyTunerError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -160,6 +163,12 @@ pub enum Error {
 
     #[error("No tuner detected")]
     NoTunerFound,
+
+    #[error(transparent)]
+    GpioBusy(#[from] GpioPinBusy),
+
+    #[error("Unsupported operation")]
+    UnsupportedOperation,
 }
 
 pub async fn open_any(options: OpenOptions) -> Result<Device, Error> {

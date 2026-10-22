@@ -102,6 +102,13 @@ impl Model {
             _ => None,
         }
     }
+
+    pub fn bias_t_pin(&self) -> Option<u8> {
+        match self {
+            Model::V4 => Some(0),
+            Model::V4l => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
