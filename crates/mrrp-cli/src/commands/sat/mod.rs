@@ -1,7 +1,8 @@
 #![allow(dead_code)] // todo: remove
 
+mod capture;
 mod config;
-mod passes;
+mod list;
 
 use std::{
     collections::{
@@ -40,6 +41,7 @@ use mrrp_core::{
         GetSampleRate,
     },
 };
+use mrrp_rtl_sdr::tuner::gain;
 use mrrp_sat::{
     Geodetic,
     satellite::{
@@ -186,27 +188,46 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
             let location = get_location(&config)?;
             let satellite = get_satellite(&satellites, &sat_id)?;
 
-            passes::list(satellite, location, options, context.global.table_style)?;
+            list::list(satellite, location, options, context.global.table_style)?;
         }
         Command::CapturePasses {
             output,
             sat_id,
             center_frequency,
             sample_rate,
+            bias_t,
+            gain,
             device,
+            options,
         } => {
             create_parent_dir_if_not_exists(&output)?;
 
+            let location = get_location(&config)?;
             let satellite = get_satellite(&satellites, &sat_id)?;
 
-            // todo
-            //let device = device.open_device().await?;
-            //let device = ();
+            let mut device = device.open_device().await?;
+            //let mut device = DummyDevice::default();
+            tracing::info!(
+                name = device.device_info().name(),
+                ?sample_rate,
+                ?center_frequency,
+                ?bias_t,
+                "configuring RTL-SDR"
+            );
+            device.set_sample_rate(sample_rate).await?;
+            device.set_center_frequency(center_frequency).await?;
+            device.set_bias_t(bias_t).await?;
+            device.set_tuner_gain(gain::Db(gain)).await?;
 
-            //capture_passes(&output, satellite, device).await?;
-            let _ = (center_frequency, sample_rate, device, satellite);
-
-            todo!();
+            capture::capture(
+                &output,
+                satellite,
+                location,
+                options,
+                &mut device,
+                center_frequency,
+            )
+            .await?;
         }
     }
 
@@ -311,7 +332,7 @@ enum Command {
     },
     ListPasses {
         #[clap(flatten)]
-        options: passes::Options,
+        options: list::Options,
 
         /// Satellite ID
         ///
@@ -333,8 +354,19 @@ enum Command {
         #[clap(short, long)]
         sample_rate: f32,
 
+        /// Whether to enable Bias-T
+        #[clap(short, long)]
+        bias_t: bool,
+
+        /// Tuner gain in dB
+        #[clap(short, long)]
+        gain: f32,
+
         #[clap(flatten)]
         device: DeviceArgs,
+
+        #[clap(flatten)]
+        options: capture::Options,
 
         /// Satellite ID
         ///

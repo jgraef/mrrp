@@ -19,7 +19,7 @@ mrrp-audio = { workspace = true, default-features = false, features = ["wav"] }
 mrrp-core.workspace = true
 mrrp-file.workspace = true
 mrrp-geo.workspace = true
-mrrp-rtl-sdr.workspace = true
+mrrp-rtl-sdr = { workspace = true, features = ["mrrp"] }
 mrrp-rtl-tcp.workspace = true
 mrrp-sat.workspace = true
 mrrp-util = { workspace = true, features = ["sat"] }

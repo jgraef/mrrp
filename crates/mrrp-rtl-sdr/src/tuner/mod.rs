@@ -448,6 +448,12 @@ pub mod gain {
     }
 
     impl IntoTunerGain for TunerGain {
+        /// Convert to [`TunerGain`] enum.
+        ///
+        /// The `available_gains` provides the gain values in dB that are
+        /// available. It is sorted in ascending order. This is needed by the
+        /// conversion from dB values to the [`TunerGain`] enum, as it only
+        /// understands indices.
         #[inline(always)]
         fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
             let _ = available_gains;
@@ -459,16 +465,20 @@ pub mod gain {
     pub struct Auto;
 
     impl IntoTunerGain for Auto {
-        /// Convert to [`TunerGain`] enum.
-        ///
-        /// The `available_gains` provides the gain values in dB that are
-        /// available. It is sorted in ascending order. This is needed by the
-        /// conversion from dB values to the [`TunerGain`] enum, as it only
-        /// understands indices.
         #[inline(always)]
         fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
             let _ = available_gains;
             TunerGain::Auto
+        }
+    }
+
+    #[derive(Clone, Copy, Debug, Default)]
+    pub struct Max;
+
+    impl IntoTunerGain for Max {
+        #[inline(always)]
+        fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
+            TunerGain::Manual(available_gains.len() - 1)
         }
     }
 

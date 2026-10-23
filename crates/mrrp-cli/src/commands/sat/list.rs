@@ -54,9 +54,9 @@ impl Default for Options {
             start_time: None,
             end_time: None,
             limit: Some(20),
-            predict_interval: Duration::from_secs(30),
+            predict_interval: Duration::from_secs(5),
             batch_size: 1024,
-            min_elevation: 10.0f64.to_radians(),
+            min_elevation: 0.0f64.to_radians(),
         }
     }
 }
