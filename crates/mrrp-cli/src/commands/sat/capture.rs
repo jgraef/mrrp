@@ -24,8 +24,8 @@ use mrrp_util::signal::AsyncReadSamplesExt;
 use crate::{
     commands::sat::PassOptions,
     util::{
-        CancelStream,
         sleep_until,
+        stream::CancelStream,
     },
 };
 
@@ -129,5 +129,5 @@ pub async fn capture(
         }
     }
 
-    todo!();
+    Ok(())
 }

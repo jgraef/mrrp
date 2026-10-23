@@ -8,8 +8,8 @@ use mrrp_util::signal::AsyncReadSamplesExt;
 
 use crate::Context;
 
-pub async fn run(context: Context<Args>) -> Result<(), Error> {
-    let mut source = WavSource::<_, i16>::from_path(&context.args.path)?.convert::<f32>();
+pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
+    let mut source = WavSource::<_, i16>::from_path(&args.path)?.convert::<f32>();
     tracing::info!(spec = ?source.inner().spec(), "input");
 
     let vis_code = vis::decode(&mut source).await?;
@@ -24,7 +24,7 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
         ?vis_code,
         "output"
     );
-    image.save(context.args.output)?;
+    image.save(args.output)?;
 
     Ok(())
 }

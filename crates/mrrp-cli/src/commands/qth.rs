@@ -10,8 +10,8 @@ use mrrp_geo::{
 
 use crate::Context;
 
-pub async fn run(context: Context<Args>) -> Result<(), Error> {
-    match context.args.command {
+pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
+    match args.command {
         Command::Encode {
             longitude,
             latitude,

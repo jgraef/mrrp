@@ -1,12 +1,11 @@
+pub mod sdrpp;
+pub mod si;
+pub mod stream;
+
 use std::{
     borrow::Cow,
-    pin::Pin,
     str::FromStr,
     sync::OnceLock,
-    task::{
-        Context,
-        Poll,
-    },
     time::Duration,
 };
 
@@ -15,24 +14,12 @@ use chrono::{
     TimeDelta,
     Utc,
 };
-use mrrp_core::signal::{
-    AsyncReadSamples,
-    GetSampleRate,
-    ReadBuf,
-    Remaining,
-    SizeHint,
-    StreamLength,
-};
 use num_traits::float::FloatCore;
-use pin_project_lite::pin_project;
 use serde::{
     Deserialize,
     Deserializer,
 };
-use tokio_util::sync::{
-    CancellationToken,
-    WaitForCancellationFutureOwned,
-};
+use tokio_util::sync::CancellationToken;
 
 pub fn parse_degrees_as_radians<T>(s: &str) -> Result<T, T::Err>
 where
@@ -105,95 +92,5 @@ pub async fn sleep_until(time: DateTime<Utc>) {
         else {
             break;
         }
-    }
-}
-
-pin_project! {
-    pub struct CancelStream<R> {
-        #[pin]
-        inner: R,
-        #[pin]
-        cancelled: WaitForCancellationFutureOwned,
-        token: CancellationToken,
-    }
-}
-
-impl<R> CancelStream<R> {
-    #[inline]
-    pub fn new(inner: R) -> Self {
-        let token = CancellationToken::new();
-        Self::from_token(inner, token)
-    }
-
-    #[inline]
-    pub fn from_token(inner: R, token: CancellationToken) -> Self {
-        let cancelled = token.clone().cancelled_owned();
-        Self {
-            inner,
-            cancelled,
-            token,
-        }
-    }
-
-    #[inline]
-    pub fn token(&self) -> CancellationToken {
-        self.token.clone()
-    }
-
-    #[inline]
-    pub fn cancel(&self) {
-        self.token.cancel();
-    }
-}
-
-impl<R> AsyncReadSamples for CancelStream<R>
-where
-    R: AsyncReadSamples,
-{
-    type Sample = R::Sample;
-    type Error = R::Error;
-
-    #[inline]
-    fn poll_read_samples(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buffer: &mut ReadBuf<Self::Sample>,
-    ) -> Poll<Result<(), Self::Error>> {
-        let this = self.project();
-
-        if let Poll::Ready(()) = this.cancelled.poll(cx) {
-            Poll::Ready(Ok(()))
-        }
-        else {
-            this.inner.poll_read_samples(cx, buffer)
-        }
-    }
-}
-
-impl<R> StreamLength for CancelStream<R>
-where
-    R: StreamLength,
-{
-    #[inline]
-    fn remaining(&self) -> Remaining {
-        Remaining::Unknown
-    }
-
-    #[inline]
-    fn size_hint(&self) -> SizeHint {
-        SizeHint {
-            lower_bound: 0,
-            upper_bound: self.inner.size_hint().upper_bound,
-        }
-    }
-}
-
-impl<R> GetSampleRate for CancelStream<R>
-where
-    R: GetSampleRate,
-{
-    #[inline]
-    fn sample_rate(&self) -> f32 {
-        self.inner.sample_rate()
     }
 }
