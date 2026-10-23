@@ -11,7 +11,7 @@ use mrrp_rtl_sdr::{
 
 #[derive(Debug, Args)]
 pub struct DeviceArgs {
-    /// Specify a device by serial number.
+    /// Specify a RTL-SDR dongle by serial number.
     ///
     /// If you only have one device connected, you can omit this.
     #[clap(short, long)]

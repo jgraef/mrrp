@@ -1,7 +1,4 @@
-use std::{
-    path::Path,
-    time::Duration,
-};
+use std::path::Path;
 
 use anyhow::Error;
 use chrono::{
@@ -24,40 +21,24 @@ use mrrp_sat::{
 };
 use mrrp_util::signal::AsyncReadSamplesExt;
 
-use crate::util::{
-    CancelStream,
-    sleep_until,
+use crate::{
+    commands::sat::PassOptions,
+    util::{
+        CancelStream,
+        sleep_until,
+    },
 };
 
-#[derive(Clone, Debug, clap::Args)]
+#[derive(Clone, Debug, Default, clap::Args)]
 pub struct Options {
-    #[clap(short, long, default_value = "5s", value_parser = humantime::parse_duration)]
-    pub predict_interval: Duration,
+    #[clap(flatten)]
+    pub pass_options: PassOptions,
 
-    #[clap(short = 'b', long, default_value = "1024")]
-    pub batch_size: usize,
-
-    #[clap(
-        short = 'e',
-        long,
-        default_value = "0",
-        value_parser = crate::util::parse_degrees_as_radians::<f64>,
-    )]
-    pub min_elevation: f64,
-
+    /// Ignores when the next pass is actually going to happen and makes it
+    /// happen in 15s. Each pass will be 15s long. This can be used to test the
+    /// whole pipeline without waiting for the satellite to pass.
     #[clap(long)]
     pub test_time: bool,
-}
-
-impl Default for Options {
-    fn default() -> Self {
-        Self {
-            predict_interval: Duration::from_secs(5),
-            batch_size: 1024,
-            min_elevation: 0.0f64.to_radians(),
-            test_time: false,
-        }
-    }
 }
 
 pub async fn capture(
@@ -75,9 +56,9 @@ pub async fn capture(
         location,
         PassEventsOptions {
             start_time: None,
-            predict_interval: options.predict_interval,
-            batch_size: options.batch_size,
-            min_elevation: options.min_elevation,
+            predict_interval: options.pass_options.predict.interval,
+            batch_size: options.pass_options.predict.batch_size,
+            min_elevation: options.pass_options.min_elevation,
         },
     );
 

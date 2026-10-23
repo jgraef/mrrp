@@ -31,6 +31,8 @@ use mrrp_util::{
     signal::AsyncReadSamplesExt,
 };
 
+// todo: also take batch_size option and don't predict all satellite positions
+// at once, but batch them.
 pub async fn correct(
     satellite: &Satellite,
     location: Geodetic,

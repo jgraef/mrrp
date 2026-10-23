@@ -86,6 +86,7 @@ enum Command {
 
 #[derive(Clone, Debug, clap::Args)]
 pub struct GlobalOptions {
+    /// How to format tables that are printed by any subcommands.
     #[clap(short, long, env = "MRRP_TABLE_STYLE", default_value = "sharp")]
     pub table_style: TableStyle,
 }

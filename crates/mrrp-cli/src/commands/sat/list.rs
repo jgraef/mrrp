@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use anyhow::Error;
 use chrono::{
     DateTime,
@@ -20,7 +18,10 @@ use tabled::{
     Tabled,
 };
 
-use crate::TableStyle;
+use crate::{
+    TableStyle,
+    commands::sat::PassOptions,
+};
 
 #[derive(Clone, Debug, clap::Args)]
 pub struct Options {
@@ -33,19 +34,8 @@ pub struct Options {
     #[clap(short = 'n', long)]
     pub limit: Option<usize>,
 
-    #[clap(short, long, default_value = "5s", value_parser = humantime::parse_duration)]
-    pub predict_interval: Duration,
-
-    #[clap(short = 'b', long, default_value = "1024")]
-    pub batch_size: usize,
-
-    #[clap(
-        short = 'e',
-        long,
-        default_value = "0",
-        value_parser = crate::util::parse_degrees_as_radians::<f64>,
-    )]
-    pub min_elevation: f64,
+    #[clap(flatten)]
+    pub pass_options: PassOptions,
 }
 
 impl Default for Options {
@@ -54,9 +44,7 @@ impl Default for Options {
             start_time: None,
             end_time: None,
             limit: Some(20),
-            predict_interval: Duration::from_secs(5),
-            batch_size: 1024,
-            min_elevation: 0.0f64.to_radians(),
+            pass_options: Default::default(),
         }
     }
 }
@@ -76,9 +64,9 @@ pub fn list(
         location,
         PassEventsOptions {
             start_time: options.start_time,
-            predict_interval: options.predict_interval,
-            batch_size: options.batch_size,
-            min_elevation: options.min_elevation,
+            predict_interval: options.pass_options.predict.interval,
+            batch_size: options.pass_options.predict.batch_size,
+            min_elevation: options.pass_options.min_elevation,
         },
     );
 

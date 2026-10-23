@@ -63,7 +63,7 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
             nominal_frequency,
             start_time,
             file_start_time,
-            predict_interval,
+            predict_options,
             output,
             input,
         } => {
@@ -90,7 +90,7 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
                 location,
                 nominal_frequency,
                 start_time,
-                predict_interval,
+                predict_options.interval,
                 &input,
                 &output,
             )
@@ -191,62 +191,28 @@ pub struct Args {
 enum Command {
     /// Update TLEs
     Update,
-    /// Correct doppler shift
-    CorrectDoppler {
-        /// Satellite ID
-        ///
-        /// # TODO
-        ///
-        /// There's currently no good way to find this satellite ID. It's the ID
-        /// from the SatNOGS API.
-        #[clap(short, long)]
-        sat_id: SatelliteId,
-
-        /// The unshifted frequency of the signal.
-        #[clap(short = 'f', long)]
-        nominal_frequency: f32,
-
-        /// Start time of the capture.
-        #[clap(short = 't', long)]
-        start_time: Option<DateTime<Utc>>,
-
-        /// Use file creation time as start time.
-        #[clap(short = 'T', long)]
-        file_start_time: bool,
-
-        /// How often the orbit propagation should run.
-        ///
-        /// Orbit propagation is computationally expensive, but doesn't have to
-        /// predict the exact satellite state for every sample of the input
-        /// file. It's usually enough to calculate the exact state every second
-        /// or so.
-        #[clap(short, long, default_value = "1s", value_parser = humantime::parse_duration)]
-        predict_interval: Duration,
-
-        /// Output file with doppler-corrected signal.
-        #[clap(short, long)]
-        output: PathBuf,
-
-        /// Input file that is doppler shifted.
-        input: PathBuf,
-    },
+    /// List satellite passes
     ListPasses {
         #[clap(flatten)]
         options: list::Options,
 
         /// Satellite ID
         ///
-        /// # TODO
-        ///
-        /// There's currently no good way to find this satellite ID. It's the ID
-        /// from the SatNOGS API.
+        /// This is the SatNOGs satellite ID.
         sat_id: SatelliteId,
     },
+    /// Capture baseband when a satellite passes overhead.
+    ///
+    /// Generated files are 16-bit signed WAV.
     CapturePasses {
+        /// Path to directory in which to store captures. Each pass is written
+        /// as a single WAV file.
         #[clap(short, long, default_value = ".")]
         output: PathBuf,
 
         /// The center frequency to capture.
+        ///
+        /// This does not apply any doppler correction.
         #[clap(short = 'f', long)]
         center_frequency: f32,
 
@@ -254,7 +220,7 @@ enum Command {
         #[clap(short, long)]
         sample_rate: f32,
 
-        /// Whether to enable Bias-T
+        /// Whether to enable Bias-T.
         #[clap(short, long)]
         bias_t: bool,
 
@@ -270,10 +236,79 @@ enum Command {
 
         /// Satellite ID
         ///
-        /// # TODO
-        ///
-        /// There's currently no good way to find this satellite ID. It's the ID
-        /// from the SatNOGS API.
+        /// This is the SatNOGs satellite ID.
         sat_id: SatelliteId,
     },
+    /// Correct doppler shift
+    CorrectDoppler {
+        /// Satellite ID
+        ///
+        /// This is the SatNOGs satellite ID.
+        #[clap(short, long)]
+        sat_id: SatelliteId,
+
+        /// The unshifted frequency of the signal.
+        #[clap(short = 'f', long)]
+        nominal_frequency: f32,
+
+        /// Start time of the capture.
+        #[clap(short = 't', long)]
+        start_time: Option<DateTime<Utc>>,
+
+        /// Use file creation time as start time.
+        #[clap(short = 'T', long)]
+        file_start_time: bool,
+
+        #[clap(flatten)]
+        predict_options: PredictOptions,
+
+        /// Output file with doppler-corrected signal.
+        #[clap(short, long)]
+        output: PathBuf,
+
+        /// Input file that is doppler shifted.
+        input: PathBuf,
+    },
+}
+
+#[derive(Clone, Debug, clap::Args)]
+pub struct PredictOptions {
+    /// How often the orbit propagation should run.
+    ///
+    /// Orbit propagation is computationally expensive, but doesn't have to
+    /// predict the exact satellite state every millsecond. It's usually enough
+    /// to calculate the exact state every 5 seconds or so.
+    #[clap(short = 'p', long = "predict-interval", default_value = "5s", value_parser = humantime::parse_duration)]
+    pub interval: Duration,
+
+    /// How many time steps to calculate at once.
+    ///
+    /// It's more efficient to calculate many satellite positions in a batch and
+    /// buffer them.
+    #[clap(short = 'b', long, default_value = "1024")]
+    pub batch_size: usize,
+}
+
+impl Default for PredictOptions {
+    fn default() -> Self {
+        Self {
+            interval: Duration::from_secs(5),
+            batch_size: 1024,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, clap::Args)]
+pub struct PassOptions {
+    #[clap(flatten)]
+    pub predict: PredictOptions,
+
+    /// Minimum elevation for a pass to be detected - in degrees.
+    #[clap(
+        short = 'e',
+        long,
+        default_value = "0",
+        value_parser = crate::util::parse_degrees_as_radians::<f64>,
+    )]
+    pub min_elevation: f64,
 }
