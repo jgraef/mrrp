@@ -58,11 +58,12 @@ use crate::{
     util::{
         run_til_shutdown,
         shutdown_signal,
+        si,
     },
 };
 
-pub async fn run(context: Context<Args>) -> Result<(), Error> {
-    match context.args.command {
+pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
+    match args.command {
         Command::List => {
             for device_info in mrrp_rtl_sdr::enumerate_devices().await? {
                 println!("{device_info:#?}");
@@ -499,11 +500,11 @@ enum Command {
         device: DeviceArgs,
 
         /// Sets the devices sample rate
-        #[clap(short = 'S', long, default_value = "2400000")]
+        #[clap(short = 'S', long, default_value = "2.4M", value_parser = si::parse_frequency::<f32>)]
         sample_rate: f32,
 
         /// Sets the device's center frequency
-        #[clap(short = 'F', long, default_value = "144000000")]
+        #[clap(short = 'F', long, default_value = "144M", value_parser = si::parse_frequency::<f32>)]
         center_frequency: f32,
 
         /// Enables IQ streaming
@@ -574,7 +575,7 @@ enum Command {
         ///
         /// This makes it possible to look at the signal received from the tuner
         /// outside of the intended band.
-        #[clap(long)]
+        #[clap(long, value_parser = si::parse_frequency::<f32>)]
         fix_tuner_frequency: Option<f32>,
     },
     /// Dumps system memory.

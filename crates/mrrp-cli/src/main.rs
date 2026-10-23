@@ -3,11 +3,19 @@ pub mod config;
 pub mod files;
 pub mod util;
 
-use anyhow::Error;
+use anyhow::{
+    Error,
+    anyhow,
+};
 use clap::{
     Parser,
     Subcommand,
     ValueEnum,
+};
+use mrrp_geo::Geodetic;
+use mrrp_sat::{
+    satellite::SatelliteDatabase,
+    update::Updater,
 };
 use tabled::{
     grid::config::ColoredConfig,
@@ -37,8 +45,7 @@ async fn main() -> Result<(), Error> {
             match command {
                 $(
                     Command::$variant(args) => {
-                        commands::$mod::run(Context {
-                            args,
+                        commands::$mod::run(args, Context {
                             global,
                             files,
                             config,
@@ -60,11 +67,48 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-pub struct Context<A> {
-    pub args: A,
+pub struct Context {
     pub global: GlobalOptions,
     pub files: Files,
     pub config: Config,
+}
+
+impl Context {
+    pub async fn open_satellite_db_with_updater(
+        &self,
+        suppress_auto_update: bool,
+    ) -> Result<(SatelliteDatabase, Updater), Error> {
+        let data_dir = self.files.data_dir();
+
+        // open satellite data
+        let mut satellites = SatelliteDatabase::open(data_dir.join("satellites.json"))?;
+
+        // perform update if necessary, but skip this invoked with update
+        // command
+        let updater = Updater::new(&data_dir, self.config.sat.min_update_interval);
+        if !suppress_auto_update {
+            updater.perform_auto_update(&mut satellites).await?;
+        }
+
+        Ok((satellites, updater))
+    }
+
+    #[inline]
+    pub async fn open_satellite_db(&self) -> Result<SatelliteDatabase, Error> {
+        let (satellites, _updater) = self.open_satellite_db_with_updater(false).await?;
+        Ok(satellites)
+    }
+
+    pub fn get_geolocation(&self) -> Result<Geodetic, Error> {
+        let location = *self
+            .config
+            .sat
+            .location
+            .as_ref()
+            .ok_or_else(|| anyhow!("Station not configured"))?;
+
+        Ok(location.to_geodetic())
+    }
 }
 
 #[derive(Debug, Parser)]

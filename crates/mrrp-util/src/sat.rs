@@ -39,7 +39,8 @@ use crate::signal::{
 pub struct DopplerCorrection {
     satellite_states: Vec<SatelliteState>,
     reference_state: ReferenceState,
-    nominal_frequency: f32,
+    pub nominal_frequency: f32,
+    pub fixed_offset: f32,
     sinusoid: ComplexSinusoid,
     start_time: DateTime<Utc>,
     sample_index: usize,
@@ -108,6 +109,7 @@ impl DopplerCorrection {
             satellite_states,
             reference_state,
             nominal_frequency,
+            fixed_offset: 0.0,
             sinusoid,
             start_time,
             sample_index: 0,
@@ -149,7 +151,8 @@ impl SignalGenerator for DopplerCorrection {
 
         self.sample_index += 1;
 
-        self.sinusoid.set_frequency(-doppler_shift);
+        self.sinusoid
+            .set_frequency(self.fixed_offset - doppler_shift);
         self.sinusoid.next()
     }
 }

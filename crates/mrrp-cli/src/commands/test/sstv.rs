@@ -1,22 +1,36 @@
-use std::path::PathBuf;
+use std::path::{
+    Path,
+    PathBuf,
+};
 
-use anyhow::Error;
+use anyhow::{
+    Error,
+    anyhow,
+};
 use clap::Parser;
+use image::DynamicImage;
 use mrrp_audio::WavSource;
-use mrrp_sstv::modes::ModeSpecification;
+use mrrp_core::signal::{
+    AsyncReadSamples,
+    GetSampleRate,
+};
+use mrrp_sstv::modes::{
+    ModeSpecification,
+    VisCode,
+};
 use mrrp_util::signal::AsyncReadSamplesExt;
 
 use crate::Context;
 
-pub async fn run(context: Context<Args>) -> Result<(), Error> {
-    let mut source = WavSource::<_, i16>::from_path(&context.args.path)?.convert::<f32>();
+pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
+    let mut source = WavSource::<_, i16>::from_path(&args.path)?.convert::<f32>();
     tracing::info!(spec = ?source.inner().spec(), "input");
 
-    let vis_code = vis::decode(&mut source).await?;
-    let vis_code = vis_code.check_parity().expect("Parity check failed");
+    let vis_code = vis_detect(&mut source)
+        .await?
+        .ok_or_else(|| anyhow!("No VIS header detected"))?;
     assert_eq!(vis_code, ModeSpecification::R36.vis_code);
-
-    let image = attempt1::decode(source).await?;
+    let image = r36_decode(source).await?;
 
     tracing::info!(
         width = image.width(),
@@ -24,9 +38,58 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
         ?vis_code,
         "output"
     );
-    image.save(context.args.output)?;
+    image.save(args.output)?;
 
     Ok(())
+}
+
+pub async fn vis_detect<R>(source: R) -> Result<Option<VisCode>, Error>
+where
+    R: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
+    Error: From<R::Error>,
+{
+    if let Some(vis_code) = vis::decode(source).await? {
+        let vis_code = vis_code.check_parity().expect("Parity check failed");
+        tracing::debug!(?vis_code, "VIS header detected");
+        Ok(Some(vis_code))
+    }
+    else {
+        Ok(None)
+    }
+}
+
+pub async fn r36_decode<R>(source: R) -> Result<DynamicImage, Error>
+where
+    R: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
+    Error: From<R::Error>,
+{
+    Ok(attempt1::decode_old(source).await?)
+}
+
+pub async fn decode_images<R>(output: impl AsRef<Path>, mut signal: R) -> Result<usize, Error>
+where
+    R: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
+    Error: From<R::Error>,
+{
+    let mut i = 0;
+
+    while let Some(vis_code) = vis_detect(&mut signal).await? {
+        if vis_code == ModeSpecification::R36.vis_code {
+            let image = r36_decode(&mut signal).await?;
+
+            // todo: better file name. needs information (sample_num +
+            // sample_rate -> time offset)
+            let filename = format!("sstv_{i}.png");
+            image.save(output.as_ref().join(&filename))?;
+
+            i += 1;
+        }
+        else {
+            tracing::info!(?vis_code, "Ignoring");
+        }
+    }
+
+    Ok(i)
 }
 
 #[derive(Debug, Parser)]
@@ -37,11 +100,9 @@ pub struct Args {
     path: PathBuf,
 }
 
-mod vis {
-    use anyhow::{
-        Error,
-        anyhow,
-    };
+pub mod vis {
+    use anyhow::Error;
+    use futures_util::TryStreamExt;
     use mrrp_core::signal::{
         AsyncReadSamples,
         GetSampleRate,
@@ -55,17 +116,17 @@ mod vis {
         VIS_LOW_TONE,
         modes::VisCode,
     };
-    use mrrp_util::signal::{
-        AsyncReadSamplesExt,
-        Scanner,
-    };
+    use mrrp_util::signal::Scanner;
 
-    use crate::commands::test::sstv::{
-        Edge,
-        attempt1::{
-            FrequencyCounter,
-            ToneDetect,
+    use crate::{
+        commands::test::sstv::{
+            Edge,
+            attempt1::{
+                FrequencyCounter,
+                ToneDetect,
+            },
         },
+        util::stream::Filter,
     };
 
     /// Detects calibration header with VIS code
@@ -80,6 +141,8 @@ mod vis {
         /// we only need this in the constructor to calculate tone lengths, but
         /// we need this atm for debugging
         sample_rate: f32,
+
+        frequency_counter: FrequencyCounter,
 
         // tone detectors
         leader_detect: ToneDetect,
@@ -108,6 +171,7 @@ mod vis {
 
     impl VisDetect {
         pub fn new(sample_rate: f32) -> Self {
+            let frequency_counter = FrequencyCounter::new(50.0, sample_rate);
             let leader_detect = ToneDetect::new(LEADER_TONE, 50.0, 75.0);
             let vis_low_detect = ToneDetect::new(VIS_LOW_TONE, 50.0, 75.0);
             let vis_high_detect = ToneDetect::new(VIS_HIGH_TONE, 50.0, 75.0);
@@ -117,6 +181,7 @@ mod vis {
             let vis_bit_length = (VIS_BIT_TIME * sample_rate) as usize;
 
             Self {
+                frequency_counter,
                 leader_detect,
                 vis_low_detect,
                 vis_high_detect,
@@ -138,7 +203,9 @@ mod vis {
     impl Scanner<f32> for VisDetect {
         type Output = Option<VisCode>;
 
-        fn scan(&mut self, frequency: f32) -> Self::Output {
+        fn scan(&mut self, sample: f32) -> Self::Output {
+            let frequency = self.frequency_counter.scan(sample);
+
             if self.state.vis_bit_count == 8 {
                 // reset
                 self.reset();
@@ -146,7 +213,7 @@ mod vis {
 
             // this is only used for debugging
             let t = self.sample_num as f32 / self.sample_rate;
-            //println!("t={:.3}ms, f={frequency}", t * 1000.0);
+            //tracing::trace!("t={:.3}ms, f={frequency}", t * 1000.0);
 
             let (_leader_state, leader_edge) = self.leader_detect.scan(frequency);
             match leader_edge {
@@ -167,7 +234,7 @@ mod vis {
                     let leader_time = self.sample_num - leader_start_time;
                     if leader_time > self.min_leader_length {
                         self.state.leader_count += 1;
-                        println!(
+                        tracing::trace!(
                             "LEADER: t={:.3}ms, n={}, dt={:.3}ms",
                             t * 1000.0,
                             self.state.leader_count,
@@ -207,7 +274,7 @@ mod vis {
                         }
                         // note: nothing to do for the low bit
 
-                        println!(
+                        tracing::trace!(
                             "VIS CODE so far: 0x{:02x}, t={:.3}ms, votes={}",
                             self.state.vis_code_buffer,
                             t * 1000.0,
@@ -233,7 +300,7 @@ mod vis {
                         // normally the vis code is over here, but we get lots
                         // of spurious detections
 
-                        println!("VIS STOP: t={:.3}ms", t * 1000.0);
+                        tracing::trace!("VIS STOP: t={:.3}ms", t * 1000.0);
                         //break;
                     }
 
@@ -252,17 +319,17 @@ mod vis {
 
                     // only for debugging
                     if let Some(Edge::Falling) = low_edge {
-                        println!("LOW: t={:.3}ms", t * 1000.0);
+                        tracing::trace!("LOW: t={:.3}ms", t * 1000.0);
                     }
                     else if let Some(Edge::Falling) = high_edge {
-                        println!("HIGH: t={:.3}ms", t * 1000.0);
+                        tracing::trace!("HIGH: t={:.3}ms", t * 1000.0);
                     }
                 }
                 else if let Some(Edge::Falling) = start_stop_edge {
                     // no bit has started yet, but we detected the falling edge
                     // of the start pulse. so the first bit is starting now.
 
-                    println!("VIS START: t={:.3}ms", t * 1000.0);
+                    tracing::trace!("VIS START: t={:.3}ms", t * 1000.0);
                     self.state.vis_bit_start_time = Some(self.sample_num);
                 }
             }
@@ -273,29 +340,25 @@ mod vis {
         }
     }
 
-    pub async fn decode<S>(mut source: S) -> Result<VisCode, Error>
+    pub async fn decode<S>(source: S) -> Result<Option<VisCode>, Error>
     where
         S: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
         Error: From<S::Error>,
     {
         let sample_rate = source.sample_rate();
-
-        let mut frequency_counter = FrequencyCounter::new(50.0, sample_rate);
-        let mut vis_detect = VisDetect::new(sample_rate);
-
-        while let Some(sample) = source.read_sample_or_eof().await? {
-            let frequency = frequency_counter.scan(sample);
-            if let Some(vis_code) = vis_detect.scan(frequency) {
-                return Ok(vis_code);
-            }
-        }
-
-        Err(anyhow!("No VIS header detected"))
+        let mut vis_codes = Filter::new(source, VisDetect::new(sample_rate));
+        Ok(vis_codes.try_next().await?)
     }
 }
 
 mod attempt1 {
-    use anyhow::Error;
+    #![allow(dead_code)]
+
+    use anyhow::{
+        Error,
+        anyhow,
+    };
+    use futures_util::TryStreamExt;
     use image::{
         DynamicImage,
         RgbImage,
@@ -321,9 +384,201 @@ mod attempt1 {
         Scanner,
     };
 
-    use crate::commands::test::sstv::Edge;
+    use crate::{
+        commands::test::sstv::Edge,
+        util::stream::Filter,
+    };
 
-    pub async fn decode<S>(mut source: S) -> Result<DynamicImage, Error>
+    #[derive(Debug)]
+    pub struct Decoder {
+        sample_rate: f32,
+
+        coarse_frequency: FrequencyCounter,
+        fine_frequency: FrequencyCounter,
+        sync_detect: ToneDetect,
+
+        sample_num: usize,
+
+        state: State,
+    }
+
+    #[derive(Debug, Default)]
+    struct State {
+        lines: Vec<Vec<f32>>,
+        line: Vec<f32>,
+        previous_sync_time: usize,
+        num_syncs: usize,
+    }
+
+    impl Decoder {
+        pub fn new(sample_rate: f32) -> Self {
+            let coarse_frequency = FrequencyCounter::new(100.0, sample_rate);
+            let r = (CHANNEL_HIGH_TONE - CHANNEL_LOW_TONE) / 4.0;
+            let fine_frequency = FrequencyCounter::new(r, sample_rate);
+            let sync_detect = ToneDetect::new(SYNC_TONE, 100.0, 110.0);
+            //let mut porch_detect = ToneDetect::new(PORCH_TONE, 100.0, 120.0);
+
+            Self {
+                sample_rate,
+                coarse_frequency,
+                fine_frequency,
+                sync_detect,
+                sample_num: 0,
+                state: Default::default(),
+            }
+        }
+
+        fn decode_lines(&self) -> DynamicImage {
+            let sync_porch_len = (0.003 * self.sample_rate).round() as usize;
+            let y_len = (0.088 * self.sample_rate).round() as usize;
+            let sep_len = (0.006 * self.sample_rate).round() as usize;
+            let uv_len = (0.044 * self.sample_rate).round() as usize;
+
+            //let width = lines.iter().map(|line| line.len()).max().unwrap() as
+            // u32
+            // * 2 / 3 + 2;
+            let width = y_len as u32;
+            let height = self.state.lines.len() as u32;
+            tracing::trace!(?width, ?height);
+
+            let mut image = RgbImage::new(width, height);
+            // Y from two lines, then U and V from even and odd lines
+            // respectively
+            let mut yuv_buffer: Vec<[f32; 4]> = vec![Default::default(); width as usize];
+
+            for (y, line) in self.state.lines.iter().enumerate() {
+                //let y_len = line.len() * 2 / 3;
+                //let uv_len = line.len() / 3;
+
+                tracing::trace!(?y, ?y_len, ?uv_len);
+
+                for (mut x, luma) in line.iter().enumerate() {
+                    let luma = ((*luma - CHANNEL_LOW_TONE)
+                        / (CHANNEL_HIGH_TONE - CHANNEL_LOW_TONE))
+                        .clamp(0.0, 1.0);
+                    let mut c = y % 2;
+
+                    if x > sync_porch_len {
+                        x -= sync_porch_len;
+
+                        if x < y_len {
+                            yuv_buffer[x][c] = luma;
+                        }
+                        else {
+                            x -= y_len;
+
+                            if x > sep_len {
+                                x -= sep_len;
+
+                                if x < uv_len {
+                                    x *= 2;
+                                    c += 2;
+
+                                    yuv_buffer[x][c] = luma;
+                                    yuv_buffer[x + 1][c] = luma;
+                                }
+                            }
+                        };
+                    }
+                }
+
+                if y % 2 == 1 {
+                    for (x, yuv) in yuv_buffer.iter().enumerate() {
+                        // YCbCr -> RGB
+                        let rgb_even: Rgb = YCbCr([yuv[0], yuv[3], yuv[2]]).into();
+                        let rgb_odd: Rgb = YCbCr([yuv[1], yuv[3], yuv[2]]).into();
+
+                        // B/W
+                        //let rgb_even = Luma(yuv[0]).into();
+                        //let rgb_odd = Luma(yuv[1]).into();
+
+                        image.put_pixel(x as u32, (y - 1) as u32, rgb_even.into());
+                        image.put_pixel(x as u32, y as u32, rgb_odd.into());
+                    }
+
+                    yuv_buffer.fill(Default::default());
+                }
+            }
+
+            //play_audio(source, 0.5).await?;
+
+            let image = DynamicImage::from(image);
+            let image = image.resize_exact(
+                ModeSpecification::R36.pixels_per_line as u32,
+                image.height(),
+                FilterType::Triangle,
+            );
+
+            image
+        }
+    }
+
+    impl Scanner<f32> for Decoder {
+        type Output = Option<DynamicImage>;
+
+        fn scan(&mut self, sample: f32) -> Self::Output {
+            if self.state.lines.len() >= ModeSpecification::R36.num_lines {
+                return Some(self.decode_lines());
+            }
+
+            let coarse_frequency = self.coarse_frequency.scan(sample);
+
+            let t = self.sample_num as f32 / self.sample_rate;
+            let time_since_sync =
+                (self.sample_num - self.state.previous_sync_time) as f32 / self.sample_rate;
+
+            let (sync_state, sync_edge) = self.sync_detect.scan(coarse_frequency);
+            //let (porch_state, porch_edge) =
+            // porch_detect.scan(fine_frequency);
+
+            /*match porch_edge {
+                Some(Edge::Rising) => tracing::trace!("porch start: t={t:.3}s"),
+                Some(Edge::Falling) => tracing::trace!("porch start: t={t:.3}s"),
+                _ => {}
+            }*/
+
+            if !sync_state {
+                let fine_frequency = self.fine_frequency.scan(sample);
+                self.state.line.push(fine_frequency);
+            }
+
+            if let Some(Edge::Rising) = sync_edge {
+                self.state.num_syncs += 1;
+                tracing::trace!(
+                    "t={t:.3}s SYNC! f={coarse_frequency} Hz, n = {}, dt={:.3}ms, line={}",
+                    self.state.num_syncs,
+                    time_since_sync * 1000.0,
+                    self.state.line.len()
+                );
+
+                self.state.previous_sync_time = self.sample_num;
+
+                let line = std::mem::take(&mut self.state.line);
+                if line.len() > 6000 && line.len() < 8000 {
+                    self.state.lines.push(line);
+                }
+            }
+
+            self.sample_num += 1;
+
+            None
+        }
+    }
+
+    pub async fn decode<S>(source: S) -> Result<DynamicImage, Error>
+    where
+        S: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
+        Error: From<S::Error>,
+    {
+        let sample_rate = source.sample_rate();
+        let mut images = Filter::new(source, Decoder::new(sample_rate));
+        images
+            .try_next()
+            .await?
+            .ok_or_else(|| anyhow!("No image decoded"))
+    }
+
+    pub async fn decode_old<S>(mut source: S) -> Result<DynamicImage, Error>
     where
         S: AsyncReadSamples<Sample = f32> + GetSampleRate + Unpin,
         Error: From<S::Error>,
@@ -334,7 +589,6 @@ mod attempt1 {
         let r = (CHANNEL_HIGH_TONE - CHANNEL_LOW_TONE) / 4.0;
         let mut fine_frequency = FrequencyCounter::new(r, sample_rate);
         let mut sync_detect = ToneDetect::new(SYNC_TONE, 100.0, 110.0);
-        //let mut porch_detect = ToneDetect::new(PORCH_TONE, 100.0, 120.0);
 
         let mut lines = vec![];
         let mut line = vec![];
@@ -353,8 +607,8 @@ mod attempt1 {
             // porch_detect.scan(fine_frequency);
 
             /*match porch_edge {
-                Some(Edge::Rising) => println!("porch start: t={t:.3}s"),
-                Some(Edge::Falling) => println!("porch start: t={t:.3}s"),
+                Some(Edge::Rising) => tracing::trace!("porch start: t={t:.3}s"),
+                Some(Edge::Falling) => tracing::trace!("porch start: t={t:.3}s"),
                 _ => {}
             }*/
 
@@ -365,7 +619,7 @@ mod attempt1 {
 
             if let Some(Edge::Rising) = sync_edge {
                 num_syncs += 1;
-                println!(
+                tracing::trace!(
                     "t={t:.3}s SYNC! f={coarse_frequency} Hz, n = {num_syncs}, dt={:.3}ms, line={}",
                     time_since_sync * 1000.0,
                     line.len()
@@ -391,7 +645,7 @@ mod attempt1 {
         // * 2 / 3 + 2;
         let width = y_len as u32;
         let height = lines.len() as u32;
-        tracing::debug!(?width, ?height);
+        tracing::trace!(?width, ?height);
 
         let mut image = RgbImage::new(width, height);
         // Y from two lines, then U and V from even and odd lines respectively
@@ -401,7 +655,7 @@ mod attempt1 {
             //let y_len = line.len() * 2 / 3;
             //let uv_len = line.len() / 3;
 
-            tracing::debug!(?y, ?y_len, ?uv_len);
+            tracing::trace!(?y, ?y_len, ?uv_len);
 
             for (mut x, luma) in line.iter().enumerate() {
                 let luma = ((*luma - CHANNEL_LOW_TONE) / (CHANNEL_HIGH_TONE - CHANNEL_LOW_TONE))
@@ -475,14 +729,14 @@ mod attempt1 {
         pub fn new(frequency_resolution: f32, sample_rate: f32) -> Self {
             // lowpass to remove DC
             //let input_lowpass = MovingAverage::from_cutoff_frequency(10.0,
-            // sample_rate); tracing::debug!(n =
+            // sample_rate); tracing::trace!(n =
             // ?input_lowpass.len(), "dc block");
 
             // lowpass to retrieve a smooth signal from the zero-crossing
             // detection
             let lowpass_size = (sample_rate / frequency_resolution).floor() as usize;
             let output_lowpass = MovingSum::new(lowpass_size);
-            tracing::debug!(size = ?lowpass_size, cutoff = output_lowpass.cutoff_frequency(sample_rate));
+            tracing::trace!(size = ?lowpass_size, cutoff = output_lowpass.cutoff_frequency(sample_rate));
 
             Self {
                 //input_lowpass,
@@ -619,7 +873,7 @@ mod attempt2 {
             if let Some(Edge::Rising) = sync_edge {
                 num_syncs += 1;
 
-                println!(
+                tracing::trace!(
                     "t={t:.3}s SYNC! f={frequency}, dt={:.3}ms, n={num_syncs}",
                     (i - previous_sync_time) as f32 / sample_rate * 1000.0
                 );

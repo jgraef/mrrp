@@ -12,6 +12,7 @@ use std::{
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ColorFormat {
     Gbr,
     Rgb,
@@ -23,6 +24,11 @@ pub enum ColorFormat {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[cfg_attr(
+    feature = "serde",
+    derive(serde::Serialize, serde::Deserialize),
+    serde(transparent)
+)]
 pub struct VisCode(pub u8);
 
 impl VisCode {
@@ -64,6 +70,7 @@ impl Debug for VisCode {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct ModeSpecification {
     pub name: &'static str,
     pub short_name: &'static str,

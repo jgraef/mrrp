@@ -14,8 +14,10 @@ mrrp-util.workspace = true
 nalgebra = { workspace = true, default-features = false, features = ["macros"] }
 num-complex.workspace = true
 pin-project-lite.workspace = true
+serde = { workspace = true, features = ["derive"], optional = true }
 thiserror.workspace = true
 tracing.workspace = true
 
 [features]
 image = ["dep:image"]
+serde = ["dep:serde"]

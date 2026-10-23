@@ -24,17 +24,17 @@ use mrrp_core::{
 use num_complex::Complex;
 
 #[derive(Debug, thiserror::Error)]
-#[error("wav source error")]
 pub enum Error {
+    #[error(transparent)]
     Hound(#[from] hound::Error),
-    UnexpectedChannelCount {
-        channels: u16,
-        expected: u16,
-    },
-    UnexpectedBitsPerSample {
-        bits_per_sample: u16,
-        expected: u16,
-    },
+
+    #[error("Expected {expected} channels, but file has {channels}.")]
+    UnexpectedChannelCount { channels: u16, expected: u16 },
+
+    #[error("Expected {expected} bits per sample, but file has {bits_per_sample}.")]
+    UnexpectedBitsPerSample { bits_per_sample: u16, expected: u16 },
+
+    #[error("Expected {expected:?} sample format, but file has {sample_format:?}.")]
     UnexpectedSampleFormat {
         sample_format: hound::SampleFormat,
         expected: hound::SampleFormat,

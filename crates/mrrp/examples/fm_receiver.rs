@@ -73,7 +73,7 @@ async fn main() -> Result<(), Error> {
 
     let sample_rate = demodulated.sample_rate();
     let filtered = demodulated
-        .scan_in_place_with(biquad::lowpass(sample_rate, 0.5 * AUDIO_SAMPLE_RATE))
+        .scan_in_place_with(biquad::lowpass(sample_rate, 0.5 * AUDIO_SAMPLE_RATE)?)
         .decimate_to(AUDIO_SAMPLE_RATE);
 
     println!("audio_sample_rate: {}", filtered.sample_rate());

@@ -273,8 +273,8 @@ pub trait ScannerExt<S>: Scanner<S> {
         Self: Sized,
     {
         Chain {
-            head: self,
-            tail: other,
+            first: self,
+            second: other,
         }
     }
 
@@ -292,8 +292,8 @@ impl<S, T> ScannerExt<S> for T where T: Scanner<S> {}
 
 #[derive(Clone, Debug)]
 pub struct Chain<H, T> {
-    head: H,
-    tail: T,
+    pub first: H,
+    pub second: T,
 }
 
 impl<H, T, S> Scanner<S> for Chain<H, T>
@@ -305,7 +305,7 @@ where
 
     #[inline]
     fn scan(&mut self, sample: S) -> Self::Output {
-        self.tail.scan(self.head.scan(sample))
+        self.second.scan(self.first.scan(sample))
     }
 }
 

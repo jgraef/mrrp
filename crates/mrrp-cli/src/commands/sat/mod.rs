@@ -23,14 +23,11 @@ use clap::{
 };
 use mrrp_rtl_sdr::tuner::gain;
 use mrrp_sat::{
-    Geodetic,
     satellite::{
         Satellite,
-        SatelliteDatabase,
         Satellites,
     },
     satnogs::SatelliteId,
-    update::Updater,
 };
 
 pub use self::config::Config;
@@ -38,63 +35,19 @@ use crate::{
     Context,
     commands::rtl_sdr::open::DeviceArgs,
     files::create_parent_dir_if_not_exists,
+    util::si,
 };
 
-pub async fn run(context: Context<Args>) -> Result<(), Error> {
-    let data_dir = context.files.data_dir();
-    let config = context.config.sat;
+pub async fn run(args: Args, context: Context) -> Result<(), Error> {
+    let suppress_auto_update = matches!(&args.command, Command::Update) || args.no_auto_update;
+    let (mut satellites, updater) = context
+        .open_satellite_db_with_updater(suppress_auto_update)
+        .await?;
 
-    // open satellite data
-    let mut satellites = SatelliteDatabase::open(data_dir.join("satellites.json"))?;
-
-    // perform update if necessary, but skip this invoked with update command
-    let updater = Updater::new(&data_dir, config.min_update_interval);
-    if !matches!(&context.args.command, Command::Update) && !context.args.no_auto_update {
-        updater.perform_auto_update(&mut satellites).await?;
-    }
-
-    match context.args.command {
+    match args.command {
         Command::Update => {
             tracing::info!("Performing forced update");
             updater.perform_update(&mut satellites).await?;
-        }
-        Command::CorrectDoppler {
-            sat_id,
-            nominal_frequency,
-            start_time,
-            file_start_time,
-            predict_options,
-            output,
-            input,
-        } => {
-            let start_time = match (start_time, file_start_time) {
-                (Some(start_time), false) => start_time,
-                (None, true) => {
-                    // use file creation time
-                    let metadata = std::fs::metadata(&input)?;
-                    let created = metadata.created()?;
-                    created.into()
-                }
-                _ => {
-                    bail!(
-                        "Start time must be specified either via --start-time or --file-start-time."
-                    );
-                }
-            };
-
-            let location = get_location(&config)?;
-            let satellite = get_satellite(&satellites, &sat_id)?;
-
-            doppler::correct(
-                satellite,
-                location,
-                nominal_frequency,
-                start_time,
-                predict_options.interval,
-                &input,
-                &output,
-            )
-            .await?;
         }
         Command::ListPasses {
             sat_id,
@@ -104,7 +57,7 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
                 options.limit = Some(20);
             }
 
-            let location = get_location(&config)?;
+            let location = context.get_geolocation()?;
             let satellite = get_satellite(&satellites, &sat_id)?;
 
             list::list(satellite, location, options, context.global.table_style)?;
@@ -121,7 +74,7 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
         } => {
             create_parent_dir_if_not_exists(&output)?;
 
-            let location = get_location(&config)?;
+            let location = context.get_geolocation()?;
             let satellite = get_satellite(&satellites, &sat_id)?;
 
             let mut device = device.open_device().await?;
@@ -148,21 +101,50 @@ pub async fn run(context: Context<Args>) -> Result<(), Error> {
             )
             .await?;
         }
+        Command::CorrectDoppler {
+            sat_id,
+            nominal_frequency,
+            start_time,
+            file_start_time,
+            predict_options,
+            output,
+            input,
+        } => {
+            let start_time = match (start_time, file_start_time) {
+                (Some(start_time), false) => start_time,
+                (None, true) => {
+                    // use file creation time
+                    let metadata = std::fs::metadata(&input)?;
+                    let created = metadata.created()?;
+                    created.into()
+                }
+                _ => {
+                    bail!(
+                        "Start time must be specified either via --start-time or --file-start-time."
+                    );
+                }
+            };
+
+            let location = context.get_geolocation()?;
+            let satellite = get_satellite(&satellites, &sat_id)?;
+
+            doppler::correct(
+                satellite,
+                location,
+                nominal_frequency,
+                start_time,
+                predict_options.interval,
+                &input,
+                &output,
+            )
+            .await?;
+        }
     }
 
     Ok(())
 }
 
-fn get_location(config: &Config) -> Result<Geodetic, Error> {
-    let location = *config
-        .location
-        .as_ref()
-        .ok_or_else(|| anyhow!("Station not configured"))?;
-
-    Ok(location.to_geodetic())
-}
-
-fn get_satellite<'a>(
+pub fn get_satellite<'a>(
     satellites: &'a Satellites,
     sat_id: &SatelliteId,
 ) -> Result<&'a Satellite, Error> {
@@ -213,11 +195,11 @@ enum Command {
         /// The center frequency to capture.
         ///
         /// This does not apply any doppler correction.
-        #[clap(short = 'f', long)]
+        #[clap(short = 'f', long, value_parser = si::parse_frequency::<f32>)]
         center_frequency: f32,
 
         /// The sample rate to capture with.
-        #[clap(short, long)]
+        #[clap(short, long, value_parser = si::parse_frequency::<f32>)]
         sample_rate: f32,
 
         /// Whether to enable Bias-T.
@@ -248,7 +230,7 @@ enum Command {
         sat_id: SatelliteId,
 
         /// The unshifted frequency of the signal.
-        #[clap(short = 'f', long)]
+        #[clap(short = 'f', long, value_parser = si::parse_frequency::<f32>)]
         nominal_frequency: f32,
 
         /// Start time of the capture.
@@ -278,14 +260,14 @@ pub struct PredictOptions {
     /// Orbit propagation is computationally expensive, but doesn't have to
     /// predict the exact satellite state every millsecond. It's usually enough
     /// to calculate the exact state every 5 seconds or so.
-    #[clap(short = 'p', long = "predict-interval", default_value = "5s", value_parser = humantime::parse_duration)]
+    #[clap(long = "predict-interval", default_value = "5s", value_parser = humantime::parse_duration)]
     pub interval: Duration,
 
     /// How many time steps to calculate at once.
     ///
     /// It's more efficient to calculate many satellite positions in a batch and
     /// buffer them.
-    #[clap(short = 'b', long, default_value = "1024")]
+    #[clap(long, default_value = "1024")]
     pub batch_size: usize,
 }
 
@@ -305,7 +287,6 @@ pub struct PassOptions {
 
     /// Minimum elevation for a pass to be detected - in degrees.
     #[clap(
-        short = 'e',
         long,
         default_value = "0",
         value_parser = crate::util::parse_degrees_as_radians::<f64>,

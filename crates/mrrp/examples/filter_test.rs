@@ -46,7 +46,7 @@ async fn main() -> Result<(), Error> {
     let filter: Box<dyn Scanner<Complex<f32>, Output = Complex<f32>> + Send> =
         if let Some(filter) = &args.filter {
             match filter.as_str() {
-                "biquad" => Box::new(biquad::lowpass(args.sample_rate, args.cutoff_frequency())),
+                "biquad" => Box::new(biquad::lowpass(args.sample_rate, args.cutoff_frequency())?),
                 "fir-halfband" => {
                     let coefficients = fir_half_band_lowpass();
                     Box::new(FirFilter::new(coefficients))

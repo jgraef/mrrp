@@ -41,7 +41,7 @@ async fn main() -> Result<(), Error> {
 
     let interpolated = wav_source
         .interpolate_to(2400000.0)
-        .scan_in_place_with(biquad::lowpass(sample_rate, 20000.0));
+        .scan_in_place_with(biquad::lowpass(sample_rate, 20000.0)?);
 
     let sample_rate = interpolated.sample_rate();
     let fm_modulated = interpolated.scan_with(FmModulator::new(sample_rate, 75000.0));

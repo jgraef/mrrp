@@ -596,7 +596,11 @@ impl RelativeState {
 
     /// Radial speed in m/s
     pub fn radial_speed(&self) -> f64 {
-        self.position.normalize().dot(&self.velocity)
+        // The position vector is the vector along which we want to measure the
+        // speed, thus we project the velocity onto it. But to get a positive
+        // speed when the satellite is coming towards us, we need to invert the
+        // position vector, so it points towards us.
+        -self.position.normalize().dot(&self.velocity)
     }
 
     /// Free-space Path Loss in dB
@@ -617,6 +621,7 @@ pub fn free_space_path_loss_db(distance: f64, frequency: f64) -> f64 {
 
 /// Doppler shift in Hz
 pub fn doppler_shift(radial_speed: f64, frequency: f64) -> f64 {
+    // https://en.wikipedia.org/wiki/Doppler_effect#Satellite_communication
     radial_speed * frequency / satkit::consts::C
 }
 

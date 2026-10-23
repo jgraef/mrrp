@@ -110,6 +110,10 @@ pub trait AsyncReadSamplesExt: AsyncReadSamples {
 
     /// Read IQ samples into a buffer until the buffer is full.
     ///
+    /// This will return [`EofError::Eof`] on the last read. This error contains
+    /// the number of samples that were read, but which didn't fill the buffer
+    /// exactly.
+    ///
     /// This might call
     /// [`poll_read_samples`][AsyncReadSamples::poll_read_samples] multiple
     /// times, and thus is not cancellation-safe.
@@ -506,6 +510,7 @@ where
                     let filled_after = self.buffer.filled().len();
 
                     if filled_before == filled_after {
+                        // no more samples can be read, EOF
                         break;
                     }
                 }
