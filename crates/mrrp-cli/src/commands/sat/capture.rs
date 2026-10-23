@@ -12,10 +12,7 @@ use chrono::{
 };
 use mrrp_audio::write_stream_to_wav;
 use mrrp_core::sample::Complex;
-use mrrp_rtl_sdr::{
-    Device,
-    tuner::gain::IntoTunerGain,
-};
+use mrrp_rtl_sdr::Device;
 use mrrp_sat::{
     Geodetic,
     pass::{
@@ -25,12 +22,7 @@ use mrrp_sat::{
     },
     satellite::Satellite,
 };
-use mrrp_util::signal::{
-    AsyncReadSamplesExt,
-    Silence,
-    Throttled,
-    WithSampleRate,
-};
+use mrrp_util::signal::AsyncReadSamplesExt;
 
 use crate::util::{
     CancelStream,
@@ -158,41 +150,3 @@ pub async fn capture(
 
     todo!();
 }
-
-#[derive(Debug)]
-pub struct DummyDevice {
-    sample_rate: f32,
-}
-
-impl Default for DummyDevice {
-    fn default() -> Self {
-        Self { sample_rate: 1e6 }
-    }
-}
-
-impl DummyDevice {
-    pub async fn reader(&mut self, _options: ()) -> Result<DummyReader, !> {
-        Ok(Silence::<Complex<u8>>::default()
-            .with_sample_rate(self.sample_rate)
-            .throttle_to_sample_rate())
-    }
-
-    pub async fn set_sample_rate(&mut self, sample_rate: f32) -> Result<(), !> {
-        self.sample_rate = sample_rate;
-        Ok(())
-    }
-
-    pub async fn set_center_frequency(&mut self, _center_frequency: f32) -> Result<(), !> {
-        Ok(())
-    }
-
-    pub async fn set_bias_t(&mut self, _enable: bool) -> Result<(), !> {
-        Ok(())
-    }
-
-    pub async fn set_tuner_gain(&mut self, _tuner_gain: impl IntoTunerGain) -> Result<(), !> {
-        Ok(())
-    }
-}
-
-pub type DummyReader = Throttled<WithSampleRate<Silence<Complex<u8>>>>;

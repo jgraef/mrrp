@@ -91,6 +91,9 @@ where
 }
 
 pub async fn sleep_until(time: DateTime<Utc>) {
+    // note: we sleep at most a minute at a time and then recheck if the time
+    // has come. this is to make edge-cases somewhat work, where the computer's
+    // time changes, e.g. when the user changes it.
     let sleep_interval = TimeDelta::minutes(1);
 
     loop {
