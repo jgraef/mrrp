@@ -8,7 +8,7 @@ use directories::ProjectDirs;
 
 use crate::config::Config;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Files {
     dirs: ProjectDirs,
 }

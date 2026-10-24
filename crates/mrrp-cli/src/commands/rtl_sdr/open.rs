@@ -9,7 +9,7 @@ use mrrp_rtl_sdr::{
     rtl2832u::Rtl2832u,
 };
 
-#[derive(Debug, Args)]
+#[derive(Clone, Debug, Args)]
 pub struct DeviceArgs {
     /// Specify a RTL-SDR dongle by serial number.
     ///

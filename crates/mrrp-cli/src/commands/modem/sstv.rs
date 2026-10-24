@@ -92,7 +92,8 @@ where
     Ok(i)
 }
 
-#[derive(Debug, Parser)]
+/// SSTV encoding and decoding. EXPERIMENTAL
+#[derive(Clone, Debug, Parser)]
 pub struct Args {
     #[clap(short, long)]
     output: PathBuf,
@@ -119,7 +120,7 @@ pub mod vis {
     use mrrp_util::signal::Scanner;
 
     use crate::{
-        commands::test::sstv::{
+        commands::modem::sstv::{
             Edge,
             attempt1::{
                 FrequencyCounter,
@@ -385,7 +386,7 @@ mod attempt1 {
     };
 
     use crate::{
-        commands::test::sstv::Edge,
+        commands::modem::sstv::Edge,
         util::stream::Filter,
     };
 
@@ -842,7 +843,7 @@ mod attempt2 {
         Scanner,
     };
 
-    use crate::commands::test::sstv::{
+    use crate::commands::modem::sstv::{
         Edge,
         attempt1::ToneDetect,
     };

@@ -338,13 +338,13 @@ pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
 }
 
 /// RTL-SDR specific commands
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 pub struct Args {
     #[clap(subcommand)]
     command: Command,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 enum Command {
     /// List available devices
     List,

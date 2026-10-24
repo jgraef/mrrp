@@ -160,7 +160,7 @@ pub fn get_satellite<'a>(
 }
 
 /// Satellite tracking
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 pub struct Args {
     #[clap(subcommand)]
     command: Command,
@@ -169,7 +169,7 @@ pub struct Args {
     no_auto_update: bool,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 enum Command {
     /// Update TLEs
     Update,

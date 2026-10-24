@@ -68,11 +68,11 @@ use serde::{
 use crate::{
     Context,
     commands::{
+        modem::sstv::vis::VisDetect,
         sat::{
             PredictOptions,
             get_satellite,
         },
-        test::sstv::vis::VisDetect,
     },
     util::{
         sdrpp,
@@ -81,13 +81,14 @@ use crate::{
     },
 };
 
-#[derive(Debug, Parser)]
+/// Experimental tools
+#[derive(Clone, Debug, Parser)]
 pub struct Args {
     #[clap(subcommand)]
     command: Command,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 enum Command {
     Demod {
         #[clap(flatten)]
@@ -126,7 +127,7 @@ enum Command {
     },
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Clone, Debug, clap::Args)]
 struct DemodOptions {
     #[clap(short, long, value_parser = si::parse_frequency::<f32>)]
     fm_frequency: f32,
@@ -138,7 +139,7 @@ struct DemodOptions {
     predict_options: PredictOptions,
 }
 
-#[derive(Debug, clap::Args)]
+#[derive(Clone, Debug, clap::Args)]
 struct SourceInfoOptions {
     #[clap(short = 'F', long, value_parser = si::parse_frequency::<f32>)]
     center_frequency: Option<f32>,

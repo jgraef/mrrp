@@ -33,15 +33,37 @@ use crate::{
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
-
     tracing_subscriber::fmt::init();
 
     let files = Files::open()?;
-    let Args { global, command } = Args::parse();
+    let args = Args::parse();
     let config = files.config()?;
 
-    macro_rules! subcommands {
-        {$($variant:ident => $mod:ident,)*} => {
+    run(args, files, config).await?;
+
+    Ok(())
+}
+
+#[derive(Clone, Debug, Parser)]
+struct Args {
+    #[clap(flatten)]
+    global: GlobalOptions,
+
+    #[clap(subcommand)]
+    command: Command,
+}
+
+macro_rules! subcommands {
+    {$($variant:ident => $mod:ident,)*} => {
+        #[derive(Clone, Debug, Subcommand)]
+        enum Command {
+            $(
+                $variant(commands::$mod::Args),
+            )*
+        }
+
+        async fn run(args: Args, files: Files, config: Config) -> Result<(), Error> {
+            let Args { global, command } = args;
             match command {
                 $(
                     Command::$variant(args) => {
@@ -50,23 +72,25 @@ async fn main() -> Result<(), Error> {
                             files,
                             config,
                         })
-                        .await?
+                        .await?;
                     }
                 )*
             }
-        };
-    }
 
-    subcommands! {
-        RtlSdr => rtl_sdr,
-        Sat => sat,
-        Test => test,
-        Qth => qth,
+            Ok(())
+        }
     };
-
-    Ok(())
 }
 
+subcommands! {
+    RtlSdr => rtl_sdr,
+    Modem => modem,
+    Sat => sat,
+    Test => test,
+    Qth => qth,
+}
+
+#[derive(Clone, Debug)]
 pub struct Context {
     pub global: GlobalOptions,
     pub files: Files,
@@ -109,23 +133,6 @@ impl Context {
 
         Ok(location.to_geodetic())
     }
-}
-
-#[derive(Debug, Parser)]
-struct Args {
-    #[clap(flatten)]
-    global: GlobalOptions,
-
-    #[clap(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    RtlSdr(commands::rtl_sdr::Args),
-    Sat(commands::sat::Args),
-    Test(commands::test::Args),
-    Qth(commands::qth::Args),
 }
 
 #[derive(Clone, Debug, clap::Args)]

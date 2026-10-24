@@ -1,5 +1,4 @@
 pub mod ariss;
-pub mod sstv;
 
 use std::{
     fs::File,
@@ -83,9 +82,6 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
             print_chunk_info(&mut reader, chunk_ref, 0)?;
         }
         Command::Ariss(args) => ariss::run(args, context).await?,
-        Command::Sstv(args) => {
-            sstv::run(args, context).await?;
-        }
         Command::RenderWaterfall {
             width,
             height,
@@ -106,20 +102,19 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
 }
 
 /// Test commands
-#[derive(Debug, Parser)]
+#[derive(Clone, Debug, Parser)]
 pub struct Args {
     #[clap(subcommand)]
     command: Command,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 enum Command {
     /// Print chunks contained in a RIFF file.
     ReadRiff {
         path: PathBuf,
     },
     Ariss(ariss::Args),
-    Sstv(sstv::Args),
     RenderWaterfall {
         #[clap(short, long)]
         width: u32,

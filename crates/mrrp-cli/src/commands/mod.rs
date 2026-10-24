@@ -1,3 +1,4 @@
+pub mod modem;
 pub mod qth;
 pub mod rtl_sdr;
 pub mod sat;

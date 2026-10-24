@@ -3,7 +3,7 @@ use clap::Subcommand;
 
 use crate::commands::rtl_sdr::open::DeviceArgs;
 
-#[derive(Debug, Subcommand)]
+#[derive(Clone, Debug, Subcommand)]
 pub enum GpioCommand {
     Mode,
     Read {
