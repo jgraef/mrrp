@@ -364,7 +364,7 @@ impl OutputPin {
     /// But this can only return a state if it was previously set, read via
     /// [`get_state`](Self::get_state), or initialized via
     /// [`into_output_init`](GpioPin::into_output_init).
-    #[inline(always)]
+    #[inline]
     pub fn get_known_state(&self) -> Option<bool> {
         self.cached_state
     }

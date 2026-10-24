@@ -157,7 +157,7 @@ impl<'a> Canvas<'a> {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn draw(&mut self, position: impl Into<Position>, color: impl Into<Color>) {
         self.draw_impl(position.into(), color.into());
     }
@@ -641,7 +641,7 @@ impl CacheLine {
 impl Index<usize> for CacheLine {
     type Output = Option<f32>;
 
-    #[inline(always)]
+    #[inline]
     fn index(&self, index: usize) -> &Self::Output {
         &self.samples[index]
     }
@@ -650,7 +650,7 @@ impl Index<usize> for CacheLine {
 impl Index<u16> for CacheLine {
     type Output = Option<f32>;
 
-    #[inline(always)]
+    #[inline]
     fn index(&self, index: u16) -> &Self::Output {
         &self[usize::from(index)]
     }

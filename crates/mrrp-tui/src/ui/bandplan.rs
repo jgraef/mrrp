@@ -226,7 +226,7 @@ impl<'a> DoubleEndedIterator for BandplanIter<'a> {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn filter_band_iter<'a>(
     band: &'a Band,
     start_frequency: &Option<u32>,

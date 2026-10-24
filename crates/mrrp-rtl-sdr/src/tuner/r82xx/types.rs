@@ -84,7 +84,7 @@ pub enum CrystalCapacitor {
 }
 
 impl From<CrystalCapacitor> for u8 {
-    #[inline(always)]
+    #[inline]
     fn from(value: CrystalCapacitor) -> Self {
         value as u8
     }
@@ -93,7 +93,7 @@ impl From<CrystalCapacitor> for u8 {
 impl TryFrom<u8> for CrystalCapacitor {
     type Error = u8;
 
-    #[inline(always)]
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0b00 => Ok(Self::P0),
@@ -112,7 +112,7 @@ pub enum CrystalDrive {
 }
 
 impl From<CrystalDrive> for bool {
-    #[inline(always)]
+    #[inline]
     fn from(value: CrystalDrive) -> Self {
         match value {
             CrystalDrive::Low => true,
@@ -142,7 +142,7 @@ pub enum OpenD {
 }
 
 impl From<OpenD> for bool {
-    #[inline(always)]
+    #[inline]
     fn from(value: OpenD) -> Self {
         match value {
             OpenD::HighZ => false,
@@ -159,7 +159,7 @@ pub enum RfMux {
 }
 
 impl From<RfMux> for u8 {
-    #[inline(always)]
+    #[inline]
     fn from(value: RfMux) -> Self {
         value as u8
     }
@@ -168,7 +168,7 @@ impl From<RfMux> for u8 {
 impl TryFrom<u8> for RfMux {
     type Error = u8;
 
-    #[inline(always)]
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0b00 => Ok(Self::TrackingFilter),
@@ -190,7 +190,7 @@ pub enum RfFilt {
 }
 
 impl From<RfFilt> for u8 {
-    #[inline(always)]
+    #[inline]
     fn from(value: RfFilt) -> Self {
         value as u8
     }
@@ -199,7 +199,7 @@ impl From<RfFilt> for u8 {
 impl TryFrom<u8> for RfFilt {
     type Error = u8;
 
-    #[inline(always)]
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             0b00 => Ok(Self::Highest),
@@ -244,21 +244,21 @@ impl VgaGain {
 impl TryFrom<u8> for VgaGain {
     type Error = InvalidVgaGainCode;
 
-    #[inline(always)]
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Self::from_code(value)
     }
 }
 
 impl From<VgaGainCode> for VgaGain {
-    #[inline(always)]
+    #[inline]
     fn from(value: VgaGainCode) -> Self {
         Self::Code(value)
     }
 }
 
 impl From<Auto> for VgaGain {
-    #[inline(always)]
+    #[inline]
     fn from(value: Auto) -> Self {
         let _ = value;
         Self::Pin
@@ -292,7 +292,7 @@ impl VgaGainCode {
         Self(code)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn from_db(gain: f32) -> Self {
         Self(
             closest_gain(gain, &Self::GAINS)
@@ -302,12 +302,12 @@ impl VgaGainCode {
         )
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn as_db(&self) -> f32 {
         Self::GAINS[usize::from(self.0)]
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn code(&self) -> u8 {
         self.0
     }
@@ -316,7 +316,7 @@ impl VgaGainCode {
 impl TryFrom<u8> for VgaGainCode {
     type Error = InvalidVgaGainCode;
 
-    #[inline(always)]
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Self::from_code(value)
     }
@@ -359,14 +359,14 @@ impl LnaGain {
 }
 
 impl From<LnaGainCode> for LnaGain {
-    #[inline(always)]
+    #[inline]
     fn from(value: LnaGainCode) -> Self {
         Self::Code(value)
     }
 }
 
 impl From<Auto> for LnaGain {
-    #[inline(always)]
+    #[inline]
     fn from(value: Auto) -> Self {
         let _ = value;
         Self::Auto
@@ -400,7 +400,7 @@ impl LnaGainCode {
         Self(code)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn from_db(gain: f32) -> Self {
         Self(
             closest_gain(gain, &Self::GAINS)
@@ -410,12 +410,12 @@ impl LnaGainCode {
         )
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn as_db(&self) -> f32 {
         Self::GAINS[usize::from(self.0)]
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn code(&self) -> u8 {
         self.0
     }
@@ -424,7 +424,7 @@ impl LnaGainCode {
 impl TryFrom<u8> for LnaGainCode {
     type Error = InvalidLnaGainCode;
 
-    #[inline(always)]
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Self::from_code(value)
     }
@@ -467,14 +467,14 @@ impl MixGain {
 }
 
 impl From<MixGainCode> for MixGain {
-    #[inline(always)]
+    #[inline]
     fn from(value: MixGainCode) -> Self {
         Self::Code(value)
     }
 }
 
 impl From<Auto> for MixGain {
-    #[inline(always)]
+    #[inline]
     fn from(value: Auto) -> Self {
         let _ = value;
         Self::Auto
@@ -495,7 +495,7 @@ impl MixGainCode {
 
     pub const ZERO: Self = Self(0);
 
-    #[inline(always)]
+    #[inline]
     pub const fn from_code(code: u8) -> Result<Self, InvalidMixGainCode> {
         if code & 0xf0 != 0 {
             Err(InvalidMixGainCode { code })
@@ -509,7 +509,7 @@ impl MixGainCode {
         Self(code)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn from_db(gain: f32) -> Self {
         // the last gain value actually decreases, so we exclude it here
         Self(
@@ -520,12 +520,12 @@ impl MixGainCode {
         )
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn as_db(&self) -> f32 {
         Self::GAINS[usize::from(self.0)]
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn code(&self) -> u8 {
         self.0
     }
@@ -534,7 +534,7 @@ impl MixGainCode {
 impl TryFrom<u8> for MixGainCode {
     type Error = InvalidMixGainCode;
 
-    #[inline(always)]
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Self::from_code(value)
     }
@@ -554,7 +554,7 @@ pub enum Model {
 }
 
 impl Model {
-    #[inline(always)]
+    #[inline]
     pub const fn name(&self) -> &'static str {
         match self {
             Model::R820T => "R820T",
@@ -563,7 +563,7 @@ impl Model {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub const fn i2c_address(&self) -> I2cAddress {
         match self {
             Model::R820T => I2cAddress::from_left_aligned(0x34),
@@ -576,7 +576,7 @@ impl Model {
     ///
     /// This is used when configuring the PLL. It's initialized as 2 for R820T,
     /// 1 for R828D. It also seems to be 1 for R828S (Blog V4)
-    #[inline(always)]
+    #[inline]
     pub fn vco_power_ref(&self) -> u8 {
         match self {
             Model::R820T => 2,
@@ -680,7 +680,7 @@ impl From<SelDiv> for u8 {
 impl TryFrom<u8> for SelDiv {
     type Error = InvalidSelDiv;
 
-    #[inline(always)]
+    #[inline]
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         Self::from_register_value(value)
     }

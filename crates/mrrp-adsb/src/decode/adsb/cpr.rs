@@ -53,7 +53,7 @@ impl Format {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_odd(&self) -> bool {
         !self.is_even()
     }
@@ -141,7 +141,7 @@ fn n_l(lat: f64) -> f64 {
     }
 }
 
-#[inline(always)]
+#[inline]
 fn fix_lat(mut lat: f64) -> f64 {
     if lat >= 270.0 {
         lat -= 360.0;
@@ -149,7 +149,7 @@ fn fix_lat(mut lat: f64) -> f64 {
     lat
 }
 
-#[inline(always)]
+#[inline]
 fn fix_lon(mut lon: f64) -> f64 {
     if lon >= 180.0 {
         lon -= 360.0;
@@ -157,7 +157,7 @@ fn fix_lon(mut lon: f64) -> f64 {
     lon
 }
 
-#[inline(always)]
+#[inline]
 fn i(format: Format) -> f64 {
     match format {
         Format::Even => 0.0,
@@ -344,12 +344,12 @@ pub trait SelectCandidate {
 }
 
 impl SelectCandidate for () {
-    #[inline(always)]
+    #[inline]
     fn select_latitude_candidate(&self, uncorrected: f64) -> f64 {
         uncorrected
     }
 
-    #[inline(always)]
+    #[inline]
     fn select_longitude_candidate(&self, uncorrected: f64) -> f64 {
         uncorrected
     }

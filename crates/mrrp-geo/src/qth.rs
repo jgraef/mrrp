@@ -63,7 +63,7 @@ impl Qth {
         geodetic.longitude /= 360.0;
         geodetic.latitude /= 180.0;
 
-        #[inline(always)]
+        #[inline]
         fn subdivide(x: &mut f64, divisions: u8) -> u8 {
             *x *= divisions as f64;
             let y = *x as u8;

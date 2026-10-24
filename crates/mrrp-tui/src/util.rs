@@ -29,12 +29,12 @@ impl FrequencyBand {
         Self { start, end }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn center(&self) -> u32 {
         (self.start + self.end) / 2
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn bandwidth(&self) -> u32 {
         self.end - self.start
     }
@@ -56,12 +56,12 @@ impl RangeBounds<u32> for FrequencyBand {
     }
 }
 
-#[inline(always)]
+#[inline]
 pub fn lerp(t: f32, a: f32, b: f32) -> f32 {
     (1.0 - t) * a + t * b
 }
 
-#[inline(always)]
+#[inline]
 pub fn unlerp(x: f32, a: f32, b: f32) -> f32 {
     (x - a) / (b - a)
 }
@@ -79,12 +79,12 @@ fn min_max_float(
     current_min
 }
 
-#[inline(always)]
+#[inline]
 pub fn min_float(iter: impl IntoIterator<Item = f32>) -> Option<f32> {
     min_max_float(iter, |min, x| x < min)
 }
 
-#[inline(always)]
+#[inline]
 pub fn max_float(iter: impl IntoIterator<Item = f32>) -> Option<f32> {
     min_max_float(iter, |min, x| x > min)
 }

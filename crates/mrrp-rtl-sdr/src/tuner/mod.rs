@@ -264,12 +264,12 @@ where
 pub struct AnyTuner(Box<dyn AnyTunerTrait>);
 
 impl AnyTuner {
-    #[inline(always)]
+    #[inline]
     pub fn new(tuner: impl Tuner) -> Self {
         Self(Box::new(tuner))
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn downcast_ref<T>(&self) -> Option<&T>
     where
         T: Tuner,
@@ -277,7 +277,7 @@ impl AnyTuner {
         (&*self.0 as &dyn Any).downcast_ref::<T>()
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn downcast_mut<T>(&mut self) -> Option<&mut T>
     where
         T: Tuner,
@@ -441,7 +441,7 @@ pub mod gain {
     }
 
     impl TunerGain {
-        #[inline(always)]
+        #[inline]
         pub fn from_db(gain: f32, available_gains: &[f32]) -> Self {
             Index::from_db(gain, available_gains).into_tuner_gain(available_gains)
         }
@@ -454,7 +454,7 @@ pub mod gain {
         /// available. It is sorted in ascending order. This is needed by the
         /// conversion from dB values to the [`TunerGain`] enum, as it only
         /// understands indices.
-        #[inline(always)]
+        #[inline]
         fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
             let _ = available_gains;
             self
@@ -465,7 +465,7 @@ pub mod gain {
     pub struct Auto;
 
     impl IntoTunerGain for Auto {
-        #[inline(always)]
+        #[inline]
         fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
             let _ = available_gains;
             TunerGain::Auto
@@ -476,7 +476,7 @@ pub mod gain {
     pub struct Max;
 
     impl IntoTunerGain for Max {
-        #[inline(always)]
+        #[inline]
         fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
             TunerGain::Manual(available_gains.len() - 1)
         }
@@ -486,7 +486,7 @@ pub mod gain {
     pub struct Index(pub usize);
 
     impl Index {
-        #[inline(always)]
+        #[inline]
         pub fn from_db(gain: f32, available_gains: &[f32]) -> Self {
             let index = closest_gain(gain, available_gains);
 
@@ -499,7 +499,7 @@ pub mod gain {
     }
 
     impl IntoTunerGain for Index {
-        #[inline(always)]
+        #[inline]
         fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
             let _ = available_gains;
             TunerGain::Manual(self.0)
@@ -510,7 +510,7 @@ pub mod gain {
     pub struct Db(pub f32);
 
     impl IntoTunerGain for Db {
-        #[inline(always)]
+        #[inline]
         fn into_tuner_gain(self, available_gains: &[f32]) -> TunerGain {
             Index::from_db(self.0, available_gains).into_tuner_gain(available_gains)
         }

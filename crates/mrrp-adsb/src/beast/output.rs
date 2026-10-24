@@ -266,18 +266,18 @@ impl Default for ReceiveBuffer {
 }
 
 impl ReceiveBuffer {
-    #[inline(always)]
+    #[inline]
     fn has_data(&self) -> bool {
         self.read_pos < self.write_pos
     }
 
-    #[inline(always)]
+    #[inline]
     fn reset(&mut self) {
         self.read_pos = 0;
         self.write_pos = 0;
     }
 
-    #[inline(always)]
+    #[inline]
     fn next_byte(&mut self) -> Option<u8> {
         self.has_data().then(|| {
             let byte = self.buffer[self.read_pos];
@@ -399,13 +399,13 @@ impl PacketDecoder {
         Ok(None)
     }
 
-    #[inline(always)]
+    #[inline]
     fn push_byte(&mut self, byte: u8) {
         self.buffer[self.buffer_write_pos] = byte;
         self.buffer_write_pos += 1;
     }
 
-    #[inline(always)]
+    #[inline]
     fn emit_packet(
         &mut self,
         next_packet_type: Option<OutputPacketType>,

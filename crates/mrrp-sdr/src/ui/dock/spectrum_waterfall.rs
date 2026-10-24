@@ -303,7 +303,7 @@ impl<'a> SpectrumWaterfallDockContextMenu<'a> {
             // apply menu style, so this always looks like a menu
             menu_style(ui.style_mut());
 
-            #[inline(always)]
+            #[inline]
             fn show_checkbox(
                 ui: &mut egui::Ui,
                 state: &mut SpectrumWaterfallDockState,

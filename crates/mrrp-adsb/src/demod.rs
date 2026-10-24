@@ -431,12 +431,12 @@ pub struct Cursor<'a, S> {
 }
 
 impl<'a, S> Cursor<'a, S> {
-    #[inline(always)]
+    #[inline]
     pub fn advance(&mut self, amount: usize) {
         self.position += amount;
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn remaining(&self) -> &[S] {
         &self.samples[self.position..]
     }

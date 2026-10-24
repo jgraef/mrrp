@@ -197,18 +197,18 @@ impl Device {
         Ok(())
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn device_info(&self) -> &DeviceInfo {
         &self.device_info
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn sample_rate(&self) -> f32 {
         let state_guard = self.shared.state.read();
         state_guard.sample_rate
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn center_frequency(&self) -> Option<f32> {
         self.center_frequency
     }
@@ -230,7 +230,7 @@ impl Device {
     /// we think it makes sense to have it that way, as the Device is not
     /// supposed to allow shared usage (except for the before-mentioned drop
     /// handlers).
-    #[inline(always)]
+    #[inline]
     pub async fn inner_mut(&mut self) -> InnerGuard<'_> {
         self.shared.lock_inner().await
     }
@@ -404,7 +404,7 @@ impl Device {
         Ok(())
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn available_tuner_gains(&self) -> &[f32] {
         &self.tuner_gains
     }
@@ -517,7 +517,7 @@ impl Reader {
 }
 
 impl AsyncRead for Reader {
-    #[inline(always)]
+    #[inline]
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -528,12 +528,12 @@ impl AsyncRead for Reader {
 }
 
 impl AsyncBufRead for Reader {
-    #[inline(always)]
+    #[inline]
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
         Pin::new(&mut self.get_mut().epa_reader).poll_fill_buf(cx)
     }
 
-    #[inline(always)]
+    #[inline]
     fn consume(self: Pin<&mut Self>, amt: usize) {
         Pin::new(&mut self.get_mut().epa_reader).consume(amt);
     }
@@ -715,14 +715,14 @@ pub struct InnerGuard<'a> {
 impl<'a> Deref for InnerGuard<'a> {
     type Target = Inner;
 
-    #[inline(always)]
+    #[inline]
     fn deref(&self) -> &Self::Target {
         &*self.guard
     }
 }
 
 impl<'a> DerefMut for InnerGuard<'a> {
-    #[inline(always)]
+    #[inline]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.guard
     }
@@ -749,7 +749,7 @@ impl Default for CloseOptions {
 ///
 /// This is dead code right now, as we don't apply any frequency correction at
 /// the moment.
-#[inline(always)]
+#[inline]
 pub fn apply_frequency_correction(frequency: f32, correction: f32) -> f32 {
     frequency * (1.0 + correction / 1.0e6)
 }

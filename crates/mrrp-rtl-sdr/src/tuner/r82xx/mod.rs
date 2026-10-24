@@ -168,7 +168,7 @@ impl R82xx {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn model(&self) -> Model {
         self.model
     }
@@ -203,12 +203,12 @@ pub struct Transaction<'a> {
 }
 
 impl<'a> Transaction<'a> {
-    #[inline(always)]
+    #[inline]
     pub fn r82xx(&self) -> &R82xx {
         &self.r82xx
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn model(&self) -> Model {
         self.r82xx.model
     }

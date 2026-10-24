@@ -83,7 +83,7 @@ where
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn stream_position(&mut self) -> std::io::Result<u64> {
         Ok(self.position)
     }

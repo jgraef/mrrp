@@ -774,7 +774,7 @@ impl EpaReader {
 }
 
 impl AsyncRead for EpaReader {
-    #[inline(always)]
+    #[inline]
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -791,7 +791,7 @@ impl AsyncRead for EpaReader {
 }
 
 impl AsyncBufRead for EpaReader {
-    #[inline(always)]
+    #[inline]
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
         let coop = ready!(tokio::task::coop::poll_proceed(cx));
         Pin::new(&mut self.get_mut().endpoint_reader)
@@ -802,7 +802,7 @@ impl AsyncBufRead for EpaReader {
             })
     }
 
-    #[inline(always)]
+    #[inline]
     fn consume(self: Pin<&mut Self>, amt: usize) {
         Pin::new(&mut self.get_mut().endpoint_reader).consume(amt);
     }

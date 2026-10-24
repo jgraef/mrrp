@@ -65,7 +65,7 @@ pub struct RegisterBuffer {
 }
 
 impl RegisterBuffer {
-    #[inline(always)]
+    #[inline]
     pub fn from_state(state: [u8; NUM_REGISTERS as usize]) -> Self {
         Self {
             state,
@@ -73,27 +73,27 @@ impl RegisterBuffer {
         }
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn set_no_dirty(&mut self, index: u8, value: u8) {
         self.state[usize::from(index)] = value;
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn is_modified(&self, register: u8) -> bool {
         self.modified.contains(register)
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn state(&self) -> &[u8; NUM_REGISTERS as usize] {
         &self.state
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn modified(&self) -> Modified {
         self.modified
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn clear_modified(&mut self) {
         self.modified = Default::default();
     }
@@ -102,7 +102,7 @@ impl RegisterBuffer {
 impl Index<u8> for RegisterBuffer {
     type Output = u8;
 
-    #[inline(always)]
+    #[inline]
     fn index(&self, index: u8) -> &Self::Output {
         &self.state[usize::from(index)]
     }
@@ -111,14 +111,14 @@ impl Index<u8> for RegisterBuffer {
 impl Index<Range<u8>> for RegisterBuffer {
     type Output = [u8];
 
-    #[inline(always)]
+    #[inline]
     fn index(&self, index: Range<u8>) -> &Self::Output {
         &self.state[usize::from(index.start)..usize::from(index.end)]
     }
 }
 
 impl IndexMut<u8> for RegisterBuffer {
-    #[inline(always)]
+    #[inline]
     fn index_mut(&mut self, index: u8) -> &mut Self::Output {
         self.modified.set_index(index);
         &mut self.state[usize::from(index)]
@@ -126,7 +126,7 @@ impl IndexMut<u8> for RegisterBuffer {
 }
 
 impl IndexMut<Range<u8>> for RegisterBuffer {
-    #[inline(always)]
+    #[inline]
     fn index_mut(&mut self, index: Range<u8>) -> &mut Self::Output {
         self.modified.set_range(index.clone());
         &mut self.state[usize::from(index.start)..usize::from(index.end)]
@@ -135,7 +135,7 @@ impl IndexMut<Range<u8>> for RegisterBuffer {
 
 /// Register 0x15 and 0x16
 impl RegisterBuffer {
-    #[inline(always)]
+    #[inline]
     pub fn sdm_in(&self) -> u16 {
         u16::from_le_bytes(self[0x15..0x17].try_into().unwrap())
     }
@@ -155,13 +155,13 @@ impl RegisterBuffer {
     /// Nfra=SDM_IN[16]*2^-1+SDM_IN[15]*2^-2+E+SDM_IN[2]
     /// *2^-15+SDM_IN[1]*2^-16
     /// ```
-    #[inline(always)]
+    #[inline]
     pub fn set_sdm_in(&mut self, value: u16) {
         self[0x15..0x17].copy_from_slice(&value.to_le_bytes());
     }
 }
 
-#[inline(always)]
+#[inline]
 fn range_mask(start: u8, end: u8) -> u32 {
     let end_mask = if end == 32 { u32::MAX } else { (1 << end) - 1 };
     let start_mask = (1 << start) - 1;
@@ -174,22 +174,22 @@ fn range_mask(start: u8, end: u8) -> u32 {
 pub struct Modified(u32);
 
 impl Modified {
-    #[inline(always)]
+    #[inline]
     pub fn contains(&self, index: u8) -> bool {
         self.0 & (1 << index) != 0
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn set_index(&mut self, index: u8) {
         self.0 |= 1 << index;
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn set_range(&mut self, range: Range<u8>) {
         self.0 |= range_mask(range.start, range.end);
     }
 
-    #[inline(always)]
+    #[inline]
     pub fn iter(&self) -> impl Iterator<Item = u8> {
         (0..NUM_REGISTERS).filter(|index| self.contains(*index))
     }
@@ -261,7 +261,7 @@ macro_rules! registers {
     (@generate_impl($name:ident, $address:literal, [$bit:literal,], [$($meta:meta),*])) => {
         $(#[$meta])*
         #[doc = concat!("\n\nRegister ", stringify!($address), ", Bit ", $bit)]
-        #[inline(always)]
+        #[inline]
         pub fn $name(&self)  -> bool {
             ::bitfield::Bit::bit(&self[$address], $bit)
         }
@@ -269,7 +269,7 @@ macro_rules! registers {
         paste! {
             $(#[$meta])*
             #[doc = concat!("\n\nRegister ", stringify!($address), ", Bit ", $bit)]
-            #[inline(always)]
+            #[inline]
             pub fn [<set_ $name>](&mut self, value: bool) {
                 ::bitfield::BitMut::set_bit(&mut self[$address], $bit, value);
             }
@@ -278,7 +278,7 @@ macro_rules! registers {
     (@generate_impl($name:ident, $address:literal, [$msb:literal,$lsb:literal], [$($meta:meta),*])) => {
         $(#[$meta])*
         #[doc = concat!("\n\nRegister ", stringify!($address), ", Bits ", $msb, ":", $lsb)]
-        #[inline(always)]
+        #[inline]
         pub fn $name(&self)  -> u8 {
             ::bitfield::BitRange::<u8>::bit_range(&self[$address], $msb, $lsb)
         }
@@ -286,7 +286,7 @@ macro_rules! registers {
         paste! {
             $(#[$meta])*
             #[doc = concat!("\n\nRegister ", stringify!($address), ", Bits ", $msb, ":", $lsb)]
-            #[inline(always)]
+            #[inline]
             pub fn [<set_ $name>](&mut self, value: u8) {
                 ::bitfield::BitRangeMut::<u8>::set_bit_range(&mut self[$address], $msb, $lsb, value);
             }

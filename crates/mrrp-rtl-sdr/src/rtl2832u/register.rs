@@ -320,12 +320,12 @@ impl<E> Bits<E> for u8 {
 
     const LENGTH: u16 = 1;
 
-    #[inline(always)]
+    #[inline]
     fn from_bytes(bytes: &[u8]) -> Self {
         bytes[0]
     }
 
-    #[inline(always)]
+    #[inline]
     fn into_bytes(&self) -> Self::Bytes {
         [*self]
     }
@@ -344,12 +344,12 @@ macro_rules! impl_bits {
 
             const LENGTH: u16 = $bytes;
 
-            #[inline(always)]
+            #[inline]
             fn from_bytes(bytes: &[u8]) -> Self {
                 Self::from_le_bytes(bytes.try_into().unwrap())
             }
 
-            #[inline(always)]
+            #[inline]
             fn into_bytes(&self) -> Self::Bytes {
                 self.to_le_bytes()
             }
@@ -360,12 +360,12 @@ macro_rules! impl_bits {
 
             const LENGTH: u16 = $bytes;
 
-            #[inline(always)]
+            #[inline]
             fn from_bytes(bytes: &[u8]) -> Self {
                 Self::from_be_bytes(bytes.try_into().unwrap())
             }
 
-            #[inline(always)]
+            #[inline]
             fn into_bytes(&self) -> Self::Bytes {
                 self.to_be_bytes()
             }
@@ -382,12 +382,12 @@ impl<E, const N: usize> Bits<E> for [u8; N] {
 
     const LENGTH: u16 = const { N as u16 };
 
-    #[inline(always)]
+    #[inline]
     fn from_bytes(bytes: &[u8]) -> Self {
         bytes.try_into().unwrap()
     }
 
-    #[inline(always)]
+    #[inline]
     fn into_bytes(&self) -> Self::Bytes {
         *self
     }
@@ -404,7 +404,7 @@ impl<T> Visitor for &mut T
 where
     T: Visitor,
 {
-    #[inline(always)]
+    #[inline]
     fn visit<R>(&mut self)
     where
         R: RegisterValue,
@@ -566,7 +566,7 @@ macro_rules! registers {
 
         #[automatically_derived]
         impl From<$int> for $name {
-            #[inline(always)]
+            #[inline]
             fn from(value: $int) -> Self {
                 Self(value)
             }
@@ -574,7 +574,7 @@ macro_rules! registers {
 
         #[automatically_derived]
         impl From<$name> for $int {
-            #[inline(always)]
+            #[inline]
             fn from(value: $name) -> Self {
                 value.0
             }
@@ -586,13 +586,13 @@ macro_rules! registers {
         #[automatically_derived]
         impl shadow::ShadowRegister for $name {
             /// This register is not using the shadow map. Therefore this always returns `None`.
-            #[inline(always)]
+            #[inline]
             fn shadow_read(map: &shadow::ShadowMap) -> Option<&Self> {
                 None
             }
 
             /// This register is not using the shadow map. Therefore this is a NOP.
-            #[inline(always)]
+            #[inline]
             fn shadow_write(&self, map: &mut shadow::ShadowMap) {
                 // nop
             }
@@ -604,13 +604,13 @@ macro_rules! registers {
         #[automatically_derived]
         impl shadow::ShadowRegister for $name {
             /// Returns the value for this register that is cached in the shadow map.
-            #[inline(always)]
+            #[inline]
             fn shadow_read(map: &shadow::ShadowMap) -> Option<&Self> {
                 map.$block.$name.as_ref()
             }
 
             /// Updates the cached value for this register in the shadow map.
-            #[inline(always)]
+            #[inline]
             fn shadow_write(&self, map: &mut shadow::ShadowMap) {
                 map.$block.$name = Some(*self);
             }
@@ -1514,17 +1514,17 @@ pub mod demod {
     }
 
     impl UNK_FIR_FILTER {
-        #[inline(always)]
+        #[inline]
         pub fn decode(&self) -> FirFilter {
             FirFilter::decode(&self.0)
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn encode(&mut self, filter: &FirFilter) {
             filter.encode(&mut self.0);
         }
 
-        #[inline(always)]
+        #[inline]
         pub fn from_filter(filter: &FirFilter) -> Self {
             let mut buffer = Self::default();
             buffer.encode(&filter);
