@@ -136,9 +136,7 @@ impl Device {
         i2c_repeater_guard.disable().await?;
 
         let tuner_gains = tuner.gains().to_vec();
-        tracing::debug!(?tuner_gains);
-
-        tracing::info!(tuner = tuner.name(), "found tuner");
+        tracing::debug!(tuner = tuner.name(), ?tuner_gains, "found tuner");
 
         let mut inner = Inner { rtl2832u, tuner };
 

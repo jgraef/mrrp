@@ -177,9 +177,12 @@ impl Rtl2832u {
             .usb_interface
             .control_in(request, self.control_timeout)
             .await
-            .inspect_err(
-                |error| tracing::error!(%error, ?address, ?length, "USB error during read"),
-            )?;
+            .inspect_err(|error| {
+                // some reads are expected to fail (e.g. tuner probing), so we
+                // can't make this a very high log level. logging it under ERROR
+                // is very distracting.
+                tracing::debug!(%error, ?address, ?length, "USB error during read")
+            })?;
 
         if response_data.len() != response_data.len() {
             return Err(Error::InvalidControlResponse {
