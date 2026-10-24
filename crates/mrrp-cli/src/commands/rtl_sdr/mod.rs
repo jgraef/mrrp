@@ -332,6 +332,16 @@ pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
                 }
             }
         }
+        Command::Gains { device } => {
+            let device = device.open_device().await?;
+
+            let gains = device.available_tuner_gains();
+            for (i, gain) in gains.iter().enumerate() {
+                println!("#{i}: {gain:.1} dB");
+            }
+
+            device.close().await?;
+        }
     }
 
     Ok(())
@@ -589,5 +599,10 @@ enum Command {
 
         #[clap(short, long)]
         output: PathBuf,
+    },
+    /// Show available tuner levels.
+    Gains {
+        #[clap(flatten)]
+        device: DeviceArgs,
     },
 }

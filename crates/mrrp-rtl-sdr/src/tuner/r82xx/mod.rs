@@ -947,7 +947,7 @@ impl<'a> Transaction<'a> {
                     break;
                 }
 
-                tracing::warn!(attempt, "PLL not locked yet");
+                tracing::debug!(attempt, "PLL not locked yet");
                 retry_interval.tick().await;
 
                 attempt += 1;

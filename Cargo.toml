@@ -52,6 +52,7 @@ debug-assertions = true
 overflow-checks = true
 
 [workspace.dependencies]
+mrrp-adsb = { path = "crates/mrrp-adsb", default-features = false }
 mrrp-audio = { path = "crates/mrrp-audio", default-features = false }
 mrrp-core = { path = "crates/mrrp-core", default-features = false }
 mrrp-file = { path = "crates/mrrp-file", default-features = false }
@@ -71,6 +72,7 @@ bytes = { version = "1.11.1", default-features = false }
 chrono = { version = "0.4.45", default-features = false }
 clap = { version = "4.6.1", features = ["derive"] }
 colorgrad = "0.9.0"
+const-hex = "1.19.3"
 derive_more = { version = "2.1.1", default-features = false }
 dotenvy = { version = "0.15.7", default-features = false }
 egui = { version = "0.36.2", default-features = false }

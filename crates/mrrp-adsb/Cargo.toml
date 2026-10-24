@@ -11,7 +11,7 @@ bytes.workspace = true
 chrono.workspace = true
 crc = "3.4.0"
 futures-util.workspace = true
-hex = { version = "0.4.3", optional = true }
+const-hex = { workspace = true, optional = true }
 mrrp-core.workspace = true
 mrrp-util.workspace = true
 num-complex = { workspace = true, features = ["bytemuck"] }
@@ -29,4 +29,4 @@ approx = "0.5.1"
 [features]
 default = ["serde", "rtl_adsb_command"]
 serde = ["dep:serde", "dep:serde_with"]
-rtl_adsb_command = ["tokio/process", "dep:hex"]
+rtl_adsb_command = ["tokio/process", "dep:const-hex"]

@@ -191,33 +191,13 @@ impl Frame {
         Ok(frame)
     }
 
-    /// Decodes a Mode-S frame and calculates its CRC checksum.
-    pub fn decode_and_calculate_checksum<B: Buf>(
-        buffer: &mut B,
-    ) -> Result<FrameWithChecksum, DecodeError> {
-        const CRC: crc::Crc<u32> = crc::Crc::<u32>::new(&CRC_24_MODES);
-
-        let mut buffer = CrcBuf {
-            inner: buffer,
-            digest: CRC.digest(),
-        };
-
-        let frame = Self::decode(&mut buffer)?;
-
-        let checksum = buffer.digest.finalize().to_be_bytes();
-        assert_eq!(checksum[0], 0);
-        let checksum = Checksum([checksum[1], checksum[2], checksum[3]]);
-
-        Ok(FrameWithChecksum { frame, checksum })
-    }
-
     /// Decodes a Mode-S frame.
     ///
     /// This performs a CRC check if possible and returns an error if it fails.
     /// If you want to decode invalid Mode-S frames, or need the CRC checksum
-    /// use [`decode_with_checksum`][Self::decode_and_calculate_checksum]
+    /// use [`FrameWithChecksum::decode`].
     pub fn decode_and_check_checksum<B: Buf>(buffer: &mut B) -> Result<Self, DecodeError> {
-        let frame = Self::decode_and_calculate_checksum(buffer)?;
+        let frame = FrameWithChecksum::decode(buffer)?;
 
         if !frame.check().unwrap_or(true) {
             return Err(DecodeError::CrcCheckFailed(frame));
@@ -295,6 +275,24 @@ pub struct FrameWithChecksum {
 }
 
 impl FrameWithChecksum {
+    /// Decodes a Mode-S frame and calculates its CRC checksum.
+    pub fn decode<B: Buf>(buffer: &mut B) -> Result<FrameWithChecksum, DecodeError> {
+        const CRC: crc::Crc<u32> = crc::Crc::<u32>::new(&CRC_24_MODES);
+
+        let mut buffer = CrcBuf {
+            inner: buffer,
+            digest: CRC.digest(),
+        };
+
+        let frame = Frame::decode(&mut buffer)?;
+
+        let checksum = buffer.digest.finalize().to_be_bytes();
+        assert_eq!(checksum[0], 0);
+        let checksum = Checksum([checksum[1], checksum[2], checksum[3]]);
+
+        Ok(FrameWithChecksum { frame, checksum })
+    }
+
     /// Tries to check if the frame is not corrupted.
     ///
     /// This is only possible for some downlink types (e.g. ADS-B), because some

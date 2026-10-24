@@ -6,6 +6,7 @@
 
 use std::{
     fmt::Debug,
+    ops::Deref,
     pin::Pin,
     task::{
         Context,
@@ -16,6 +17,7 @@ use std::{
 use futures_util::Stream;
 use mrrp_core::signal::{
     AsyncReadSamples,
+    GetSampleRate,
     ReadBuf,
 };
 use mrrp_util::signal::{
@@ -37,6 +39,14 @@ pub const DOWNLINK_FREQUENCY: u32 = 1_090_000_000;
 /// Mode S uplink frequency: 1030 MHz
 pub const UPLINK_FREQUENCY: u32 = 1_030_000_000;
 
+/// A raw data frame.
+///
+/// This only contains the demodulated bytes. Depending on the type of frame
+/// these are 2, 7 or 14 bytes long.
+///
+/// Since they have a fixed and rather short
+/// length, this can easily be stored on the stack, and no `Vec` is needed for
+/// the variable-length byte array.
 #[derive(Clone, Copy, Debug)]
 pub enum RawFrame {
     ModeAc { data: [u8; 2] },
@@ -44,13 +54,54 @@ pub enum RawFrame {
     ModeSLong { data: [u8; 14] },
 }
 
-impl AsRef<[u8]> for RawFrame {
-    fn as_ref(&self) -> &[u8] {
+impl RawFrame {
+    /// Returns the frame's bytes as slice
+    #[inline]
+    pub fn bytes(&self) -> &[u8] {
         match self {
-            RawFrame::ModeAc { data } => &data[..],
-            RawFrame::ModeSShort { data } => &data[..],
-            RawFrame::ModeSLong { data } => &data[..],
+            Self::ModeAc { data } => &data[..],
+            Self::ModeSShort { data } => &data[..],
+            Self::ModeSLong { data } => &data[..],
         }
+    }
+
+    #[inline]
+    pub fn is_mode_ac(&self) -> bool {
+        matches!(self, Self::ModeAc { data: _ })
+    }
+
+    #[inline]
+    pub fn is_mode_s_short(&self) -> bool {
+        matches!(self, Self::ModeSShort { data: _ })
+    }
+
+    #[inline]
+    pub fn is_mode_s_long(&self) -> bool {
+        matches!(self, Self::ModeSLong { data: _ })
+    }
+
+    #[inline]
+    pub fn is_mode_s(&self) -> bool {
+        matches!(
+            self,
+            Self::ModeSShort { data: _ } | Self::ModeSLong { data: _ }
+        )
+    }
+}
+
+impl AsRef<[u8]> for RawFrame {
+    #[inline]
+    fn as_ref(&self) -> &[u8] {
+        self.bytes()
+    }
+}
+
+impl Deref for RawFrame {
+    type Target = [u8];
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        self.bytes()
     }
 }
 
@@ -299,9 +350,13 @@ pin_project! {
 
 impl<T> DemodulateStream<T>
 where
-    T: AsyncReadSamples<Sample = Complex<f32>>,
+    T: AsyncReadSamples<Sample = Complex<f32>> + GetSampleRate,
 {
     pub fn new(stream: T, demodulator: Demodulator, buffer_size: usize) -> Self {
+        if stream.sample_rate() != 2_000_000.0 {
+            todo!("TODO: Accept sample rates other than 2 MHz");
+        }
+
         Self {
             stream: stream.map_in_place_pod(|sample| sample.re * sample.re + sample.im * sample.im),
             demodulator,

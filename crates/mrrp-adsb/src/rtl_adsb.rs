@@ -56,13 +56,13 @@ impl RtlAdsbCommand {
             match line.len() {
                 16 => {
                     let mut data = [0; 7];
-                    hex::decode_to_slice(&self.buffer[1..15], &mut data)
+                    const_hex::decode_to_slice(&self.buffer[1..15], &mut data)
                         .map_err(|_| Error::InvalidLine(line.to_owned()))?;
                     return Ok(Some(RawFrame::ModeSShort { data }));
                 }
                 30 => {
                     let mut data = [0; 14];
-                    hex::decode_to_slice(&self.buffer[1..29], &mut data)
+                    const_hex::decode_to_slice(&self.buffer[1..29], &mut data)
                         .map_err(|_| Error::InvalidLine(line.to_owned()))?;
                     return Ok(Some(RawFrame::ModeSLong { data }));
                 }

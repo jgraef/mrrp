@@ -1,3 +1,4 @@
+pub mod adsb;
 pub mod sstv;
 
 use anyhow::Error;
@@ -13,6 +14,9 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
         Command::Sstv(args) => {
             sstv::run(args, context).await?;
         }
+        Command::Adsb(args) => {
+            adsb::run(args, context).await?;
+        }
     }
 
     Ok(())
@@ -27,4 +31,5 @@ pub struct Args {
 #[derive(Clone, Debug, Subcommand)]
 enum Command {
     Sstv(sstv::Args),
+    Adsb(adsb::Args),
 }
