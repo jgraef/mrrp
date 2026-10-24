@@ -1,8 +1,23 @@
 //! 1090 MHz Mode-S demodulator
 //!
-//! <https://www.radartutorial.eu/13.ssr/sr24.en.html>
-//! <https://www.idc-online.com/technical_references/pdfs/electronic_engineering/Mode_S_Reply_Encoding.pdf>
-#![allow(dead_code)]
+//! Uplink uses [DPSK][1] (not implemented), Downlink uses [BPPM][3].
+//!
+//! # Downlink
+//!
+//! Pulses are 0.5µs. First a preamble with 3 pulses separated by 1, 3.5 and 4.5
+//! µs. TODO: What's the total length? The source says 8µs, but that doesn't
+//! make sense as it must be 0.5 + 1 + 0.5 + 3.5 + 0.5 + 4.5 + 0.5
+//!
+//! # Sources
+//!
+//! - [Mode S - Differential Phase shift Keying (DPSK)][1]
+//! - [Mode S Reply Encoding][2]
+//! - [Transition to ADS-B][3]
+//!
+//! [1]: https://web.archive.org/web/20191115224604/https://www.radartutorial.eu/13.ssr/sr23.en.html
+//! [2]: https://web.archive.org/web/20191115232412/https://www.radartutorial.eu/13.ssr/sr24.en.html
+//! [3]: https://en.wikipedia.org/wiki/Pulse-position_modulation
+//! [4]: http://www.aircraft-avoid.com/ads-b-transition.html
 
 use std::{
     fmt::Debug,

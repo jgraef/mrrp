@@ -1,5 +1,4 @@
 use std::{
-    fmt::Display,
     fs::File,
     io::BufWriter,
     path::{
@@ -16,7 +15,6 @@ use anyhow::{
 };
 use chrono::{
     DateTime,
-    Local,
     Utc,
 };
 use clap::{
@@ -75,7 +73,8 @@ use crate::{
         },
     },
     util::{
-        sdrpp,
+        SourceInfo,
+        SourceInfoOptions,
         si,
         stream::Progress,
     },
@@ -137,73 +136,6 @@ struct DemodOptions {
 
     #[clap(flatten)]
     predict_options: PredictOptions,
-}
-
-#[derive(Clone, Debug, clap::Args)]
-struct SourceInfoOptions {
-    #[clap(short = 'F', long, value_parser = si::parse_frequency::<f32>)]
-    center_frequency: Option<f32>,
-
-    #[clap(short = 'S', long)]
-    start_time: Option<DateTime<Utc>>,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct SourceInfo {
-    start_time: DateTime<Utc>,
-    frequency: f32,
-}
-
-impl SourceInfo {
-    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
-        let info = sdrpp::parse_path(path)?;
-
-        tracing::debug!(?info, "extracted info from file name");
-        if info.recording_type != sdrpp::RecordingType::Baseband {
-            bail!("Input file must be baseband");
-        }
-
-        Ok(Self {
-            start_time: info.timestamp.to_utc(),
-            frequency: info.center_frequency as f32,
-        })
-    }
-
-    pub fn from_path_or_options(
-        path: impl AsRef<Path>,
-        options: &SourceInfoOptions,
-    ) -> Result<Self, Error> {
-        Self::from_path(path).or_else(|error| {
-            tracing::debug!(%error, "Could not extract file info from file name.");
-
-            let start_time = options
-                .start_time
-                .ok_or_else(|| anyhow!("Missing start time"))?;
-            let frequency = options
-                .center_frequency
-                .ok_or_else(|| anyhow!("Missing center frequency"))?;
-
-            Ok(Self {
-                start_time,
-                frequency,
-            })
-        })
-    }
-
-    pub fn with_frequency(mut self, frequency: f32) -> Self {
-        self.frequency = frequency;
-        self
-    }
-
-    pub fn filename(&self, prefix: impl Display, file_extension: impl Display) -> String {
-        format!(
-            "{}_{}Hz_{}.{}",
-            prefix,
-            self.frequency,
-            DateTime::<Local>::from(self.start_time).format("%H-%M-%S_%d-%m-%Y"),
-            file_extension
-        )
-    }
 }
 
 pub async fn run(args: Args, context: Context) -> Result<(), Error> {

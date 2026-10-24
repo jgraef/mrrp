@@ -46,6 +46,8 @@ pub fn parse_file_name(file_name: &str) -> Result<FileInfo, Error> {
     let date = NaiveDate::parse_from_str(parts.next().ok_or_else(|| invalid!())?, "%d-%m-%Y")?;
     let timestamp = NaiveDateTime::new(date, time)
         .and_local_timezone(Local)
+        // fixme: this will panic when we parse the file with a timestamp falling inside the fold
+        // 2026-10-25 0:00 to 2:00 UTC.
         .unwrap();
 
     Ok(FileInfo {

@@ -2,8 +2,6 @@ use std::path::Path;
 
 use anyhow::Error;
 use chrono::{
-    DateTime,
-    Local,
     TimeDelta,
     Utc,
 };
@@ -24,6 +22,7 @@ use mrrp_util::signal::AsyncReadSamplesExt;
 use crate::{
     commands::sat::PassOptions,
     util::{
+        SourceInfo,
         sleep_until,
         stream::CancelStream,
     },
@@ -86,11 +85,11 @@ pub async fn capture(
 
                         // note: filename format expected by SDR++ so that it
                         // can determine center frequency
-                        let file_name = format!(
-                            "baseband_{}Hz_{}.wav",
-                            center_frequency as u32,
-                            DateTime::<Local>::from(start).format("%H-%M-%S_%d-%m-%Y")
-                        );
+                        let file_name = SourceInfo {
+                            start_time: start,
+                            frequency: center_frequency,
+                        }
+                        .filename("baseband", "wav");
                         let path = output.join(&file_name);
                         tracing::info!(%file_name, "Pass started");
 
