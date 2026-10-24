@@ -97,7 +97,7 @@ impl Default for Options {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ResetOptions {
     pub stop_epa: bool,
     pub poweroff_demod: bool,
@@ -546,7 +546,7 @@ impl Rtl2832u {
     }
 
     pub async fn reset(&mut self, options: ResetOptions) -> Result<(), Error> {
-        tracing::debug!("resetting device");
+        tracing::debug!(?options, "resetting device");
 
         // turn off I2C repeater, if it is on.
         self.set_i2c_repeater(false).await?;

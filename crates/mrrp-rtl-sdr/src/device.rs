@@ -29,6 +29,7 @@ use crate::{
     Error,
     enumerate::DeviceInfo,
     rtl2832u::{
+        self,
         EpaReader,
         IfMode,
         Rtl2832u,
@@ -174,17 +175,27 @@ impl Device {
 
     /// Properly close the device.
     ///
+    /// See [`close_with_options`](Self::close_with_options).
+    #[inline]
+    pub async fn close(self) -> Result<(), Error> {
+        self.close_with_options(Default::default()).await
+    }
+
+    /// Properly close the device.
+    ///
     /// This resets the device. By default the Drop handler for [`Device`] will
     /// also attempt to do this. But it needs to spawn a tokio task for this and
     /// that task might never run, if e.g. the tokio runtime is shutdown
     /// immediately after.
     ///
     /// Not resetting the device leaves it running, which consumes more power.
-    pub async fn close(mut self) -> Result<(), Error> {
-        tracing::debug!("closing device");
+    pub async fn close_with_options(mut self, options: CloseOptions) -> Result<(), Error> {
+        tracing::debug!(?options, "closing device");
         self.reset_on_drop = false;
+
         let mut inner = self.inner_mut().await;
-        inner.reset().await?;
+        inner.reset(options).await?;
+
         Ok(())
     }
 
@@ -400,6 +411,11 @@ impl Device {
         &self.tuner_gains
     }
 
+    /// Enable or disable Bias-T
+    ///
+    /// # Note
+    ///
+    /// When a device is closed all GPIO pins are reset.
     pub async fn set_bias_t(&mut self, enable: bool) -> Result<(), Error> {
         // todo: should we move this into the Tuner? or a Peripherals trait that
         // works like the tuner?
@@ -430,7 +446,7 @@ impl Drop for Device {
             tokio::spawn(async move {
                 let mut inner = shared.lock_inner().await;
 
-                if let Err(error) = inner.reset().await {
+                if let Err(error) = inner.reset(Default::default()).await {
                     tracing::error!(%error, "Error resetting RTL2832U while dropping");
                 }
             });
@@ -613,14 +629,18 @@ pub struct Inner {
 }
 
 impl Inner {
-    async fn reset(&mut self) -> Result<(), Error> {
-        // reset tuner
-        let mut i2c_repeater_guard = self.rtl2832u.enable_i2c_repeater().await?;
-        self.tuner.shutdown(&mut *i2c_repeater_guard).await?;
-        i2c_repeater_guard.disable().await?;
+    async fn reset(&mut self, options: CloseOptions) -> Result<(), Error> {
+        if options.reset_tuner {
+            // reset tuner
+            let mut i2c_repeater_guard = self.rtl2832u.enable_i2c_repeater().await?;
+            self.tuner.shutdown(&mut *i2c_repeater_guard).await?;
+            i2c_repeater_guard.disable().await?;
+        }
 
-        // reset rtl2832u
-        self.rtl2832u.reset(Default::default()).await?;
+        if let Some(options) = options.reset_rtl2832u {
+            // reset rtl2832u
+            self.rtl2832u.reset(options).await?;
+        }
 
         Ok(())
     }
@@ -707,6 +727,21 @@ impl<'a> DerefMut for InnerGuard<'a> {
     #[inline(always)]
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut *self.guard
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct CloseOptions {
+    pub reset_tuner: bool,
+    pub reset_rtl2832u: Option<rtl2832u::ResetOptions>,
+}
+
+impl Default for CloseOptions {
+    fn default() -> Self {
+        Self {
+            reset_tuner: true,
+            reset_rtl2832u: Default::default(),
+        }
     }
 }
 
