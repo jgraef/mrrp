@@ -23,15 +23,19 @@ use anyhow::{
     Error,
     bail,
 };
+use chrono::Utc;
 use clap::{
     Parser,
     Subcommand,
 };
 use futures_util::TryFutureExt;
+use mrrp_audio::write_stream_to_wav;
+use mrrp_core::sample::Complex;
 use mrrp_rtl_sdr::rtl2832u::register::{
     self as reg,
 };
 use mrrp_rtl_tcp::server::RtlTcpServer;
+use mrrp_util::signal::AsyncReadSamplesExt;
 use tokio::{
     io::AsyncBufReadExt,
     net::TcpListener,
@@ -56,6 +60,7 @@ use crate::{
         },
     },
     util::{
+        SourceInfo,
         run_til_shutdown,
         shutdown_signal,
         si,
@@ -303,6 +308,69 @@ pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
                     }
                 })
                 .await?;
+        }
+        Command::Record {
+            device,
+            sample_rate,
+            center_frequency,
+            output,
+        } => {
+            // determine output path
+            let filename = || {
+                SourceInfo {
+                    start_time: Utc::now(),
+                    frequency: center_frequency,
+                }
+                .filename("baseband", "wav")
+            };
+
+            let output = match output {
+                Some(output) => {
+                    if output.is_dir() {
+                        let filename = filename();
+                        tracing::info!(?filename, "Output is a directory.");
+                        output.join(filename)
+                    }
+                    else {
+                        output
+                    }
+                }
+                None => PathBuf::from(filename()),
+            };
+
+            // setup RTL-SDR
+            let mut device = device.open_device().await?;
+
+            tracing::info!(?sample_rate, "Setting sample rate");
+            device.set_sample_rate(sample_rate).await?;
+
+            tracing::info!(?center_frequency, "Setting center frequency");
+            device.set_center_frequency(center_frequency).await?;
+
+            let reader = device.reader(Default::default()).await?;
+
+            // create shutdown signal (Ctrl-C) and make the reader end on it.
+            let shutdown = shutdown_signal();
+            let stream = reader.cancelable_with(shutdown.clone());
+
+            // todo: show progress spinner
+
+            // spawn recording task
+            let task = tokio::spawn(async move {
+                write_stream_to_wav(output, stream.convert::<Complex<i16>>()).await
+            });
+
+            // wait for shutdown
+            shutdown.cancelled().await;
+
+            // wait recording task to finish
+            match task.await {
+                Err(error) => tracing::error!(%error, "recoding task panicked"),
+                Ok(Err(error)) => tracing::error!(?error, "recording task failed"),
+                Ok(Ok(())) => {}
+            }
+
+            device.close().await?;
         }
         Command::SysDump { device, output } => {
             let mut writer = BufWriter::new(File::create(&output)?);
@@ -587,6 +655,21 @@ enum Command {
         /// outside of the intended band.
         #[clap(long, value_parser = si::parse_frequency::<f32>)]
         fix_tuner_frequency: Option<f32>,
+    },
+    Record {
+        #[clap(flatten)]
+        device: DeviceArgs,
+
+        /// Sets the devices sample rate
+        #[clap(short = 'S', long, default_value = "2.4M", value_parser = si::parse_frequency::<f32>)]
+        sample_rate: f32,
+
+        /// Sets the device's center frequency
+        #[clap(short = 'F', long, default_value = "144M", value_parser = si::parse_frequency::<f32>)]
+        center_frequency: f32,
+
+        #[clap(short, long)]
+        output: Option<PathBuf>,
     },
     /// Dumps system memory.
     ///

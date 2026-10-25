@@ -117,17 +117,17 @@ pub mod vis {
         VIS_LOW_TONE,
         modes::VisCode,
     };
-    use mrrp_util::signal::Scanner;
+    use mrrp_util::signal::{
+        AsyncReadSamplesExt,
+        Scanner,
+    };
 
-    use crate::{
-        commands::modem::sstv::{
-            Edge,
-            attempt1::{
-                FrequencyCounter,
-                ToneDetect,
-            },
+    use crate::commands::modem::sstv::{
+        Edge,
+        attempt1::{
+            FrequencyCounter,
+            ToneDetect,
         },
-        util::stream::Filter,
     };
 
     /// Detects calibration header with VIS code
@@ -347,7 +347,7 @@ pub mod vis {
         Error: From<S::Error>,
     {
         let sample_rate = source.sample_rate();
-        let mut vis_codes = Filter::new(source, VisDetect::new(sample_rate));
+        let mut vis_codes = source.emit(VisDetect::new(sample_rate));
         Ok(vis_codes.try_next().await?)
     }
 }
@@ -382,13 +382,11 @@ mod attempt1 {
     };
     use mrrp_util::signal::{
         AsyncReadSamplesExt,
+        Emitter,
         Scanner,
     };
 
-    use crate::{
-        commands::modem::sstv::Edge,
-        util::stream::Filter,
-    };
+    use crate::commands::modem::sstv::Edge;
 
     #[derive(Debug)]
     pub struct Decoder {
@@ -572,7 +570,7 @@ mod attempt1 {
         Error: From<S::Error>,
     {
         let sample_rate = source.sample_rate();
-        let mut images = Filter::new(source, Decoder::new(sample_rate));
+        let mut images = Emitter::new(source, Decoder::new(sample_rate));
         images
             .try_next()
             .await?

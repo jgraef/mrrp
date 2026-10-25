@@ -5,6 +5,12 @@
 //! do it once, with a function for each specific case.
 //!
 //! <https://en.wikipedia.org/wiki/Gillham_code>
+//!
+//! # TODO
+//!
+//! This can probably be done with [`extract_bits`](u16::extract_bits) and
+//! [`deposit_bits`](u16::deposit_bits). If this doesn't work, there has to be
+//! some intrinsic to make this not as horrible.
 
 /// Decodes 13-bit identity code as is used in DF5, DF21, and Mode A?? (not
 /// ADSB)

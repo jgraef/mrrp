@@ -1,6 +1,5 @@
 pub mod sdrpp;
 pub mod si;
-pub mod stream;
 
 use std::{
     borrow::Cow,

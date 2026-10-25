@@ -9,6 +9,7 @@ use std::{
 };
 
 use futures_util::FutureExt;
+use mrrp::signal::SizeHint;
 use mrrp_core::{
     buf::SampleBufMut,
     signal::{
@@ -140,6 +141,11 @@ where
     #[inline]
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
     }
 }
 

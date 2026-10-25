@@ -13,6 +13,7 @@ use mrrp_core::{
         FiniteStream,
         GetSampleRate,
         Remaining,
+        SizeHint,
         StreamLength,
     },
 };
@@ -105,6 +106,11 @@ where
     #[inline]
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
     }
 }
 

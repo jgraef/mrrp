@@ -262,6 +262,11 @@ where
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 impl<L, R> FiniteStream for Summed<L, R>
@@ -348,6 +353,11 @@ where
     #[inline]
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
     }
 }
 

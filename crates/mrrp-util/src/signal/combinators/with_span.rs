@@ -10,6 +10,7 @@ use mrrp_core::signal::{
     FiniteStream,
     GetSampleRate,
     Remaining,
+    SizeHint,
     StreamLength,
 };
 use pin_project_lite::pin_project;
@@ -105,6 +106,11 @@ where
     #[inline]
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
     }
 }
 

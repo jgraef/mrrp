@@ -34,10 +34,14 @@ use mrrp_core::{
         StreamLength,
     },
 };
+use tokio_util::sync::CancellationToken;
 use tracing::Span;
 
 use crate::signal::{
+    Cancelable,
+    Emitter,
     Forward,
+    Progress,
     combinators::{
         Buffered,
         Chained,
@@ -370,6 +374,40 @@ pub trait AsyncReadSamplesExt: AsyncReadSamples {
         R: AsyncReadSamples + Sized,
     {
         Multiplied::new(self, other)
+    }
+
+    #[inline]
+    fn emit<Sc, T>(self, scanner: Sc) -> Emitter<Self, Sc>
+    where
+        Self: Sized,
+        Sc: Scanner<Self::Sample, Output = Option<T>>,
+    {
+        Emitter::new(self, scanner)
+    }
+
+    #[inline]
+    fn cancelable(self) -> Cancelable<Self>
+    where
+        Self: Sized,
+    {
+        Cancelable::new(self)
+    }
+
+    #[inline]
+    fn cancelable_with(self, token: CancellationToken) -> Cancelable<Self>
+    where
+        Self: Sized,
+    {
+        Cancelable::from_token(self, token)
+    }
+
+    #[inline]
+    fn progress<P>(self, on_progress: P) -> Progress<Self, P>
+    where
+        Self: Sized,
+        P: Scanner<usize, Output = ()>,
+    {
+        Progress::new(self, on_progress)
     }
 }
 

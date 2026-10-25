@@ -24,7 +24,6 @@ use crate::{
     util::{
         SourceInfo,
         sleep_until,
-        stream::CancelStream,
     },
 };
 
@@ -98,7 +97,7 @@ pub async fn capture(
                         // note: we convert to i16 even though i8 would be
                         // sufficient, so that SDR++ can read it. SDR++ can
                         // somewhat read i8, but it doesn't look right.
-                        let stream = CancelStream::new(reader.convert::<Complex<i16>>());
+                        let stream = reader.convert::<Complex<i16>>().cancelable();
 
                         let stop = stream.token();
 

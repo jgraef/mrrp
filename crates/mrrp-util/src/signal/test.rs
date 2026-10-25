@@ -12,6 +12,7 @@ use mrrp_core::{
     signal::{
         FiniteStream,
         Remaining,
+        SizeHint,
         StreamLength,
     },
 };
@@ -23,7 +24,7 @@ use crate::signal::{
 };
 
 pin_project! {
-    /// Stream that only ever returns a single sample when polled
+    /// Stream that only ever returns a single sample when polled.
     ///
     /// This was used to benchmark if polling for single samples, i.e. a `Stream`-like interface, would work.
     #[derive(Clone, Copy, Debug)]
@@ -83,6 +84,11 @@ where
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 impl<R> FiniteStream for SingleSampleStream<R> where R: FiniteStream {}
@@ -129,6 +135,11 @@ where
     #[inline]
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
     }
 }
 

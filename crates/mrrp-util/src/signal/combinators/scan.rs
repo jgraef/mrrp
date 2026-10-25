@@ -1,6 +1,7 @@
 use std::{
     fmt::Debug,
     marker::PhantomData,
+    mem::MaybeUninit,
     ops::{
         Add,
         Mul,
@@ -12,13 +13,18 @@ use std::{
     },
 };
 
+use futures_core::Stream;
 use mrrp_core::{
-    buf::SampleBufMut,
+    buf::{
+        SampleBufMut,
+        UninitSlice,
+    },
     sample::FromSample,
     signal::{
         FiniteStream,
         GetSampleRate,
         Remaining,
+        SizeHint,
         StreamLength,
     },
 };
@@ -132,6 +138,11 @@ where
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
     }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
 }
 
 impl<R, Sc> FiniteStream for ScanWith<R, Sc> where R: AsyncReadSamples + FiniteStream {}
@@ -215,6 +226,11 @@ where
     #[inline]
     fn remaining(&self) -> Remaining {
         self.inner.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
     }
 }
 
@@ -400,5 +416,67 @@ where
     #[inline]
     fn scan(&mut self, (left, right): (S, T)) -> Self::Output {
         left * right
+    }
+}
+
+pin_project! {
+    /// Filters a [`AsyncReadSamples`] into a [`Stream`] by applying a [`Scanner`].
+    ///
+    /// Whenever the [`Scanner`] returns [`Some`], the stream yields an element.
+    #[derive(Debug)]
+    pub struct Emitter<R, Sc> {
+        #[pin]
+        pub inner: R,
+        pub scanner: Sc,
+    }
+}
+
+impl<R, Sc> Emitter<R, Sc> {
+    pub fn new(inner: R, scanner: Sc) -> Self {
+        Self { inner, scanner }
+    }
+}
+
+impl<R, Sc, T> Stream for Emitter<R, Sc>
+where
+    R: AsyncReadSamples,
+    Sc: Scanner<R::Sample, Output = Option<T>>,
+{
+    type Item = Result<T, R::Error>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        // todo: use buffer?
+
+        let mut this = self.project();
+
+        let mut buffer = [MaybeUninit::uninit(); 1];
+
+        loop {
+            let mut read_buf = ReadBuf::uninit(UninitSlice::slice_mut_from_uninit(&mut buffer));
+            match this.inner.as_mut().poll_read_samples(cx, &mut read_buf) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => return Poll::Ready(Some(Err(error))),
+                Poll::Ready(Ok(())) => {
+                    let n = read_buf.filled().len();
+
+                    if n == 0 {
+                        // end of stream
+                        return Poll::Ready(None);
+                    }
+                    else {
+                        assert!(n == 1);
+                        let sample = unsafe {
+                            // SAFETY: The buffer had one element written to it,
+                            // so this must be initialized.
+                            MaybeUninit::assume_init_read(&buffer[0])
+                        };
+
+                        if let Some(output) = this.scanner.scan(sample) {
+                            return Poll::Ready(Some(Ok(output)));
+                        }
+                    }
+                }
+            }
+        }
     }
 }

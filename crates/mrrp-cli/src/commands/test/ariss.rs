@@ -54,6 +54,7 @@ use mrrp_util::{
     sat::DopplerCorrection,
     signal::{
         AsyncReadSamplesExt,
+        FuncScanner,
         Scanner,
         ScannerExt,
     },
@@ -76,7 +77,6 @@ use crate::{
         SourceInfo,
         SourceInfoOptions,
         si,
-        stream::Progress,
     },
 };
 
@@ -285,9 +285,9 @@ async fn demod(
         )
         .unwrap(),
     );
-    let source = Progress::new(source, |num_samples: usize| {
+    let source = source.progress(FuncScanner::new(|num_samples: usize| {
         progress_bar.inc(num_samples as u64);
-    });
+    }));
 
     // doppler correction
     let mut doppler_correction = DopplerCorrection::from_satellite(

@@ -22,28 +22,13 @@
 use std::{
     fmt::Debug,
     ops::Deref,
-    pin::Pin,
-    task::{
-        Context,
-        Poll,
-    },
+    task::Poll,
 };
 
-use futures_util::Stream;
-use mrrp_core::signal::{
-    AsyncReadSamples,
-    GetSampleRate,
-    ReadBuf,
+use crate::decode::{
+    LENGTH_LONG,
+    LENGTH_SHORT,
 };
-use mrrp_util::signal::{
-    AsyncReadSamplesExt,
-    MapInPlacePod,
-};
-use num_complex::Complex;
-use pin_project_lite::pin_project;
-
-/// Preamble: 8 µs / 16 samples
-const PREAMBLE_SAMPLES: usize = 16;
 
 /// Sample rate: 2 samples/µs
 pub const SAMPLE_RATE: u32 = 2_000_000;
@@ -54,6 +39,34 @@ pub const DOWNLINK_FREQUENCY: u32 = 1_090_000_000;
 /// Mode S uplink frequency: 1030 MHz
 pub const UPLINK_FREQUENCY: u32 = 1_030_000_000;
 
+/// Preamble length in samples. 8 µs / 16 samples
+const PREAMBLE_SAMPLES: usize = 16;
+
+/// Expected preamble edges. None if there's no edge for that sample.
+const PREAMBLE_EDGES: [Option<Edge>; PREAMBLE_SAMPLES] = [
+    None,
+    Some(Edge::Falling),
+    Some(Edge::Rising),
+    Some(Edge::Falling),
+    None,
+    None,
+    None,
+    Some(Edge::Rising),
+    Some(Edge::Falling),
+    Some(Edge::Rising),
+    Some(Edge::Falling),
+    None,
+    None,
+    None,
+    None,
+    None,
+];
+
+const DATA_SAMPLES_SHORT: usize = LENGTH_SHORT * 8 * 2;
+const DATA_SAMPLES_LONG: usize = LENGTH_LONG * 8 * 2;
+
+const FRAME_MAX_SAMPLES: usize = PREAMBLE_SAMPLES + DATA_SAMPLES_LONG;
+
 /// A raw data frame.
 ///
 /// This only contains the demodulated bytes. Depending on the type of frame
@@ -62,7 +75,7 @@ pub const UPLINK_FREQUENCY: u32 = 1_030_000_000;
 /// Since they have a fixed and rather short
 /// length, this can easily be stored on the stack, and no `Vec` is needed for
 /// the variable-length byte array.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy)]
 pub enum RawFrame {
     ModeAc { data: [u8; 2] },
     ModeSShort { data: [u8; 7] },
@@ -120,340 +133,226 @@ impl Deref for RawFrame {
     }
 }
 
-enum DemodFail {
-    NotEnoughSamples,
-    Invalid,
+impl Debug for RawFrame {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (name, bytes) = match self {
+            RawFrame::ModeAc { data } => ("ModeAc", &data[..]),
+            RawFrame::ModeSShort { data } => ("ModeSShort", &data[..]),
+            RawFrame::ModeSLong { data } => ("ModeSLong", &data[..]),
+        };
+        write!(f, "{name}({})", const_hex::display(bytes))
+    }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Demodulator {
-    quality: Quality,
-    num_errors: usize,
-    max_errors: usize,
+    previous_sample: f32,
+
+    // todo: use limited stack-allocated deque
+    states: Vec<State>,
 }
 
 impl Default for Demodulator {
     fn default() -> Self {
-        Self::new(Default::default(), 5)
+        Self {
+            // just use 0.0, instead of None. If we used None we would need to check in each push.
+            // Using 0.0 we'll potentially create a single edge where there isn't one, which is
+            // acceptable.
+            previous_sample: 0.0,
+            states: Vec::with_capacity(FRAME_MAX_SAMPLES),
+        }
     }
 }
 
 impl Demodulator {
-    pub fn new(quality: Quality, max_errors: usize) -> Self {
+    pub fn push(&mut self, sample: f32, output: &mut Vec<RawFrame>) {
+        // there will be at most one demodulator state per sample - usually much
+        // fewer because most will fail early
+        assert!(self.states.len() < FRAME_MAX_SAMPLES);
+
+        let edge = Edge::from_samples([self.previous_sample, sample]);
+        self.previous_sample = sample;
+
+        // create new state for current sample
+        self.states.push(State::default());
+
+        // update existing demodulator states with current sample
+        self.states.retain_mut(|state| {
+            match state.push(edge) {
+                Poll::Pending => {
+                    // state not done, keep it
+                    true
+                }
+                Poll::Ready(Ok(frame)) => {
+                    // state is done and returned a valid frame
+
+                    // note: only one state can finish at a time.
+                    //
+                    // if we only had frames with the same length, this would
+                    // trivially follow from the fact that we start one state
+                    // per sample - so they can only successfully finish after a
+                    // fixed period and thus one per sample.
+                    //
+                    // this still holds with the 2 lengths of frames, since we
+                    // can't have a long frame and a short frame overlapping
+                    // such that they end at the same sample. this is because
+                    // the short frame's preamble would fall into the long
+                    // frames data. preambles contain sample pairs (i.e.
+                    // silence) that cannot occur in the data.
+                    //
+                    // important! take care to handle this correctly if we allow
+                    // for small errors. then we can very much have multiple
+                    // states finish successfully at the same sample.
+                    //
+                    // this panicked on the first try :sweaty smile:. the
+                    // preamble matching that we wrote is a lot more permissive
+                    // and this can happen now. we'll have to figure out a
+                    // better way to do this `Emitter` thing.
+                    //
+                    //assert!(output.is_none(), "Only one demodulator state can
+                    // finish successfully at the same sample. If this is not
+                    // the case anymore read the comment here.");
+
+                    output.push(frame);
+
+                    // this is done, so don't keep it
+                    false
+                }
+                Poll::Ready(Err(())) => {
+                    // this state became invalid, so don't keep it.
+                    false
+                }
+            }
+        });
+    }
+}
+
+/* todo: fix emitter #27
+impl Scanner<Complex<f32>> for Demodulator {
+    type Output = Option<RawFrame>;
+
+    #[inline]
+    fn scan(&mut self, sample: Complex<f32>) -> Self::Output {
+        self.push(sample.norm())
+    }
+}
+
+impl Scanner<f32> for Demodulator {
+    type Output = Option<RawFrame>;
+
+    #[inline]
+    fn scan(&mut self, sample: f32) -> Self::Output {
+        self.push(sample)
+    }
+} */
+
+#[derive(Clone, Debug)]
+struct State {
+    sample_num: usize,
+    frame_buffer: [u8; LENGTH_LONG],
+    num_samples: usize,
+}
+
+impl Default for State {
+    fn default() -> Self {
         Self {
-            quality,
-            num_errors: 0,
-            max_errors,
+            sample_num: 1,
+            frame_buffer: [0; _],
+            num_samples: DATA_SAMPLES_SHORT + PREAMBLE_SAMPLES,
         }
     }
+}
 
-    pub fn next(&mut self, cursor: &mut Cursor<f32>) -> Option<RawFrame> {
-        while find_preamble(cursor) {
-            //tracing::debug!(?cursor.position, "found preamble");
+impl State {
+    fn push(&mut self, edge: Edge) -> Poll<Result<RawFrame, ()>> {
+        assert!(self.sample_num < self.num_samples);
 
-            let mut frame_cursor = *cursor;
+        if self.sample_num < PREAMBLE_SAMPLES {
+            // we're still in the preamble
 
-            match self.read_frame(&mut frame_cursor) {
-                Ok(frame) => {
-                    // found a frame!
-                    // set main cursor to the position of the frame cursor
-                    cursor.position = frame_cursor.position;
-                    return Some(frame);
+            if let Some(expected_edge) = PREAMBLE_EDGES[self.sample_num] {
+                if edge == expected_edge {
+                    // still matching
                 }
-                Err(DemodFail::NotEnoughSamples) => {
-                    // cursor position should remain at start of preamble
-                    return None;
-                }
-                Err(DemodFail::Invalid) => {
-                    // find next preamble starting from end of previous preamble
-                    // so the main cursor stays unchanged and we do nothing here
+                else {
+                    // current edge doesn't match preamble, abort
+                    return Poll::Ready(Err(()));
                 }
             }
-        }
-
-        None
-    }
-
-    fn read_frame(&mut self, cursor: &mut Cursor<f32>) -> Result<RawFrame, DemodFail> {
-        self.num_errors = 0;
-
-        let first_byte = self.read_byte(cursor)?;
-
-        if first_byte & 0x80 == 0 {
-            Ok(RawFrame::ModeSShort {
-                data: self.read_frame_rest(first_byte, cursor)?,
-            })
         }
         else {
-            Ok(RawFrame::ModeSLong {
-                data: self.read_frame_rest(first_byte, cursor)?,
-            })
-        }
-    }
+            // data part
 
-    fn read_frame_rest<const N: usize>(
-        &mut self,
-        first_byte: u8,
-        cursor: &mut Cursor<f32>,
-    ) -> Result<[u8; N], DemodFail> {
-        let mut data = [0u8; N];
-        data[0] = first_byte;
-        for i in 1..N {
-            data[i] = self.read_byte(cursor)?;
-        }
-        Ok(data)
-    }
+            // only with the second sample per bit we can actually figure out
+            // the bit
+            if self.sample_num % 2 == 1 {
+                if edge == Edge::Falling {
+                    // falling edge is a 1, and only those we need to set
 
-    fn read_bit(&self, cursor: &mut Cursor<f32>) -> Result<bool, bool> {
-        // these should exist, since we read a preamble first
-        let a = cursor.samples[cursor.position - 2];
-        let b = cursor.samples[cursor.position - 1];
+                    let bit = (self.sample_num - PREAMBLE_SAMPLES) / 2;
 
-        let c = cursor.samples[cursor.position];
-        let d = cursor.samples[cursor.position + 1];
-
-        cursor.advance(2);
-
-        let bit_p = a > b;
-        let bit = c > d;
-
-        // todo: this could be implemented with a few bitmask really
-
-        match self.quality {
-            Quality::NoChecks => Ok(bit),
-            Quality::HalfBit => {
-                if bit && bit_p && b > c {
-                    Err(bit)
-                }
-                else if !bit && !bit_p && b < c {
-                    Err(bit)
-                }
-                else {
-                    Ok(bit)
-                }
-            }
-            Quality::OneBit => {
-                if bit && bit_p && c > b {
-                    Ok(true)
-                }
-                else if bit && !bit_p && d < b {
-                    Ok(true)
-                }
-                else if !bit && bit_p && d > b {
-                    Ok(false)
-                }
-                else if !bit && !bit_p && c < b {
-                    Ok(false)
-                }
-                else {
-                    Err(bit)
-                }
-            }
-            Quality::TwoBits => {
-                if bit && bit_p && c > b && d < a {
-                    Ok(true)
-                }
-                else if bit && !bit_p && c > a && d < b {
-                    Ok(true)
-                }
-                else if !bit && bit_p && c < a && d > b {
-                    Ok(false)
-                }
-                else if !bit && !bit_p && c < b && d > a {
-                    Ok(false)
-                }
-                else {
-                    Err(bit)
-                }
-            }
-        }
-    }
-
-    fn read_byte(&mut self, cursor: &mut Cursor<f32>) -> Result<u8, DemodFail> {
-        let mut byte = 0;
-
-        if cursor.remaining().len() < 2 * 8 {
-            Err(DemodFail::NotEnoughSamples)
-        }
-        else {
-            for _ in 0..8 {
-                byte <<= 1;
-                let bit = self.read_bit(cursor).or_else(|bit| {
-                    self.num_errors += 1;
-                    if self.num_errors <= self.max_errors {
-                        Ok(bit)
+                    if bit == 0 {
+                        // this decides if this is a short ot long frame. 1 for
+                        // long frames.
+                        self.num_samples = DATA_SAMPLES_LONG + PREAMBLE_SAMPLES;
                     }
-                    else {
-                        // rtl_adsb.c does change the previous bits, but I don't
-                        // get how that works.
-                        // Wouldn't that break the next bit reads?
-                        //
-                        // <https://github.com/rtlsdrblog/rtl-sdr-blog/blob/240bd0e1e6d9f64361b6949047468958cd08aa31/src/rtl_adsb.c#L300>
-                        Err(DemodFail::Invalid)
-                    }
-                })?;
 
-                if bit {
-                    byte |= 1;
-                }
-            }
-
-            Ok(byte)
-        }
-    }
-}
-
-fn is_preamble(samples: &[f32]) -> bool {
-    let mut low = f32::MIN;
-    let mut high = f32::MAX;
-
-    for i in 0..PREAMBLE_SAMPLES {
-        match i {
-            0 | 2 | 7 | 9 => {
-                high = samples[i];
-            }
-            _ => {
-                low = samples[i];
-            }
-        }
-
-        if high <= low {
-            return false;
-        }
-    }
-
-    true
-}
-
-fn find_preamble(cursor: &mut Cursor<f32>) -> bool {
-    loop {
-        let remaining = cursor.remaining();
-        if remaining.len() >= PREAMBLE_SAMPLES {
-            if is_preamble(remaining) {
-                cursor.advance(PREAMBLE_SAMPLES);
-                break true;
-            }
-            cursor.advance(1);
-        }
-        else {
-            break false;
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Quality {
-    NoChecks,
-    HalfBit,
-    #[default]
-    OneBit,
-    TwoBits,
-}
-
-pin_project! {
-    #[derive(Debug)]
-    pub struct DemodulateStream<T> {
-        #[pin]
-        stream: MapInPlacePod<T, fn(Complex<f32>) -> f32>,
-        demodulator: Demodulator,
-        buffer: Vec<f32>,
-        read_pos: usize,
-        write_pos: usize,
-        num_samples: usize,
-    }
-}
-
-impl<T> DemodulateStream<T>
-where
-    T: AsyncReadSamples<Sample = Complex<f32>> + GetSampleRate,
-{
-    pub fn new(stream: T, demodulator: Demodulator, buffer_size: usize) -> Self {
-        if stream.sample_rate() != 2_000_000.0 {
-            todo!("TODO: Accept sample rates other than 2 MHz");
-        }
-
-        Self {
-            stream: stream.map_in_place_pod(|sample| sample.re * sample.re + sample.im * sample.im),
-            demodulator,
-            buffer: vec![0.0; buffer_size],
-            read_pos: 0,
-            write_pos: 0,
-            num_samples: 0,
-        }
-    }
-}
-
-impl<T> Stream for DemodulateStream<T>
-where
-    T: AsyncReadSamples<Sample = Complex<f32>>,
-{
-    type Item = Result<RawFrame, T::Error>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            let this = self.as_mut().project();
-
-            /*tracing::debug!(
-                read_pos = *this.read_pos,
-                write_pos = *this.write_pos,
-                num_samples = *this.num_samples
-            );*/
-
-            if *this.read_pos < *this.num_samples {
-                let mut cursor = Cursor {
-                    samples: &this.buffer[..*this.num_samples],
-                    position: *this.read_pos,
-                };
-
-                if let Some(frame) = this.demodulator.next(&mut cursor) {
-                    *this.read_pos = cursor.position;
-                    return Poll::Ready(Some(Ok(frame)));
+                    let byte = bit / 8;
+                    let bit = bit % 8;
+                    // note: first bit received corresponds to MSB
+                    self.frame_buffer[byte] |= 0x80 >> bit;
                 }
                 else {
-                    let position = cursor.position;
-                    this.buffer.copy_within(position..*this.num_samples, 0);
-                    *this.write_pos = *this.num_samples - position;
-                    *this.read_pos = 0;
-                    *this.num_samples = 0;
+                    // rising edge is a 0. we don't need to write this.
+                    //
+                    // if the first bit is 0, this indicates that this is a
+                    // short frame, but we initialize it to that anyway.
                 }
+            }
+        }
+
+        // update state
+        self.sample_num += 1;
+
+        if self.sample_num == self.num_samples {
+            // we have the full frame. return it.
+
+            let frame = if self.num_samples == DATA_SAMPLES_SHORT + PREAMBLE_SAMPLES {
+                let mut data = [0; _];
+                data.copy_from_slice(&self.frame_buffer[0..LENGTH_SHORT]);
+                RawFrame::ModeSShort { data }
             }
             else {
-                let mut read_buf = ReadBuf::new(&mut this.buffer[*this.write_pos..]);
-                match this.stream.poll_read_samples(cx, &mut read_buf) {
-                    Poll::Pending => return Poll::Pending,
-                    Poll::Ready(Err(error)) => return Poll::Ready(Some(Err(error))),
-                    Poll::Ready(Ok(())) => {
-                        if read_buf.filled().is_empty() {
-                            return Poll::Ready(None);
-                        }
-
-                        *this.num_samples = *this.write_pos + read_buf.filled().len();
-                        *this.read_pos = 0;
-                        *this.write_pos = 0;
-                    }
+                RawFrame::ModeSLong {
+                    data: self.frame_buffer,
                 }
-            }
+            };
+
+            Poll::Ready(Ok(frame))
+        }
+        else {
+            // not done yet, continue
+            Poll::Pending
         }
     }
 }
 
-// todo: use SampleBuf instead, buf we need examine past samples sometimes.
-
-#[derive(Clone, Copy, Debug)]
-pub struct Cursor<'a, S> {
-    pub samples: &'a [S],
-    pub position: usize,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Edge {
+    Rising,
+    Falling,
 }
 
-impl<'a, S> Cursor<'a, S> {
-    #[inline]
-    pub fn advance(&mut self, amount: usize) {
-        self.position += amount;
-    }
-
-    #[inline]
-    pub fn remaining(&self) -> &[S] {
-        &self.samples[self.position..]
+impl Edge {
+    fn from_samples(samples: [f32; 2]) -> Self {
+        // note: not 100% symmetrical as we need a tie-breaker or deal with the
+        // rare case that both are equal
+        if samples[0] < samples[1] {
+            Self::Rising
+        }
+        else {
+            Self::Falling
+        }
     }
 }
 
@@ -461,10 +360,8 @@ impl<'a, S> Cursor<'a, S> {
 mod tests {
     use super::{
         Demodulator,
-        Quality,
         RawFrame,
     };
-    use crate::demod::Cursor;
 
     fn modulate(data: &[u8], mut sample: impl FnMut(bool) -> f32) -> Vec<f32> {
         let mut samples = vec![];
@@ -504,24 +401,33 @@ mod tests {
         if signal { 1.0 } else { 0.0 }
     }
 
+    fn demod(mut demodulator: Demodulator, samples: &[f32], check: impl Fn(&RawFrame) -> bool) {
+        let mut output = vec![];
+
+        for sample in samples {
+            demodulator.push(*sample, &mut output);
+        }
+
+        if !output.into_iter().any(|frame| {
+            dbg!(&frame);
+            check(&frame)
+        }) {
+            panic!("None of the matched frames is the correct one.")
+        };
+    }
+
     #[test]
     fn it_demodulates_a_frame() {
         let input = b"\x8d\x40\x74\xb5\x23\x15\xa6\x76\xdd\x13\xa0\x66\x29\x67";
 
         let samples = modulate(input, signal);
 
-        let mut demodulator = Demodulator::new(Quality::NoChecks, 0);
-        let mut cursor = Cursor {
-            samples: &samples[..],
-            position: 0,
-        };
-
-        let frame = demodulator.next(&mut cursor).expect("no frame demodulated");
-        match frame {
-            RawFrame::ModeSLong { data } => {
-                assert_eq!(&data, input);
+        let demodulator = Demodulator::default();
+        demod(demodulator, &samples, |frame| {
+            match frame {
+                RawFrame::ModeSLong { data } => data == input,
+                _ => false,
             }
-            _ => panic!("unexpected frame: {:?}", frame),
-        }
+        });
     }
 }

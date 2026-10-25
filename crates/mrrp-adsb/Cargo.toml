@@ -6,15 +6,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-bytemuck.workspace = true
 bytes.workspace = true
 chrono.workspace = true
 crc = "3.4.0"
 futures-util.workspace = true
-const-hex = { workspace = true, optional = true }
-mrrp-core.workspace = true
-mrrp-util.workspace = true
-num-complex = { workspace = true, features = ["bytemuck"] }
+const-hex.workspace = true
 pin-project-lite.workspace = true
 serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
@@ -25,8 +21,9 @@ uuid = "1.23.3"
 
 [dev-dependencies]
 approx = "0.5.1"
+tokio = { workspace = true, features = ["macros", "rt"] }
 
 [features]
 default = ["serde", "rtl_adsb_command"]
 serde = ["dep:serde", "dep:serde_with"]
-rtl_adsb_command = ["tokio/process", "dep:const-hex"]
+rtl_adsb_command = ["tokio/process", "tokio/io-util"]

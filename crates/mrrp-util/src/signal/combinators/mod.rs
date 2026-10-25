@@ -1,10 +1,12 @@
 mod buffered;
+mod cancel;
 mod chained;
 mod converted;
 mod inspect;
 mod limited;
 mod map;
 mod map_err;
+mod progress;
 mod repeated;
 mod scan;
 mod throttled;
@@ -13,6 +15,7 @@ mod with_span;
 mod zip_with;
 
 pub use buffered::Buffered;
+pub use cancel::Cancelable;
 pub use chained::{
     Chained,
     ChainedError,
@@ -32,10 +35,15 @@ pub use map::{
     MapInPlacePod,
 };
 pub use map_err::MapErr;
+pub use progress::{
+    Progress,
+    ProgressInfo,
+};
 pub use repeated::Repeated;
 pub use scan::{
     Chain,
     ConvertScanner,
+    Emitter,
     FuncScanner,
     ScanInPlaceWith,
     ScanWith,
