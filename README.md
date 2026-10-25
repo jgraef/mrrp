@@ -20,16 +20,17 @@ This project consists of a number of different crates:
   - `sat`: List satellite passes, correct doppler shift in files, capture IQ baseband for satellite passes.
   - `qth`: Encode and decode QTH locators.
 - `mrrp-core`: Defines the main traits and types for DSP.
-- `mrrp-file`: File formats (WIP)
+- `mrrp-file`: Reading and writing files (e.g. [WAV](https://en.wikipedia.org/wiki/WAV))
 - `mrrp-filter`: Signal filtering and filter synthesis.
 - `mrrp-geo`: Geographic primitives and QTH locators.
-- `mrrp-hamlib`: WIP hamlib rigctl client and server.
+- `mrrp-hamlib`: WIP - hamlib rigctl client and server.
+- `mrrp-miq`: WIP - File and stream format for IQ data. Supports multiple streams and metadata. This will be the main format used by mrrp to pass IQ data between tools - either as files written to disk, or via a socket.
 - `mrrp-modem`: General-purpose modulation & demodulations (e.g. FM).
 - `mrrp-rtl-sdr`: From-scratch RTL-SDR driver in async Rust.
 - `mrrp-rtl-tcp`: Client and server implementation of the `rtl_tcp` protocol.
 - `mrrp-sat`: Satellite tracking
 - `mrrp-sdr`: SDR GUI application
-- `mrrp-sstv`: WIP SSTV encoder and decoder
+- `mrrp-sstv`: WIP - SSTV encoder and decoder
 - `mrrp-tui`: Deprecated TUI SDR app that initially started this project. ([Screenshot](https://media.githubusercontent.com/media/jgraef/mrrp/refs/heads/main/docs/mrrp-cli.png))
 - `mrrp-util`: Useful utilities to use with `mrrp-core`.
 - `mrrp-widgets`: egui widgets that are needed to display radio-related information in a GUI. Contains hardware-accelerated spectrum and waterfall renderers.
