@@ -11,7 +11,7 @@ use std::{
 
 use serde::Serialize;
 
-use crate::miq::{
+use crate::{
     codec::{
         Encoder,
         Flush,

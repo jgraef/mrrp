@@ -15,7 +15,7 @@ use serde::{
     Serialize,
 };
 
-use crate::miq::container::{
+use crate::container::{
     chunk::{
         Tag,
         Tagged,

@@ -66,7 +66,7 @@
 //! [1]: https://en.wikipedia.org/wiki/Resource_Interchange_File_Format
 //! [2]: https://cbor.io/
 
-use crate::miq::container::header::Version;
+use crate::container::header::Version;
 
 pub mod chunk;
 pub mod header;
@@ -83,7 +83,7 @@ pub const VERSION: Version = Version {
 mod tests {
     use std::io::Read;
 
-    use crate::miq::container::{
+    use crate::container::{
         chunk::{
             Flags,
             Tag,

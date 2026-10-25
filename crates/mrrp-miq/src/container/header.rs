@@ -3,7 +3,7 @@ use serde::{
     Serialize,
 };
 
-use crate::miq::container::chunk::{
+use crate::container::chunk::{
     Tag,
     Tagged,
 };

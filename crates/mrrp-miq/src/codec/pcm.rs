@@ -8,7 +8,7 @@ use mrrp_core::sample::encoding::{
     Endianess,
 };
 
-use crate::miq::codec::{
+use crate::codec::{
     Decoder,
     Encoder,
     Flush,
@@ -32,7 +32,8 @@ impl<T, E> Encoder<T> for Pcm<E>
 where
     T: Encode<E>,
     E: Endianess,
-    // this is required because we need to put the error into `miq::stream::writer::Error`
+    // this is required because we need to put the error into
+    // `miq::stream::writer::Error`
     T::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = T::Error;
@@ -56,7 +57,8 @@ impl<T, E> Decoder<T> for Pcm<E>
 where
     T: Decode<E>,
     E: Endianess,
-    // this is required because we need to put the error into `miq::stream::reader::Error`
+    // this is required because we need to put the error into
+    // `miq::stream::reader::Error`
     T::Error: std::error::Error + Send + Sync + 'static,
 {
     type Error = T::Error;

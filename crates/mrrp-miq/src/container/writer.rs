@@ -5,7 +5,7 @@ use std::io::{
 
 use serde::Serialize;
 
-use crate::miq::container::chunk::{
+use crate::container::chunk::{
     ChunkHeader,
     Flags,
     Tag,

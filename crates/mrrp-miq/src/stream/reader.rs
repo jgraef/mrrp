@@ -1,6 +1,6 @@
 use std::io::Read;
 
-use crate::miq::{
+use crate::{
     container::{
         self,
         header::SubFormat,
@@ -37,6 +37,8 @@ impl Error {
 
 #[derive(Debug)]
 pub struct Reader<R> {
+    // todo: we need to implement reading samples from this
+    #[allow(unused)]
     container_reader: container::reader::Reader<R>,
 }
 

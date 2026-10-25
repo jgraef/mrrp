@@ -12,7 +12,7 @@ use std::{
 
 use serde::de::DeserializeOwned;
 
-use crate::miq::container::{
+use crate::container::{
     chunk::{
         ChunkHeader,
         Flags,
