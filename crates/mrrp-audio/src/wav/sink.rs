@@ -11,6 +11,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
 };
 
@@ -24,6 +25,7 @@ use mrrp_util::signal::{
     ForwardError,
 };
 use num_complex::Complex;
+use tokio::task::coop;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -97,9 +99,14 @@ where
 
     fn poll_write_samples(
         mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &[S],
     ) -> Poll<Result<usize, Self::Error>> {
+        // important that we yield to the runtime every now and then, since
+        // this thing is not really async.
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         let writer = self.writer_mut()?;
         for sample in buffer {
             // todo: should we return the error even if we have written some

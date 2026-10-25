@@ -19,5 +19,5 @@ tokio = { workspace = true, features = ["rt", "sync"], optional = true }
 [features]
 default = ["full"]
 full = ["wav", "rodio"]
-wav = ["dep:hound"]
+wav = ["dep:hound", "dep:tokio"]
 rodio = ["dep:rodio", "dep:parking_lot", "dep:tokio"]

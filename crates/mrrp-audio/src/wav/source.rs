@@ -7,6 +7,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
 };
 
@@ -22,6 +23,7 @@ use mrrp_core::{
     },
 };
 use num_complex::Complex;
+use tokio::task::coop;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -108,11 +110,16 @@ where
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
         let this = &mut *self;
         let mut samples = this.inner.samples();
+
+        // important that we yield to the runtime every now and then, since
+        // this thing is not really async.
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
 
         while buffer.has_remaining_mut() {
             let Some(sample) = S::from_samples(&mut samples)?
