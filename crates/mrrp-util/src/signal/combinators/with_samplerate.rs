@@ -6,7 +6,6 @@ use std::{
     },
 };
 
-use futures_util::Stream;
 use mrrp_core::signal::{
     FiniteStream,
     GetSampleRate,
@@ -75,18 +74,5 @@ where
         buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
         self.project().inner.poll_read_samples(cx, buffer)
-    }
-}
-
-// todo: what was this for?
-impl<T> Stream for WithSampleRate<T>
-where
-    T: Stream,
-{
-    type Item = T::Item;
-
-    #[inline]
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.project().inner.poll_next(cx)
     }
 }
