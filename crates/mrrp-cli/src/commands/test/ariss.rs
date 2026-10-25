@@ -76,6 +76,7 @@ use crate::{
     util::{
         SourceInfo,
         SourceInfoOptions,
+        run_til_shutdown,
         si,
     },
 };
@@ -110,6 +111,7 @@ enum Command {
         #[clap(short, long)]
         output: PathBuf,
 
+        /// Input file path
         input: PathBuf,
     },
     DemodAll {
@@ -122,7 +124,22 @@ enum Command {
         #[clap(short, long, default_value = "XSKZ-5603-1870-9019-3066")]
         sat_id: SatelliteId,
 
-        path: PathBuf,
+        /// Audio output directory
+        ///
+        /// By default the audio output files are written to the input
+        /// directory.
+        #[clap(short, long)]
+        audio: Option<PathBuf>,
+
+        /// Info output directory.
+        ///
+        /// When specified JSON files containing metadata are written to this
+        /// directoryr.
+        #[clap(short, long)]
+        info: Option<PathBuf>,
+
+        /// Input directory
+        baseband: PathBuf,
     },
 }
 
@@ -154,7 +171,7 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
             let location = context.get_geolocation()?;
             let satellite = get_satellite(&satellites, &sat_id)?;
 
-            let sstv_detections = demod(
+            let result = demod(
                 &input,
                 &output,
                 satellite,
@@ -164,7 +181,9 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
             )
             .await?;
 
-            if let Some(info) = &info {
+            if let Some(sstv_detections) = result
+                && let Some(info) = &info
+            {
                 let input_filename = to_filename(&input)?;
                 let output_filename = to_filename(&output)?;
                 write_demod_info(
@@ -180,13 +199,33 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
         Command::DemodAll {
             demod_options,
             sat_id,
-            path,
+            audio: audio_dir,
+            info: info_dir,
+            baseband: baseband_dir,
         } => {
+            if !baseband_dir.is_dir() {
+                bail!("Baseband input path is not a directory: {baseband_dir:?}");
+            }
+            let audio_dir = audio_dir.as_ref().map_or_else(
+                || Ok(&baseband_dir),
+                |audio_dir| {
+                    if !audio_dir.is_dir() {
+                        bail!("Audio output path is not a directory: {audio_dir:?}");
+                    }
+                    Ok(audio_dir)
+                },
+            )?;
+            if let Some(info_dir) = &info_dir
+                && !info_dir.is_dir()
+            {
+                bail!("Info output path is not a directory: {info_dir:?}");
+            }
+
             let satellites = context.open_satellite_db().await?;
             let location = context.get_geolocation()?;
             let satellite = get_satellite(&satellites, &sat_id)?;
 
-            for result in std::fs::read_dir(&path)? {
+            for result in std::fs::read_dir(&baseband_dir)? {
                 let dir_entry = result?;
                 let baseband_path = dir_entry.path();
                 let baseband_filename = to_filename(&baseband_path)?;
@@ -198,7 +237,7 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
 
                     let audio_info = source_info.with_frequency(demod_options.fm_frequency);
                     let audio_filename = audio_info.filename("audio", "wav");
-                    let audio_path = path.join(&audio_filename);
+                    let audio_path = audio_dir.join(&audio_filename);
 
                     if let Ok(audio_metadata) = audio_path.metadata() {
                         tracing::debug!(filename = ?audio_filename, "audio file already exists");
@@ -215,7 +254,7 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
                         tracing::debug!(filename = ?audio_filename, "creating audio file");
                     }
 
-                    let sstv_detections = demod(
+                    let result = demod(
                         &baseband_path,
                         &audio_path,
                         satellite,
@@ -225,17 +264,25 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
                     )
                     .await?;
 
-                    let info_filename = audio_info.filename("info", ".json");
-                    let info_path = path.join(&info_filename);
+                    if let Some(sstv_detections) = result {
+                        if let Some(info_dir) = &info_dir {
+                            let info_filename = audio_info.filename("info", ".json");
+                            let info_path = info_dir.join(&info_filename);
 
-                    write_demod_info(
-                        &info_path,
-                        baseband_filename,
-                        &audio_filename,
-                        &source_info,
-                        &demod_options,
-                        sstv_detections,
-                    )?;
+                            write_demod_info(
+                                &info_path,
+                                baseband_filename,
+                                &audio_filename,
+                                &source_info,
+                                &demod_options,
+                                sstv_detections,
+                            )?;
+                        }
+                    }
+                    else {
+                        // cancelled
+                        break;
+                    }
                 }
             }
         }
@@ -251,7 +298,7 @@ async fn demod(
     location: Geodetic,
     source_info: &SourceInfo,
     demod_options: &DemodOptions,
-) -> Result<Vec<SstvDetection>, Error> {
+) -> Result<Option<Vec<SstvDetection>>, Error> {
     let input = input.as_ref();
     let output = output.as_ref();
 
@@ -331,9 +378,23 @@ async fn demod(
     // write FM demodulated audio to file
     let signal = signal.convert::<i16>();
     tracing::info!(?output, sample_rate = %si::format(sample_rate, "Hz"), "Writing demodulated audio to file");
-    write_stream_to_wav(&output, signal).await?;
 
-    Ok(vis_collector.finish())
+    // we use `run_until_shutdown` to gracefully abort on Ctrl-C.
+    //
+    // on abort we could just finish writing the file. that would mean we need
+    // to make the signal we pass to `write_stream_to_wav` cancelable. a
+    // `write_stream_to_wav_with_graceful_shutdown` would be nice to have.
+    if run_til_shutdown(async move { write_stream_to_wav(&output, signal).await })
+        .await
+        .transpose()?
+        .is_none()
+    {
+        tracing::info!(?output, "Processing was cancelled. Deleting file.");
+        std::fs::remove_file(&output)?;
+        return Ok(None);
+    }
+
+    Ok(Some(vis_collector.finish()))
 }
 
 #[derive(Clone, Copy, Debug)]
