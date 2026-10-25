@@ -3,13 +3,16 @@ use std::path::Path;
 use anyhow::{
     Error,
     anyhow,
+    bail,
 };
 use chrono::{
     DateTime,
     Local,
+    MappedLocalTime,
     NaiveDate,
     NaiveDateTime,
     NaiveTime,
+    Utc,
 };
 
 pub fn parse_path(path: impl AsRef<Path>) -> Result<FileInfo, Error> {
@@ -44,11 +47,26 @@ pub fn parse_file_name(file_name: &str) -> Result<FileInfo, Error> {
 
     let time = NaiveTime::parse_from_str(parts.next().ok_or_else(|| invalid!())?, "%H-%M-%S")?;
     let date = NaiveDate::parse_from_str(parts.next().ok_or_else(|| invalid!())?, "%d-%m-%Y")?;
-    let timestamp = NaiveDateTime::new(date, time)
-        .and_local_timezone(Local)
-        // fixme: this will panic when we parse the file with a timestamp falling inside the fold
-        // 2026-10-25 0:00 to 2:00 UTC.
-        .unwrap();
+
+    // handle folds and gaps in time
+    //
+    // see: [`MappedLocalTime.html`]
+    let timestamp = match NaiveDateTime::new(date, time).and_local_timezone(Local) {
+        MappedLocalTime::Single(timestamp) => timestamp,
+        MappedLocalTime::Ambiguous(earliest, latest) => {
+            let earliest_utc = DateTime::<Utc>::from(earliest);
+            let latest_utc = DateTime::<Utc>::from(latest);
+            tracing::warn!(
+                "Parsed local time {date} {time}, which is ambigious because of a time fold. The time could mean {earliest_utc:?} or {latest_utc:?} in UTC. Defaulting to {earliest_utc:?}. You need to fix the resulting filename to account for this."
+            );
+            earliest
+        }
+        MappedLocalTime::None => {
+            bail!(
+                "The time stamp {date} {time} does not exist in the local timezone. Were the input files generated with a different time zone set?"
+            );
+        }
+    };
 
     Ok(FileInfo {
         recording_type,
