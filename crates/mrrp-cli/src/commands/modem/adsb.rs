@@ -207,7 +207,8 @@ impl<R, F, T> MultiEmitter<R, F, T> {
 impl<R, F, T> Stream for MultiEmitter<R, F, T>
 where
     R: AsyncReadSamples,
-    // todo: if we make this a proper trait, we make it take an impl Extend as output
+    // todo: if we make this a proper trait, we make it take an impl Extend as
+    // output
     F: FnMut(R::Sample, &mut Vec<T>),
 {
     type Item = Result<T, R::Error>;

@@ -287,8 +287,8 @@ enum StateInner {
         task: BackgroundTask<Result<mrrp_rtl_sdr::Device, Error>>,
     },
     Connected {
-        // todo: we need to store this in app state, or leak it. otherwise the source will be
-        // stopped when the dock is closed.
+        // todo: we need to store this in app state, or leak it. otherwise the
+        // source will be stopped when the dock is closed.
         handle: SourceHandle,
     },
 }

@@ -155,9 +155,9 @@ pub struct Demodulator {
 impl Default for Demodulator {
     fn default() -> Self {
         Self {
-            // just use 0.0, instead of None. If we used None we would need to check in each push.
-            // Using 0.0 we'll potentially create a single edge where there isn't one, which is
-            // acceptable.
+            // just use 0.0, instead of None. If we used None we would need to
+            // check in each push. Using 0.0 we'll potentially create a single
+            // edge where there isn't one, which is acceptable.
             previous_sample: 0.0,
             states: Vec::with_capacity(FRAME_MAX_SAMPLES),
         }

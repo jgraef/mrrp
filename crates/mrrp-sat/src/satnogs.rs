@@ -93,9 +93,10 @@ pub struct Satellite {
     pub norad_cat_id: Option<NoradCatId>,
     pub norad_follow_id: Option<NoradFollowId>,
     pub name: String,
-    // todo: the satnogs API returns this a comma-separated list in a string. once we decouple our
-    // model from the satnogs model, we can deserialize this into a vec. right now we also
-    // serialize this and use this format for our db, which would conflict then.
+    // todo: the satnogs API returns this a comma-separated list in a string.
+    // once we decouple our model from the satnogs model, we can deserialize
+    // this into a vec. right now we also serialize this and use this format for
+    // our db, which would conflict then.
     #[serde_as(as = "NoneAsEmptyString")]
     pub names: Option<String>,
     #[serde_as(as = "NoneAsEmptyString")]

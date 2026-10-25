@@ -285,7 +285,8 @@ struct BufferedSource {
     source: Pin<Box<dyn Source + Send>>,
 
     // doesn't work. these futures contain a borrow on the source
-    //control_future: Option<Pin<Box<dyn Future<Output = Result<(), Error>> + Send + 'static>>>,
+    //control_future: Option<Pin<Box<dyn Future<Output = Result<(), Error>> +
+    // Send + 'static>>>,
     buffer: SamplesMut<Iq>,
 
     // what was this supposed to be for?

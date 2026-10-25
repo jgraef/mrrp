@@ -165,8 +165,9 @@ impl<'a> egui::Widget for FrequencyDial<'a> {
 
                 let mut format = TextFormat {
                     font_id,
-                    // we think this only affects spacing between letters in one section, so
-                    // layout_section.leading_space is actually doing this.
+                    // we think this only affects spacing between letters in one
+                    // section, so layout_section.leading_space is actually
+                    // doing this.
                     extra_letter_spacing: style.digit_spacing,
                     line_height: None,
                     color: style.text_color,

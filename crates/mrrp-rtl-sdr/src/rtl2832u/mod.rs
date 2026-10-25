@@ -952,8 +952,8 @@ mod tests {
     fn test_rsamp_ratio_from_hz() {
         assert_eq!(
             rsamp_ratio_from_hz(64.0 * 1000000.0 / 7.0, DEFAULT_CRYSTAL_FREQUENCY as f32),
-            // tried debugging the discrepancy and we're pretty sure it's because of
-            // rounding of f_symbol
+            // tried debugging the discrepancy and we're pretty sure it's
+            // because of rounding of f_symbol
             0x00c9_9999 + 1
         );
         assert_eq!(

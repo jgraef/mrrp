@@ -598,7 +598,8 @@ impl ThreatIdentityData {
 pub struct TargetStateAndStatusInformation {
     pub sil_supplement: SilSupplement,
     pub selected_altitude_type: SelectedAltitudeType,
-    //pub navigation_accuracy_category_position: NavigationAccuracyCategoryPosition,
+    //pub navigation_accuracy_category_position:
+    // NavigationAccuracyCategoryPosition,
     /// Feel free to open a pull request :3
     pub todo: (),
 }

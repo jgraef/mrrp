@@ -65,8 +65,10 @@ where
         Self {
             inner: self.inner.clone(),
             sample_duration: self.sample_duration,
-            // fixme: this unfortunately doesn't work, as Fuse doesn't let us access the inner type
-            //delay: Box::pin(tokio::time::sleep_until(self.delay.deadline()).fuse()),
+            // fixme: this unfortunately doesn't work, as Fuse doesn't let us
+            // access the inner type
+            // delay: Box::pin(tokio::time::sleep_until(self.delay.deadline()).
+            // fuse()),
             delay: Box::pin(Fuse::terminated()),
         }
     }

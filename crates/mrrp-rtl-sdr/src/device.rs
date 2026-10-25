@@ -575,7 +575,8 @@ impl mrrp_core::signal::AsyncReadSamples for Reader {
                 use tokio::io::AsyncBufReadExt;
 
                 let samples_iq = bytemuck::cast_slice::<_, num_complex::Complex<u8>>(
-                    // ignore the last byte if the buffer has an odd number of bytes
+                    // ignore the last byte if the buffer has an odd number of
+                    // bytes
                     &samples[..samples.len() & !1],
                 );
 

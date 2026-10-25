@@ -106,9 +106,9 @@ impl<'a> SpectrumWaterfallDockView<'a> {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SpectrumWaterfallDockState {
-    // these store the state of the spectrum view or waterfall view - whatever is visible. note
-    // that at least one must be visible (just because it wouldn't make sense to have an empty
-    // dock)
+    // these store the state of the spectrum view or waterfall view - whatever
+    // is visible. note that at least one must be visible (just because it
+    // wouldn't make sense to have an empty dock)
     spectrum: Option<PanelState<SpectrumState>>,
     waterfall: Option<PanelState<WaterfallState>>,
 
@@ -204,8 +204,8 @@ impl SpectrumWaterfallDockState {
 struct PanelState<S> {
     // handle to registration in SDR runtime for this sink.
     //
-    // when this is dropped (i.e. when the spectrum or waterfall is removed) it will automatically
-    // unregister.
+    // when this is dropped (i.e. when the spectrum or waterfall is removed) it
+    // will automatically unregister.
     #[serde(skip, default)]
     sdr_link_handle: Option<SpectrumSinkHandle>,
 

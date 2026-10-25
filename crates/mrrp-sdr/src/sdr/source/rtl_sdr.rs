@@ -37,10 +37,10 @@ impl IntoSource for mrrp_rtl_sdr::Device {
 
 pub struct RtlSdrSource {
     device: mrrp_rtl_sdr::Device,
-    // todo: `Converted` buffers internally, but it could read directly from the Reader buffer
-    // instread, if we had AsyncBufReadSamples. Alternatively we could implement
-    // AsyncReadSamples<Sample = Complex<f32>> direclty on the Reader, since it's such a common use
-    // case.
+    // todo: `Converted` buffers internally, but it could read directly from the
+    // Reader buffer instread, if we had AsyncBufReadSamples. Alternatively we
+    // could implement AsyncReadSamples<Sample = Complex<f32>> direclty on the
+    // Reader, since it's such a common use case.
     reader: Option<Converted<mrrp_rtl_sdr::Reader, Iq>>,
     name: String,
 }

@@ -349,7 +349,8 @@ impl DesiredFrequencyResponse for Hilbert {
 
         Some(FrequencyResponseAt {
             amplitude,
-            // todo: we should handle this better, as pm-remez uses weights not tolerances
+            // todo: we should handle this better, as pm-remez uses weights not
+            // tolerances
             tolerance: 0.1,
         })
     }
