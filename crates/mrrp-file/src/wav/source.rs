@@ -116,8 +116,7 @@ where
         let this = &mut *self;
         let mut samples = this.inner.samples();
 
-        // important that we yield to the runtime every now and then, since
-        // this thing is not really async.
+        // <https://github.com/jgraef/mrrp/issues/30>
         let coop = ready!(coop::poll_proceed(cx));
         coop.made_progress();
 

@@ -22,7 +22,7 @@ pub use chained::{
     ChainedError,
 };
 pub use converted::Converted;
-pub use coop::Cooperative;
+pub use coop::Coop;
 pub use inspect::{
     Inspect,
     InspectWith,

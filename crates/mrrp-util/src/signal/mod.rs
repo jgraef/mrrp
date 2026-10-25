@@ -1,4 +1,5 @@
 mod combinators;
+pub mod coop;
 mod generator;
 mod noise;
 pub mod pcm;

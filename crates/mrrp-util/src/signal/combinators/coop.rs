@@ -24,20 +24,20 @@ use crate::signal::{
 
 pin_project! {
     #[derive(Clone, Copy, Debug)]
-    pub struct Cooperative<T> {
+    pub struct Coop<T> {
         #[pin]
-        inner: T,
+        pub inner: T,
     }
 }
 
-impl<T> Cooperative<T> {
+impl<T> Coop<T> {
     #[inline]
     pub fn new(inner: T) -> Self {
         Self { inner }
     }
 }
 
-impl<T> GetSampleRate for Cooperative<T>
+impl<T> GetSampleRate for Coop<T>
 where
     T: GetSampleRate,
 {
@@ -47,7 +47,7 @@ where
     }
 }
 
-impl<T> StreamLength for Cooperative<T>
+impl<T> StreamLength for Coop<T>
 where
     T: StreamLength,
 {
@@ -62,9 +62,9 @@ where
     }
 }
 
-impl<T> FiniteStream for Cooperative<T> where T: FiniteStream {}
+impl<T> FiniteStream for Coop<T> where T: FiniteStream {}
 
-impl<T> AsyncReadSamples for Cooperative<T>
+impl<T> AsyncReadSamples for Coop<T>
 where
     T: AsyncReadSamples,
 {
@@ -77,6 +77,7 @@ where
         cx: &mut Context<'_>,
         buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
         let coop = ready!(coop::poll_proceed(cx));
 
         self.project()

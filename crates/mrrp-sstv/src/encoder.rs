@@ -4,6 +4,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
 };
 
@@ -22,6 +23,7 @@ use mrrp_util::{
     signal::{
         ComplexSinusoid,
         SignalGenerator,
+        coop,
     },
 };
 use num_complex::Complex;
@@ -81,9 +83,13 @@ where
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &mut ReadBuf<Complex<f32>>,
     ) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         while buffer.has_remaining_mut() {
             let this = &mut *self;
 

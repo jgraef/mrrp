@@ -227,9 +227,12 @@ impl<S> AsyncWriteSamples<S> for NullSink {
 
     fn poll_write_samples(
         self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         _buffer: &[S],
     ) -> Poll<Result<usize, Self::Error>> {
+        // we always return pending, so we don't need to use `tokio::task::coop`
+        // here. <https://github.com/jgraef/mrrp/issues/30>
+        let _ = cx;
         Poll::Pending
     }
 

@@ -34,10 +34,13 @@ use std::{
 };
 
 use bitfield::BitRangeMut;
-use tokio::io::{
-    AsyncBufRead,
-    AsyncRead,
-    ReadBuf,
+use tokio::{
+    io::{
+        AsyncBufRead,
+        AsyncRead,
+        ReadBuf,
+    },
+    task::coop,
 };
 
 use crate::rtl2832u::{
@@ -783,7 +786,9 @@ impl AsyncRead for EpaReader {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        let coop = ready!(tokio::task::coop::poll_proceed(cx));
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+
         Pin::new(&mut self.get_mut().endpoint_reader)
             .poll_read(cx, buf)
             .map(|result| {
@@ -796,7 +801,9 @@ impl AsyncRead for EpaReader {
 impl AsyncBufRead for EpaReader {
     #[inline]
     fn poll_fill_buf(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<&[u8]>> {
-        let coop = ready!(tokio::task::coop::poll_proceed(cx));
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+
         Pin::new(&mut self.get_mut().endpoint_reader)
             .poll_fill_buf(cx)
             .map(|result| {

@@ -34,12 +34,13 @@ use mrrp_core::{
         StreamLength,
     },
 };
+use tokio::task::coop;
 use tokio_util::sync::CancellationToken;
 use tracing::Span;
 
 use crate::signal::{
     Cancelable,
-    Cooperative,
+    Coop,
     Emitter,
     Forward,
     Progress,
@@ -417,11 +418,11 @@ pub trait AsyncReadSamplesExt: AsyncReadSamples {
     /// This can be used to make a signal yield sometimes, so it doesn't staved
     /// other tasks.
     #[inline]
-    fn coop(self) -> Cooperative<Self>
+    fn coop(self) -> Coop<Self>
     where
         Self: Sized,
     {
-        Cooperative::new(self)
+        Coop::new(self)
     }
 }
 
@@ -685,9 +686,13 @@ where
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         buffer.fill_with(|| self.sample.clone());
         Poll::Ready(Ok(()))
     }
@@ -715,9 +720,12 @@ impl<S> AsyncReadSamples for PendingSource<S> {
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         _buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
+        // we always return pending, so we don't need to use `tokio::task::coop`
+        // here. <https://github.com/jgraef/mrrp/issues/30>
+        let _ = cx;
         Poll::Pending
     }
 }
@@ -766,9 +774,13 @@ where
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         buffer.fill_with(|| S::EQUILIBRIUM);
         Poll::Ready(Ok(()))
     }
@@ -837,9 +849,13 @@ where
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         let chunk = &self.buffer.as_ref()[self.position..];
         let n = buffer.remaining_mut().min(chunk.len());
         buffer.put_slice(&chunk[..n]);
@@ -890,9 +906,13 @@ where
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         let chunk = self.buffer.chunk();
         let n = buffer.remaining_mut().min(chunk.len());
         buffer.put_slice(&chunk[..n]);

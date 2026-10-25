@@ -102,8 +102,7 @@ where
         cx: &mut Context<'_>,
         buffer: &[S],
     ) -> Poll<Result<usize, Self::Error>> {
-        // important that we yield to the runtime every now and then, since
-        // this thing is not really async.
+        // <https://github.com/jgraef/mrrp/issues/30>
         let coop = ready!(coop::poll_proceed(cx));
         coop.made_progress();
 
@@ -118,19 +117,21 @@ where
     }
 
     #[inline]
-    fn poll_flush(
-        mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         self.writer_mut()?.flush()?;
         Poll::Ready(Ok(()))
     }
 
     #[inline]
-    fn poll_close(
-        mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), Self::Error>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         if let Some(writer) = self.inner.take() {
             writer.finalize()?;
         }

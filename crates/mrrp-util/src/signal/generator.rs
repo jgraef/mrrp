@@ -4,6 +4,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
 };
 
@@ -18,6 +19,7 @@ use mrrp_core::{
         StreamLength,
     },
 };
+use tokio::task::coop;
 
 pub trait SignalGenerator: GetSampleRate {
     type Sample;
@@ -118,9 +120,13 @@ where
     #[inline]
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &mut ReadBuf<G::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         buffer.fill_with(|| self.signal_generator.next());
         Poll::Ready(Ok(()))
     }

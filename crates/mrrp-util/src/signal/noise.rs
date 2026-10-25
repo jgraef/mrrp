@@ -5,6 +5,7 @@ use std::{
     task::{
         Context,
         Poll,
+        ready,
     },
 };
 
@@ -26,6 +27,7 @@ use rand::{
         Uniform,
     },
 };
+use tokio::task::coop;
 
 pin_project! {
     #[derive(Clone, Debug, Default)]
@@ -58,9 +60,13 @@ where
     #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
+        cx: &mut Context<'_>,
         buffer: &mut ReadBuf<S>,
     ) -> Poll<Result<(), Self::Error>> {
+        // <https://github.com/jgraef/mrrp/issues/30>
+        let coop = ready!(coop::poll_proceed(cx));
+        coop.made_progress();
+
         let this = self.project();
         buffer.fill_with(|| this.rng.sample(&*this.distribution));
         Poll::Ready(Ok(()))
