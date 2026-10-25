@@ -18,7 +18,7 @@ nalgebra = { workspace = true, default-features = false, optional = true }
 num-complex.workspace = true
 num-traits.workspace = true
 pin-project-lite.workspace = true
-pm-remez = { version = "0.3.4", default-features = false, features = [
+pm-remez = { version = "0.4.1", default-features = false, features = [
     "nalgebra-backend",
 ], optional = true }
 rustfft = { workspace = true, optional = true }

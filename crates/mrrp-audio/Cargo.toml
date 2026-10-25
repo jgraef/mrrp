@@ -12,7 +12,7 @@ mrrp-core.workspace = true
 mrrp-util.workspace = true
 num-complex.workspace = true
 parking_lot = { workspace = true, optional = true }
-rodio = { version = "0.22.2", optional = true }
+rodio = { version = "0.23.0", optional = true }
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"], optional = true }
 

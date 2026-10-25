@@ -540,7 +540,7 @@ macro_rules! registers {
             $(#[$attrs])*
             #[allow(non_camel_case_types)]
             #[derive(Clone, Copy, PartialEq, Eq, Default)]
-            pub struct $name($int);
+            pub struct $name(pub $int);
             impl Debug;
             impl new;
             $($fields)*
