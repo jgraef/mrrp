@@ -12,6 +12,7 @@ chrono.workspace = true
 clap = { workspace = true, features = ["env"] }
 colorgrad = { workspace = true, features = ["preset"] }
 const-hex.workspace = true
+derive_more = { workspace = true, features = ["debug"] }
 directories = "6.0.0"
 dotenvy.workspace = true
 futures-util.workspace = true

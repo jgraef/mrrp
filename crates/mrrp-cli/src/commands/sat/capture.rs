@@ -23,7 +23,7 @@ use crate::{
     commands::sat::PassOptions,
     util::{
         SourceInfo,
-        sleep_until,
+        sleep_until::sleep_until_with_progress,
     },
 };
 
@@ -80,7 +80,7 @@ pub async fn capture(
                         };
 
                         tracing::debug!(%start, "sleeping until pass starts");
-                        sleep_until(start).await;
+                        sleep_until_with_progress(start, "waiting until pass starts").await;
 
                         // note: filename format expected by SDR++ so that it
                         // can determine center frequency
@@ -111,7 +111,7 @@ pub async fn capture(
                         });
 
                         tracing::debug!(%end, "sleeping until pass ends");
-                        sleep_until(end).await;
+                        sleep_until_with_progress(end, "recording until pass ends").await;
                         stop.cancel();
 
                         if let Err(error) = handle.await {
