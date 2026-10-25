@@ -10,7 +10,7 @@ use chrono::{
 };
 
 use crate::{
-    error::Error,
+    Error,
     satellite::SatelliteDatabase,
 };
 

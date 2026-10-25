@@ -8,7 +8,9 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 derive_more = { workspace = true, features = ["display", "from_str"] }
+mrrp-core = { workspace = true, optional = true }
 mrrp-geo = { workspace = true, features = ["serde"] }
+mrrp-util = { workspace = true, optional = true }
 numeris = { version = "0.6.0", features = ["serde"] }
 reqwest = { version = "0.13.3", features = ["json"] }
 satkit = { version = "0.24.1", features = ["chrono"] }
@@ -19,3 +21,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["rt"] }
 tracing.workspace = true
 url = { version = "2.5.8", features = ["serde"] }
+
+[features]
+default = ["doppler-correct"]
+doppler-correct = ["dep:mrrp-core", "dep:mrrp-util"]

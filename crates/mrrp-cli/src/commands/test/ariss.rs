@@ -43,6 +43,7 @@ use mrrp_filter::{
 use mrrp_geo::Geodetic;
 use mrrp_modem::fm::FmDemodulator;
 use mrrp_sat::{
+    doppler_correct::DopplerCorrection,
     satellite::{
         ReferenceState,
         Satellite,
@@ -50,14 +51,11 @@ use mrrp_sat::{
     satnogs::SatelliteId,
 };
 use mrrp_sstv::modes::VisCode;
-use mrrp_util::{
-    sat::DopplerCorrection,
-    signal::{
-        AsyncReadSamplesExt,
-        FuncScanner,
-        Scanner,
-        ScannerExt,
-    },
+use mrrp_util::signal::{
+    AsyncReadSamplesExt,
+    FuncScanner,
+    Scanner,
+    ScannerExt,
 };
 use serde::{
     Deserialize,

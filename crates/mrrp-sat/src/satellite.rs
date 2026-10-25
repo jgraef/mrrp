@@ -41,7 +41,7 @@ use serde::{
 };
 
 use crate::{
-    error::Error,
+    Error,
     satnogs::{
         self,
         NoradCatId,

@@ -26,7 +26,7 @@ use serde::{
 };
 
 use crate::{
-    error::Error,
+    Error,
     satellite::{
         OrbitPropagationCache,
         ReferenceState,

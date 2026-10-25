@@ -21,15 +21,13 @@ use mrrp_core::{
 };
 use mrrp_sat::{
     Geodetic,
+    doppler_correct::DopplerCorrection,
     satellite::{
         ReferenceState,
         Satellite,
     },
 };
-use mrrp_util::{
-    sat::DopplerCorrection,
-    signal::AsyncReadSamplesExt,
-};
+use mrrp_util::signal::AsyncReadSamplesExt;
 
 // todo: also take batch_size option and don't predict all satellite positions
 // at once, but batch them.

@@ -8,17 +8,20 @@ use mrrp_core::{
     sample::Complex,
     signal::GetSampleRate,
 };
-use mrrp_sat::satellite::{
-    OrbitPropagationCache,
-    ReferenceState,
-    Satellite,
-    SatelliteState,
-};
-
-use crate::signal::{
+use mrrp_util::signal::{
     ComplexSinusoid,
     Scanner,
     SignalGenerator,
+};
+
+use crate::{
+    Error,
+    satellite::{
+        OrbitPropagationCache,
+        ReferenceState,
+        Satellite,
+        SatelliteState,
+    },
 };
 
 /// Corrects doppler shift from satellites.
@@ -56,7 +59,7 @@ impl DopplerCorrection {
         predict_interval: Duration,
         sample_rate: f32,
         duration: Duration,
-    ) -> Result<Self, mrrp_sat::Error> {
+    ) -> Result<Self, Error> {
         tracing::debug!(sat=satellite.name(), tle=?satellite.tle(), nominal_frequency, "Correcting doppler");
 
         let num_intervals =

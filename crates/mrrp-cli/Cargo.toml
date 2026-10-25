@@ -30,9 +30,9 @@ mrrp-geo.workspace = true
 mrrp-modem.workspace = true
 mrrp-rtl-sdr = { workspace = true, features = ["mrrp"] }
 mrrp-rtl-tcp.workspace = true
-mrrp-sat.workspace = true
+mrrp-sat = { workspace = true, features = ["doppler-correct"] }
 mrrp-sstv = { workspace = true, features = ["image", "serde"] }
-mrrp-util = { workspace = true, features = ["sat"] }
+mrrp-util.workspace = true
 num-traits.workspace = true
 parking_lot.workspace = true
 pin-project-lite.workspace = true
