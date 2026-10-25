@@ -2,6 +2,7 @@ mod buffered;
 mod cancel;
 mod chained;
 mod converted;
+mod coop;
 mod inspect;
 mod limited;
 mod map;
@@ -21,6 +22,7 @@ pub use chained::{
     ChainedError,
 };
 pub use converted::Converted;
+pub use coop::Cooperative;
 pub use inspect::{
     Inspect,
     InspectWith,

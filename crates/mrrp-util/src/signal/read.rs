@@ -39,6 +39,7 @@ use tracing::Span;
 
 use crate::signal::{
     Cancelable,
+    Cooperative,
     Emitter,
     Forward,
     Progress,
@@ -408,6 +409,19 @@ pub trait AsyncReadSamplesExt: AsyncReadSamples {
         P: Scanner<usize, Output = ()>,
     {
         Progress::new(self, on_progress)
+    }
+
+    /// Makes the signal cooperate with the tokio runtime
+    ///
+    /// Some signals inherently never yield (i.e. return [`Poll::Pending`]).
+    /// This can be used to make a signal yield sometimes, so it doesn't staved
+    /// other tasks.
+    #[inline]
+    fn coop(self) -> Cooperative<Self>
+    where
+        Self: Sized,
+    {
+        Cooperative::new(self)
     }
 }
 

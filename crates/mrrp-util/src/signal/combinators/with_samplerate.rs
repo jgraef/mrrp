@@ -78,6 +78,7 @@ where
     }
 }
 
+// todo: what was this for?
 impl<T> Stream for WithSampleRate<T>
 where
     T: Stream,

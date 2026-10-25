@@ -1,10 +1,7 @@
 use std::{
     mem::MaybeUninit,
     pin::Pin,
-    task::{
-        Poll,
-        ready,
-    },
+    task::Poll,
 };
 
 use anyhow::Error;
@@ -230,16 +227,13 @@ where
                 return Poll::Ready(Some(Ok(item)));
             }
 
-            let coop = ready!(tokio::task::coop::poll_proceed(cx));
             let mut read_buf = ReadBuf::uninit(UninitSlice::slice_mut_from_uninit(&mut buffer));
             match this.inner.as_mut().poll_read_samples(cx, &mut read_buf) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(error)) => {
-                    coop.made_progress();
                     return Poll::Ready(Some(Err(error)));
                 }
                 Poll::Ready(Ok(())) => {
-                    coop.made_progress();
                     let n = read_buf.filled().len();
 
                     if n == 0 {
