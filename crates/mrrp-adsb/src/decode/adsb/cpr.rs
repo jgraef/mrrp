@@ -23,6 +23,8 @@ use std::{
     ops::Not,
 };
 
+pub use mrrp_geo::HorizontalGeodetic as Position;
+
 use crate::decode::VerticalStatus;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,12 +104,6 @@ impl CoodinateCode {
     pub fn as_u32(&self) -> u32 {
         self.0
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct Position {
-    pub latitude: f64,
-    pub longitude: f64,
 }
 
 #[derive(Debug, thiserror::Error)]

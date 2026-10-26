@@ -171,3 +171,5 @@ impl<B: Buf> BufReadBytesExt for B {
         data
     }
 }
+
+pub const METER_PER_FOOT: f64 = 0.3048;

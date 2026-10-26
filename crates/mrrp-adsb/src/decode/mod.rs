@@ -27,6 +27,7 @@ use crate::decode::util::{
     BufReadBytesExt,
     CRC_24_MODES,
     CrcBuf,
+    METER_PER_FOOT,
     decode_air_air_surveillance_common_fields,
     decode_surveillance_reply_body,
     gillham::{
@@ -811,6 +812,22 @@ impl Debug for AltitudeCode {
 pub struct Altitude {
     pub altitude: i32,
     pub unit: AltitudeUnit,
+}
+
+impl Altitude {
+    pub fn as_meters(&self) -> f64 {
+        match self.unit {
+            AltitudeUnit::Feet => self.altitude as f64 * METER_PER_FOOT,
+            AltitudeUnit::Meter => self.altitude as f64,
+        }
+    }
+
+    pub fn as_feet(&self) -> f64 {
+        match self.unit {
+            AltitudeUnit::Feet => self.altitude as f64,
+            AltitudeUnit::Meter => self.altitude as f64 / METER_PER_FOOT,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
