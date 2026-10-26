@@ -17,6 +17,7 @@ use futures_util::{
     Stream,
     StreamExt,
 };
+use pin_project_lite::pin_project;
 
 use crate::{
     buf::{
@@ -27,7 +28,6 @@ use crate::{
     signal::{
         AsyncReadSamples,
         AsyncWriteSamples,
-        AsyncWriteSamplesExt,
         GetSampleRate,
         ReadBuf,
         Remaining,
@@ -179,12 +179,15 @@ where
     }
 }
 
+pin_project! {
 #[derive(Clone, Debug)]
-pub struct WriteSamplesChunkSink<W, C, S> {
-    pub write_samples: W,
-    chunk: Option<C>,
-    // todo: what is the right variance here?
-    _phantom: PhantomData<fn(S)>,
+    pub struct WriteSamplesChunkSink<W, C, S> {
+        #[pin]
+        write_samples: W,
+        chunk: Option<C>,
+        // todo: what is the right variance here?
+        _phantom: PhantomData<fn(S)>,
+    }
 }
 
 impl<W, C, S> WriteSamplesChunkSink<W, C, S> {
@@ -205,14 +208,11 @@ where
 {
     type Error = W::Error;
 
-    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        let this = &mut *self;
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        let this = self.project();
 
-        if let Some(chunk) = &mut this.chunk {
-            match this
-                .write_samples
-                .poll_write_samples_unpin(cx, chunk.chunk())
-            {
+        if let Some(chunk) = this.chunk {
+            match this.write_samples.poll_write_samples(cx, chunk.chunk()) {
                 Poll::Pending => Poll::Pending,
                 Poll::Ready(Err(error)) => Poll::Ready(Err(error)),
                 Poll::Ready(Ok(num_samples_written)) => {
@@ -233,12 +233,12 @@ where
     }
 
     #[inline]
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.write_samples.poll_flush_unpin(cx)
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().write_samples.poll_flush(cx)
     }
 
     #[inline]
-    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.write_samples.poll_close_unpin(cx)
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.project().write_samples.poll_close(cx)
     }
 }

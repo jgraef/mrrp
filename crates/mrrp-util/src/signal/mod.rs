@@ -6,6 +6,7 @@ pub mod pcm;
 mod read;
 mod sine;
 pub mod test;
+pub mod write;
 
 use std::{
     fmt::Debug,

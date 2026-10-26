@@ -8,4 +8,5 @@ repository.workspace = true
 [dependencies]
 futures-util = { workspace = true, features = ["sink"] }
 num-complex = { workspace = true, features = ["std"] }
+pin-project-lite.workspace = true
 thiserror.workspace = true
