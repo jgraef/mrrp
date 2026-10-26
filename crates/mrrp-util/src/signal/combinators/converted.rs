@@ -40,18 +40,6 @@ pin_project! {
     }
 }
 
-impl<R, Q> Clone for Converted<R, Q>
-where
-    R: AsyncReadSamples + Clone,
-    R::Sample: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
 impl<R, Q> Converted<R, Q>
 where
     R: AsyncReadSamples,
@@ -63,12 +51,31 @@ where
         }
     }
 
-    pub fn inner(&self) -> &R {
-        self.inner.inner()
+    #[inline]
+    pub fn into_inner(self) -> R {
+        self.inner.into_inner()
     }
 
-    pub fn inner_mut(&mut self) -> &mut R {
-        self.inner.inner_mut()
+    #[inline]
+    pub fn get_ref(&self) -> &R {
+        self.inner.get_ref()
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self) -> &mut R {
+        self.inner.get_mut()
+    }
+}
+
+impl<R, Q> Clone for Converted<R, Q>
+where
+    R: AsyncReadSamples + Clone,
+    R::Sample: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
     }
 }
 

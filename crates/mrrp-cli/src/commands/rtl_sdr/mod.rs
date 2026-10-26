@@ -177,7 +177,7 @@ pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
                 const MEASUREMENT_INVERVAL: Duration = Duration::from_secs(1);
 
                 let stream_task = tokio::spawn(async move {
-                    run_til_shutdown(async {
+                    let _ = run_til_shutdown(async {
                         loop {
                             match reader.fill_buf().await {
                                 Ok(buffer) => {

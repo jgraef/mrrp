@@ -1,4 +1,5 @@
 use std::{
+    net::SocketAddr,
     num::NonZero,
     pin::Pin,
     task::{
@@ -109,7 +110,6 @@ impl Client {
         options: ConnectOptions,
     ) -> Result<Self, Error> {
         let socket = TcpStream::connect(address).await?;
-        let address = socket.peer_addr()?;
 
         let (reader, writer) = socket.into_split();
         let mut reader = BufReader::with_capacity(options.read_buffer_capacity.get(), reader);
@@ -137,13 +137,21 @@ impl Client {
 
         let pcm_reader = PcmReader::new(reader);
 
-        tracing::debug!(?address, dongle_info = ?header.dongle_info, "connected to server");
-
         Ok(Self {
             dongle_info: header.dongle_info,
             command_sender: CommandSender { command_writer },
             source: Source { pcm_reader },
         })
+    }
+
+    #[inline]
+    pub fn local_address(&self) -> Result<SocketAddr, std::io::Error> {
+        Ok(self.source.pcm_reader.get_ref().get_ref().local_addr()?)
+    }
+
+    #[inline]
+    pub fn peer_address(&self) -> Result<SocketAddr, std::io::Error> {
+        Ok(self.source.pcm_reader.get_ref().get_ref().peer_addr()?)
     }
 }
 

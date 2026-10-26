@@ -72,11 +72,18 @@ where
         self
     }
 
-    pub fn inner(&self) -> &R {
+    #[inline]
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+
+    #[inline]
+    pub fn get_ref(&self) -> &R {
         &self.inner
     }
 
-    pub fn inner_mut(&mut self) -> &mut R {
+    #[inline]
+    pub fn get_mut(&mut self) -> &mut R {
         &mut self.inner
     }
 }

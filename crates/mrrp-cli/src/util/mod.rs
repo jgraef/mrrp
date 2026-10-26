@@ -66,6 +66,7 @@ pub fn shutdown_signal() -> CancellationToken {
     .clone()
 }
 
+#[must_use]
 pub async fn run_til_shutdown<R>(fut: impl Future<Output = R>) -> Option<R> {
     let cancellation_token = shutdown_signal();
     tokio::select! {

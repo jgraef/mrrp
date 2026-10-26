@@ -76,11 +76,14 @@ where
     type Output = Result<usize, ForwardError<R::Error, W::Error>>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        // TODO: poll for reading and writing at the same time (if there's data
+        // and free space in the buffer)
+
         loop {
             let this = self.as_mut().project();
 
             if this.buffer.read_pos < this.buffer.write_pos {
-                // we still have data buffered, so lets cosume that first.
+                // we still have data buffered, so lets consume that first.
 
                 let buffer = unsafe {
                     this.buffer.buffer[this.buffer.read_pos..this.buffer.write_pos]
@@ -164,6 +167,15 @@ impl<S> Buffer<S> {
             read_pos: 0,
             write_pos: 0,
         }
+    }
+
+    pub fn clear(&mut self) {
+        unsafe {
+            self.buffer[self.read_pos..self.write_pos].assume_init_drop();
+        }
+
+        self.read_pos = 0;
+        self.write_pos = 0;
     }
 
     #[inline]

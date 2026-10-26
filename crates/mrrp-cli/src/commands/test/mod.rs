@@ -1,5 +1,6 @@
 pub mod ariss;
 pub mod miq;
+pub mod play;
 
 use std::{
     fs::File,
@@ -106,7 +107,7 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
         Command::Client { address } => {
             let mut client = Client::connect(&address, Default::default()).await?;
 
-            println!("{:#?}", client.dongle_info);
+            tracing::info!(?address, dongle_info = ?client.dongle_info, "Connected to server");
 
             client.command_sender.set_sample_rate(2_400_000).await?;
             client
@@ -134,6 +135,12 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
                     samples_per_second = 0;
                 }
             }
+        }
+        Command::Play {
+            input,
+            listen_address,
+        } => {
+            play::play(&input, &listen_address).await?;
         }
     }
 
@@ -171,7 +178,15 @@ enum Command {
     },
     Miq(miq::Args),
     Client {
+        /// Server address to connect to
         address: String,
+    },
+    Play {
+        input: PathBuf,
+
+        /// Listen address and port
+        #[clap(short, long, default_value = "localhost:1234")]
+        listen_address: String,
     },
 }
 

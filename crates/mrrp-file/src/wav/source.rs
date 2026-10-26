@@ -48,7 +48,7 @@ pub struct WavSource<R, S> {
     #[debug(skip)]
     inner: hound::WavReader<R>,
     spec: hound::WavSpec,
-    num_samples_read: usize,
+    stream_position: usize,
     _phantom: PhantomData<fn() -> S>,
 }
 
@@ -63,7 +63,7 @@ where
         Ok(Self {
             inner,
             spec,
-            num_samples_read: 0,
+            stream_position: 0,
             _phantom: PhantomData,
         })
     }
@@ -73,6 +73,7 @@ where
         Self::new(hound::WavReader::new(reader)?)
     }
 
+    #[inline]
     pub fn spec(&self) -> &hound::WavSpec {
         &self.spec
     }
@@ -86,16 +87,22 @@ where
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, Error> {
         Self::new(hound::WavReader::open(path)?)
     }
+
+    #[inline]
+    pub fn stream_position(&self) -> usize {
+        self.stream_position
+    }
 }
 
 impl<R, S> WavSource<R, S>
 where
     R: std::io::Read + std::io::Seek,
 {
-    pub fn seek(&mut self, time: u32) -> Result<(), Error> {
+    pub fn seek(&mut self, stream_position: usize) -> Result<(), Error> {
         self.inner
-            .seek(time)
+            .seek(stream_position.try_into().unwrap())
             .map_err(|error| Error::Hound(error.into()))?;
+        self.stream_position = stream_position;
         Ok(())
     }
 }
@@ -126,7 +133,7 @@ where
                 break;
             };
             buffer.put_sample(sample);
-            this.num_samples_read += 1;
+            this.stream_position += 1;
         }
 
         Poll::Ready(Ok(()))
@@ -146,9 +153,7 @@ where
 {
     fn remaining(&self) -> Remaining {
         Remaining::Finite {
-            num_samples: usize::try_from(self.inner.len()).unwrap()
-                / usize::from(self.spec.channels)
-                - self.num_samples_read,
+            num_samples: usize::try_from(self.inner.duration()).unwrap() - self.stream_position,
         }
     }
 }

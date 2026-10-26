@@ -44,6 +44,25 @@ where
             buffer: Buffer::new(buffer_size),
         }
     }
+
+    #[inline]
+    pub fn into_inner(self) -> R {
+        self.inner
+    }
+
+    #[inline]
+    pub fn get_ref(&self) -> &R {
+        &self.inner
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self) -> &mut R {
+        &mut self.inner
+    }
+
+    pub fn clear_buffer(&mut self) {
+        self.buffer.clear();
+    }
 }
 
 impl<R> AsyncReadSamples for Buffered<R>

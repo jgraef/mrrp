@@ -24,6 +24,7 @@ use tabled::{
         TableOption,
     },
 };
+use tracing_subscriber::EnvFilter;
 
 use crate::{
     config::Config,
@@ -34,7 +35,10 @@ use crate::{
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let _ = dotenvy::dotenv();
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .with_writer(std::io::stderr)
+        .init();
 
     let files = Files::open()?;
     let args = Args::parse();

@@ -101,7 +101,11 @@ pub trait AsyncReadSamplesExt: AsyncReadSamples {
     ///
     /// This will call
     /// [`poll_read_samples`][AsyncReadSamples::poll_read_samples] exactly once,
-    /// and return the number of samples read. This is cancellation-safe.
+    /// and return the number of samples read.
+    ///
+    /// # Cancellation safety
+    ///
+    /// The returned future is cancellation-safe.
     #[inline]
     fn read_samples<'a>(&'a mut self, buffer: &'a mut [Self::Sample]) -> ReadSamples<'a, Self>
     where

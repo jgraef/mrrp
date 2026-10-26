@@ -24,7 +24,7 @@ use crate::Context;
 
 pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
     let mut source = WavSource::<_, i16>::from_path(&args.path)?.convert::<f32>();
-    tracing::info!(spec = ?source.inner().spec(), "input");
+    tracing::info!(spec = ?source.get_ref().spec(), "input");
 
     let vis_code = vis_detect(&mut source)
         .await?

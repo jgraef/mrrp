@@ -54,6 +54,16 @@ where
             _marker: PhantomData,
         }
     }
+
+    #[inline]
+    pub fn into_inner(self) -> R {
+        self.reader
+    }
+
+    #[inline]
+    pub fn get_ref(&self) -> &R {
+        &self.reader
+    }
 }
 
 impl<R, S, E> Clone for PcmReader<R, S, E>

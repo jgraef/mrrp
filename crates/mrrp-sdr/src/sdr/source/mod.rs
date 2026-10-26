@@ -272,7 +272,7 @@ impl AsyncReadSamples for LoopedFileSource {
                     Poll::Ready(Ok(())) => {
                         if before == buffer.filled().len() {
                             // nothing was read, end of file
-                            self.inner.inner_mut().inner_mut().seek(0)?;
+                            self.inner.get_mut().get_mut().seek(0)?;
                         }
                         else {
                             buffer.filled_mut().iter_mut().for_each(|v| {

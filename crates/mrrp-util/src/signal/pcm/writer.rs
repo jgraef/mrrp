@@ -54,6 +54,11 @@ where
     pub fn into_inner(self) -> W {
         self.writer
     }
+
+    #[inline]
+    pub fn get_ref(&self) -> &W {
+        &self.writer
+    }
 }
 
 impl<W, S, E> Clone for PcmWriter<W, S, E>

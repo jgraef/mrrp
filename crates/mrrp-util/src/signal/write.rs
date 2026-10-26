@@ -5,9 +5,12 @@ use std::{
         Context,
         Poll,
     },
+    time::Duration,
 };
 
 use mrrp_core::signal::AsyncWriteSamples;
+
+use crate::signal::Throttled;
 
 pub trait AsyncWriteSamplesExt<S>: AsyncWriteSamples<S> {
     #[inline]
@@ -80,6 +83,14 @@ pub trait AsyncWriteSamplesExt<S>: AsyncWriteSamples<S> {
             write_samples: self,
             buffer,
         }
+    }
+
+    #[inline]
+    fn throttled(self, sample_duration: Duration) -> Throttled<Self>
+    where
+        Self: Sized,
+    {
+        Throttled::new(self, sample_duration)
     }
 }
 
