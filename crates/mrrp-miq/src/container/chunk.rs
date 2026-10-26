@@ -13,8 +13,6 @@ pub struct ChunkHeader {
 pub struct Tag([u8; 4]);
 
 impl Tag {
-    pub const MIQH: Self = Self::from_bytes_unchecked(*b"MIQH");
-
     #[inline]
     pub const fn from_bytes(bytes: [u8; 4]) -> Result<Self, InvalidTag> {
         if bytes.is_ascii() {

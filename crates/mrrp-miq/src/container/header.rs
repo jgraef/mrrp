@@ -23,7 +23,7 @@ pub struct FileHeader<S = String> {
 }
 
 impl<S> Tagged for FileHeader<S> {
-    const TAG: Tag = Tag::MIQH;
+    const TAG: Tag = Tag::from_bytes_unchecked(*b"MIQH");
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Hash)]

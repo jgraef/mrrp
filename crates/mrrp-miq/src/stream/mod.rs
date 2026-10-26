@@ -1,6 +1,8 @@
 pub mod reader;
 pub mod writer;
 
+use std::num::NonZero;
+
 use chrono::{
     DateTime,
     Utc,
@@ -44,14 +46,46 @@ pub struct StreamId(pub(super) u32);
 /// After this chunk the stream with ID `stream_id` is valid.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamStart<U = ()> {
+    /// ID of stream to which this [`StreamStart`] belongs to.
     pub stream_id: StreamId,
 
+    /// Sample format
+    ///
+    /// This specifies how many bits a sample has, if it is an signed
+    /// integer, unsigned integer, or IEEE 754 float, and if it is real or
+    /// complex.
     pub sample_format: SampleFormat,
+
+    #[serde(default, skip_serializing_if = "crate::util::is_default")]
+    pub num_channels: ChannelCount,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub samples: Option<u64>,
 
     pub stream_info: StreamInfo<U>,
+}
+
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    derive_more::Display,
+    derive_more::FromStr,
+    Serialize,
+    Deserialize,
+)]
+#[serde(transparent)]
+pub struct ChannelCount(pub NonZero<u8>);
+
+impl Default for ChannelCount {
+    fn default() -> Self {
+        Self(const { NonZero::new(1).unwrap() })
+    }
 }
 
 impl<U> Tagged for StreamStart<U> {
@@ -60,7 +94,9 @@ impl<U> Tagged for StreamStart<U> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamInfoChange<U = ()> {
+    /// ID of stream to which this [`StreamInfoChange`] belongs to.
     pub stream_id: StreamId,
+
     pub stream_info: StreamInfo<U>,
 }
 
@@ -74,8 +110,12 @@ pub const IQ_TAG: Tag = Tag::from_bytes_unchecked(*b"SIQD");
 /// End of a stream
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamEnd<U = ()> {
+    /// ID of stream to which this [`StreamEnd`] belongs to.
     pub stream_id: StreamId,
+
     pub stream_info: StreamInfo<U>,
+
+    pub checksum: Option<u64>,
 }
 
 impl<U> Tagged for StreamEnd<U> {
@@ -216,12 +256,16 @@ make_stream_info! {
     pll_unlocked: Pll as Option,
 }
 
+/// Format of a single sample.
+///
+/// Samples can be real or complex.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum SampleFormat {
     Real(SampleComponentFormat),
     Iq(SampleComponentFormat),
 }
 
+/// Number format for a component of a sample.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum SampleComponentFormat {
     U8,
@@ -232,7 +276,9 @@ pub enum SampleComponentFormat {
     I32,
     U64,
     I64,
+    /// IEEE 754 32-bit float
     F32,
+    /// IEEE 754 64-bit float
     F64,
 }
 

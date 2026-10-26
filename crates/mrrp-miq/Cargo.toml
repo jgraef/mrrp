@@ -9,9 +9,11 @@ repository.workspace = true
 bitflags.version = "2.13.2"
 chrono = { workspace = true, features = ["serde"] }
 ciborium.version = "0.2.2"
+derive_more = { workspace = true, features = ["debug", "display", "from_str"] }
 mrrp-core.workspace = true
 #flate2.version = "1.1.10"
 mrrp-geo = { workspace = true, features = ["serde"] }
 num-complex.workspace = true
+seahash = "4.1.0"
 serde = { workspace = true, features = ["derive"] }
 thiserror.workspace = true

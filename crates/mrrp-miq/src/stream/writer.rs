@@ -1,6 +1,7 @@
 use std::{
     fmt::Debug,
     fs::File,
+    hash::Hasher,
     io::{
         BufWriter,
         Write,
@@ -9,6 +10,7 @@ use std::{
     path::Path,
 };
 
+use seahash::SeaHasher;
 use serde::Serialize;
 
 use crate::{
@@ -104,6 +106,7 @@ where
         self.container_writer.write_cbor_chunk(&StreamStart {
             stream_id,
             sample_format: T::SAMPLE_FORMAT,
+            num_channels: Default::default(),
             samples: None,
             stream_info,
         })?;
@@ -116,6 +119,12 @@ where
         self.container_writer.write_cbor_chunk(&StreamEnd::<()> {
             stream_id: stream_writer.stream_id,
             stream_info: Default::default(),
+            // todo
+            //checksum: Some(stream_writer.checksum()),
+            checksum: {
+                let _ = stream_writer.checksum();
+                None
+            },
         })?;
         Ok(())
     }
@@ -143,21 +152,34 @@ impl Writer<BufWriter<File>> {
     }
 }
 
+pub const CHECKSUM_SEED: [u64; 4] = [
+    0x7d71d5fdfa9a9e36,
+    0xd1d329a80c99931e,
+    0x8b55a32b5757926c,
+    0x34d490e72e8c727d,
+];
+
 // todo: we would like to merge IqWriter into this. we can probably do this if
 // we don't use the BufferedChunkWriter, but manage the buffer in StreamWriter.
 // Then we can buffer here to avoid writing too few samples into a chunk. We
 // also want to flush the buffer by writing a chunk whenever the number of
 // buffered samples exceeds some limit.
-#[derive(Debug)]
+#[derive(derive_more::Debug)]
 pub struct StreamWriter<T, E> {
     stream_id: StreamId,
     encoder: E,
+
+    #[debug("<{} bytes>", buffer.len())]
     buffer: Vec<u8>,
 
     /// If the underlying encoder supports flushing whenever we want, we will
     /// flush once the buffer is at least `min_chunk_size` bytes full.
     min_chunk_size: usize,
 
+    #[debug("SeaHasher {{ ... }}")]
+    checksum_hasher: SeaHasher,
+
+    #[debug(skip)]
     _marker: PhantomData<fn(&[T])>,
 }
 
@@ -169,6 +191,12 @@ impl<T, E> StreamWriter<T, E> {
             encoder,
             buffer: Vec::with_capacity(min_chunk_size),
             min_chunk_size,
+            checksum_hasher: SeaHasher::with_seeds(
+                CHECKSUM_SEED[0],
+                CHECKSUM_SEED[1],
+                CHECKSUM_SEED[2],
+                CHECKSUM_SEED[3],
+            ),
             _marker: PhantomData,
         }
     }
@@ -176,6 +204,12 @@ impl<T, E> StreamWriter<T, E> {
     #[inline]
     pub fn stream_id(&self) -> StreamId {
         self.stream_id
+    }
+
+    #[inline]
+    pub fn checksum(&self) -> u64 {
+        let _ = self.checksum_hasher.finish();
+        todo!("push samples into checksum hasher");
     }
 }
 
@@ -191,6 +225,8 @@ where
     where
         W: Write,
     {
+        // todo: push samples into checksum hasher
+
         let flush = self
             .encoder
             .write_samples(samples, &mut self.buffer)
@@ -216,6 +252,7 @@ where
             writer
                 .container_writer
                 .write_data_chunk(IQ_TAG, Default::default(), &self.buffer)?;
+
             self.buffer.clear();
         }
 

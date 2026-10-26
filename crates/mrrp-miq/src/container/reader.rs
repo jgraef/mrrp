@@ -18,6 +18,7 @@ use crate::container::{
         Flags,
         InvalidTag,
         Tag,
+        Tagged,
     },
     header::FileHeader,
 };
@@ -125,7 +126,7 @@ where
 
         // check header tag
         let chunk_header = chunk.chunk_header();
-        if chunk_header.tag != Tag::MIQH {
+        if chunk_header.tag != FileHeader::<()>::TAG {
             return Err(Error::InvalidHeader {
                 bytes: chunk_header.tag.to_bytes(),
             });
