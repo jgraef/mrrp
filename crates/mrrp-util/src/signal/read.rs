@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     fmt::Debug,
     marker::PhantomData,
     mem::MaybeUninit,
@@ -682,7 +681,7 @@ where
     S: Clone,
 {
     type Sample = S;
-    type Error = Infallible;
+    type Error = !;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
@@ -716,7 +715,7 @@ pub struct PendingSource<S> {
 
 impl<S> AsyncReadSamples for PendingSource<S> {
     type Sample = S;
-    type Error = Infallible;
+    type Error = !;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
@@ -770,7 +769,7 @@ where
     S: Sample,
 {
     type Sample = S;
-    type Error = Infallible;
+    type Error = !;
 
     fn poll_read_samples(
         self: Pin<&mut Self>,
@@ -845,7 +844,7 @@ where
     S: Clone,
 {
     type Sample = S;
-    type Error = Infallible;
+    type Error = !;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,
@@ -902,7 +901,7 @@ where
     S: Clone,
 {
     type Sample = S;
-    type Error = Infallible;
+    type Error = !;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,

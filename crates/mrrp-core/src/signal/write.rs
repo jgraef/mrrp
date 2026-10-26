@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     marker::PhantomData,
     pin::Pin,
     task::{
@@ -223,7 +222,7 @@ where
 pub struct NullSink;
 
 impl<S> AsyncWriteSamples<S> for NullSink {
-    type Error = Infallible;
+    type Error = !;
 
     fn poll_write_samples(
         self: Pin<&mut Self>,

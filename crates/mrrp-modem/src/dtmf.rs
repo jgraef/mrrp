@@ -298,10 +298,7 @@ impl CurrentSignal {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        convert::Infallible,
-        fmt::Display,
-    };
+    use std::fmt::Display;
 
     use futures_util::stream;
     use mrrp_core::signal::{
@@ -339,11 +336,7 @@ mod tests {
             .unwrap_or_else(|c| panic!("Invalid DTMF symbol: {c}"));
 
         // convert to stream
-        let symbols = stream::iter(
-            symbols
-                .into_iter()
-                .map(|symbol| Ok::<_, Infallible>(symbol)),
-        );
+        let symbols = stream::iter(symbols.into_iter().map(|symbol| Ok::<_, !>(symbol)));
 
         // encode
         let encoded = DtmfEncoder::new(symbols, sample_rate, tone_duration, 0.1);

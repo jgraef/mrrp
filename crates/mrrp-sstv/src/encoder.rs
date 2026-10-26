@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     pin::Pin,
     task::{
         Context,
@@ -79,7 +78,7 @@ where
     F: FrameBuffer + Unpin,
 {
     type Sample = Complex<f32>;
-    type Error = Infallible;
+    type Error = !;
 
     fn poll_read_samples(
         mut self: Pin<&mut Self>,

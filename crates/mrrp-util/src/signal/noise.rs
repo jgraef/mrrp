@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     marker::PhantomData,
     pin::Pin,
     task::{
@@ -55,7 +54,7 @@ where
     D: Distribution<S>,
 {
     type Sample = S;
-    type Error = Infallible;
+    type Error = !;
 
     #[inline]
     fn poll_read_samples(

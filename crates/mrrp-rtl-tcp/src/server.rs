@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     net::SocketAddr,
     num::NonZero,
     pin::Pin,
@@ -227,7 +226,7 @@ impl AsyncWriteSamples<Complex<u8>> for Sink {
 }
 
 #[inline]
-fn map_sink_err(error: RawWriterError<Infallible>) -> Error {
+fn map_sink_err(error: RawWriterError<!>) -> Error {
     match error {
         RawWriterError::Writer(error) => Error::Io(error),
         // note: the other variant is uninhabited

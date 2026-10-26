@@ -2,7 +2,6 @@ pub mod r82xx;
 
 use std::{
     any::Any,
-    convert::Infallible,
     fmt::Debug,
     pin::Pin,
 };
@@ -19,7 +18,7 @@ use crate::{
 
 pub trait TunerError: std::error::Error + Send + Sync + Sized + 'static {}
 
-impl TunerError for Infallible {}
+impl TunerError for ! {}
 
 pub trait TunerProbe: Clone + Debug + Sized + Send + Sync + 'static {
     type Error: TunerError;
@@ -343,7 +342,7 @@ impl Tuner for AnyTuner {
 pub struct NullTuner;
 
 impl Tuner for NullTuner {
-    type Error = Infallible;
+    type Error = !;
 
     fn name(&self) -> &str {
         "null"
@@ -391,7 +390,7 @@ impl Tuner for NullTuner {
 }
 
 impl TunerProbe for NullTuner {
-    type Error = Infallible;
+    type Error = !;
     type Tuner = Self;
 
     fn try_open<'a>(

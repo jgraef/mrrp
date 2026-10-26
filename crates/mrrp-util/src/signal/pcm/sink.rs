@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     pin::Pin,
     task::{
         Context,
@@ -148,7 +147,7 @@ macro_rules! impl_encode_sample {
     {$($T:ty, $bytes:expr, $method:ident;)*} => {
         $(
             impl EncodeSample for $T {
-                type Error = Infallible;
+                type Error = !;
 
                 const BYTES: usize = $bytes;
 
@@ -159,7 +158,7 @@ macro_rules! impl_encode_sample {
             }
 
             impl EncodeSample for Complex<$T> {
-                type Error = Infallible;
+                type Error = !;
 
                 const BYTES: usize = $bytes * 2;
 

@@ -1,5 +1,4 @@
 use std::{
-    convert::Infallible,
     pin::Pin,
     task::{
         Context,
@@ -115,7 +114,7 @@ where
     G: SignalGenerator + Unpin,
 {
     type Sample = G::Sample;
-    type Error = Infallible;
+    type Error = !;
 
     #[inline]
     fn poll_read_samples(
