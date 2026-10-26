@@ -55,7 +55,9 @@ overflow-checks = true
 [workspace.dependencies]
 mrrp-adsb = { path = "crates/mrrp-adsb", default-features = false }
 mrrp-audio = { path = "crates/mrrp-audio", default-features = false }
-mrrp-core = { path = "crates/mrrp-core", default-features = false }
+mrrp-core = { path = "crates/mrrp-core", default-features = false, features = [
+    "std",
+] }
 mrrp-file = { path = "crates/mrrp-file", default-features = false }
 mrrp-geo = { path = "crates/mrrp-geo", default-features = false }
 mrrp-filter = { path = "crates/mrrp-filter", default-features = false }

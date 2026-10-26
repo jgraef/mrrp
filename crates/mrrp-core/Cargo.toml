@@ -7,6 +7,12 @@ repository.workspace = true
 
 [dependencies]
 futures-util = { workspace = true, features = ["sink"] }
-num-complex = { workspace = true, features = ["std"] }
+num-complex.workspace = true
 pin-project-lite.workspace = true
 thiserror.workspace = true
+
+[features]
+default = ["std"]
+# see <https://github.com/jgraef/mrrp/issues/39>
+std = ["num-complex/std"]
+libm = ["num-complex/libm"]

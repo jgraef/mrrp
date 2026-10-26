@@ -8,17 +8,16 @@ repository.workspace = true
 [dependencies]
 bytes.workspace = true
 chrono.workspace = true
+const-hex.workspace = true
 crc = "3.4.0"
 futures-util.workspace = true
-const-hex.workspace = true
+mrrp-geo.workspace = true
 pin-project-lite.workspace = true
-serde = { workspace = true, optional = true }
 serde_with = { workspace = true, optional = true }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 uuid = "1.23.3"
-mrrp-geo.workspace = true
 
 [dev-dependencies]
 approx = "0.5.1"
@@ -26,5 +25,5 @@ tokio = { workspace = true, features = ["macros", "rt"] }
 
 [features]
 default = ["serde", "rtl_adsb_command"]
-serde = ["dep:serde", "dep:serde_with"]
+serde = ["dep:serde_with"]
 rtl_adsb_command = ["tokio/process", "tokio/io-util"]
