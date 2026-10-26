@@ -10,6 +10,8 @@ bytes.workspace = true
 futures-util = { workspace = true, default-features = false, features = [
     "sink",
 ] }
+mrrp-core.workspace = true
+mrrp-util.workspace = true
 pin-project-lite.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "io-util", "sync"] }

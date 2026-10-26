@@ -1,5 +1,4 @@
 use std::{
-    net::SocketAddr,
     pin::Pin,
     task::{
         Context,
@@ -12,231 +11,242 @@ use anyhow::{
     anyhow,
 };
 use bytes::Buf;
+use futures_util::TryStreamExt;
 use mrrp_rtl_sdr::{
+    Device,
     device::ReaderOptions,
     tuner::gain,
 };
 use mrrp_rtl_tcp::{
     protocol::TunerGainMode,
-    server,
+    server::{
+        Commands,
+        Connection,
+        RawSink,
+        Server,
+        Sink,
+    },
 };
-use pin_project_lite::pin_project;
 use tokio::{
-    io::AsyncBufReadExt,
+    io::{
+        AsyncBufReadExt,
+        AsyncWrite,
+    },
+    net::TcpListener,
     sync::{
         mpsc,
         oneshot,
     },
 };
-
-use crate::commands::rtl_sdr::server::ring_buffer::Closed;
+use tokio_util::sync::CancellationToken;
+use tracing::{
+    Instrument,
+    Span,
+};
 
 #[derive(Clone, Copy, Debug)]
 pub struct ServerConfig {
     pub buffer_size: usize,
     pub fix_tuner_frequency: Option<f32>,
+    pub log_dropped: bool,
 }
 
-#[derive(Debug)]
-pub struct ServerHandler {
-    command_sender: mpsc::Sender<Command>,
-    data_subscriber: ring_buffer::Subscriber<u8>,
-    dongle_info: mrrp_rtl_tcp::DongleInfo,
-    log_dropped: bool,
-}
+pub async fn run(
+    mut device: Device,
+    listener: TcpListener,
+    shutdown: CancellationToken,
+    config: ServerConfig,
+) -> Result<(), Error> {
+    let server = Server::from_listener(listener);
 
-impl ServerHandler {
-    pub async fn new(
-        mut device: mrrp_rtl_sdr::Device,
-        config: ServerConfig,
-    ) -> Result<Self, Error> {
-        assert_ne!(config.buffer_size, 0, "buffer_size can't be 0");
-        assert_eq!(
-            config.buffer_size % 2,
-            0,
-            "buffer_size must be a multiple of 2"
-        );
+    let tuner_type = tuner_type(&mut device).await;
 
-        let tuner_type = tuner_type(&mut device).await;
+    let tuner_gain_count = device.available_tuner_gains().len();
+    let tuner_gain_count = tuner_gain_count.try_into().unwrap_or_else(|_| {
+        panic!("The tuner gain count is too large for a u32: {tuner_gain_count}")
+    });
 
-        let tuner_gain_count = device.available_tuner_gains().len();
-        let tuner_gain_count = tuner_gain_count.try_into().unwrap_or_else(|_| {
-            panic!("The tuner gain count is too large for a u32: {tuner_gain_count}")
-        });
+    let dongle_info = mrrp_rtl_tcp::DongleInfo {
+        tuner_type,
+        tuner_gain_count,
+    };
 
-        let dongle_info = mrrp_rtl_tcp::DongleInfo {
-            tuner_type,
-            tuner_gain_count,
+    // spawn task handling commands for the rtl-sdr
+    let (command_sender, command_receiver) = mpsc::channel(64);
+    let _command_task = tokio::spawn(handle_commands(device, command_receiver, config));
+
+    // spawn task reading samples from the rtl-sdr
+    let (data_sender, data_subscriber) = ring_buffer::channel(config.buffer_size);
+    let _data_task = tokio::spawn({
+        let shutdown = shutdown.clone();
+        let command_sender = command_sender.clone();
+
+        async move {
+            if let Err(error) = handle_data(data_sender, command_sender.clone()).await {
+                tracing::error!(%error, "Error in server data handler");
+                shutdown.cancel();
+            }
+        }
+    });
+
+    loop {
+        let accept = tokio::select! {
+            result = server.wait() => result?,
+            _ = shutdown.cancelled() => break,
         };
 
-        let (command_sender, command_receiver) = mpsc::channel(64);
-        let (data_sender, data_subscriber) = ring_buffer::channel(config.buffer_size);
+        let span = tracing::info_span!("connection", address = ?accept.address());
+        let _guard = span.clone().entered();
 
-        let _command_task = tokio::spawn(handle_commands(device, command_receiver, config));
-        let _data_task = tokio::spawn({
+        tracing::info!("New connection");
+
+        let Connection {
+            address: _,
+            commands,
+            sink,
+        } = accept.accept(dongle_info, Default::default()).await?;
+
+        let _conn_command_task = tokio::spawn({
             let command_sender = command_sender.clone();
 
             async move {
-                if let Err(error) = handle_data(data_sender, command_sender.clone()).await {
-                    // todo: we need to propagate the error to the actual server
-                    tracing::error!(%error, "server data handler error");
-                    let _ = command_sender.send(Command::Shutdown {
-                        result_sender: None,
-                    });
+                if let Err(error) = handle_connection_commands(commands, command_sender).await {
+                    tracing::error!(?error, "Error in connection command handler");
                 }
+
+                tracing::info!("Connection closed");
             }
+            .instrument(span.clone())
         });
 
-        Ok(Self {
-            command_sender,
-            data_subscriber,
-            dongle_info,
-            log_dropped: false,
-        })
+        let _conn_data_task = tokio::spawn({
+            let data_receiver = data_subscriber.subscribe();
+
+            async move {
+                if let Err(error) =
+                    HandleConnectionData::new(sink, data_receiver, config.log_dropped).await
+                {
+                    tracing::error!(?error, "Error in connection data handler");
+                }
+            }
+            .instrument(span)
+        });
     }
 
-    pub fn with_log_dropped(mut self, log_dropped: bool) -> Self {
-        self.log_dropped = log_dropped;
-        self
+    tracing::debug!("shutting down");
+    let (result_sender, result_receiver) = oneshot::channel();
+    command_sender
+        .send(Command::Shutdown { result_sender })
+        .await
+        .map_err(|_| anyhow!("command handling task dead"))?;
+
+    result_receiver
+        .await
+        .map_err(|_| anyhow!("command handling task didn't reply with result"))??;
+
+    Ok(())
+}
+
+async fn handle_connection_commands(
+    mut commands: Commands,
+    command_sender: mpsc::Sender<Command>,
+) -> Result<(), Error> {
+    while let Some(command) = commands.try_next().await? {
+        let (result_sender, result_receiver) = oneshot::channel();
+        command_sender
+            .send(Command::Client {
+                command,
+                result_sender,
+                span: Span::current(),
+            })
+            .await
+            .map_err(|_| anyhow!("command handling task dead"))?;
+
+        result_receiver
+            .await
+            .map_err(|_| anyhow!("command handling task didn't reply with result"))??;
+    }
+
+    Ok(())
+}
+
+#[derive(Debug)]
+struct HandleConnectionData {
+    sink: RawSink,
+    data_receiver: ring_buffer::Receiver<u8>,
+    log_dropped: bool,
+}
+
+impl HandleConnectionData {
+    #[inline]
+    fn new(sink: Sink, data_receiver: ring_buffer::Receiver<u8>, log_dropped: bool) -> Self {
+        Self {
+            sink: sink.into_raw(),
+            data_receiver,
+            log_dropped,
+        }
+    }
+}
+
+impl Future for HandleConnectionData {
+    type Output = Result<(), std::io::Error>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = &mut *self;
+
+        loop {
+            match Pin::new(&mut this.data_receiver).poll_receive(cx) {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(ring_buffer::Closed)) => {
+                    return Poll::Ready(Ok(()));
+                }
+                Poll::Ready(Ok(mut receive_guard)) => {
+                    if this.log_dropped {
+                        let num_dropped = receive_guard.num_dropped();
+                        if num_dropped > 0 {
+                            tracing::warn!(?num_dropped, "Dropped samples");
+                        }
+                    }
+
+                    while receive_guard.has_remaining() {
+                        let chunk = receive_guard.chunk();
+
+                        match Pin::new(&mut this.sink).poll_write(cx, chunk) {
+                            Poll::Pending => return Poll::Pending,
+                            Poll::Ready(Err(error))
+                                if error.kind() == std::io::ErrorKind::BrokenPipe =>
+                            {
+                                // socket closed
+                                return Poll::Ready(Ok(()));
+                            }
+                            Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                            Poll::Ready(Ok(num_bytes_written)) => {
+                                receive_guard.advance(num_bytes_written);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
 async fn tuner_type(device: &mut mrrp_rtl_sdr::Device) -> mrrp_rtl_tcp::TunerType {
     let mrrp_rtl_sdr::device::Inner { rtl2832u: _, tuner } = &*device.inner_mut().await;
 
-    if let Some(r82xx) = tuner.downcast_ref::<mrrp_rtl_sdr::tuner::r82xx::R82xx>() {
+    let tuner_type = if let Some(r82xx) = tuner.downcast_ref::<mrrp_rtl_sdr::tuner::r82xx::R82xx>()
+    {
         match r82xx.model() {
-            mrrp_rtl_sdr::tuner::r82xx::Model::R820T => return mrrp_rtl_tcp::TunerType::R820T,
-            mrrp_rtl_sdr::tuner::r82xx::Model::R828D => return mrrp_rtl_tcp::TunerType::R828D,
-            _ => {}
+            mrrp_rtl_sdr::tuner::r82xx::Model::R820T => Some(mrrp_rtl_tcp::TunerType::R820T),
+            mrrp_rtl_sdr::tuner::r82xx::Model::R828D => Some(mrrp_rtl_tcp::TunerType::R828D),
+            _ => None,
         }
     }
+    else {
+        None
+    };
 
-    mrrp_rtl_tcp::TunerType::UNKNOWN
-}
-
-impl server::Handler for ServerHandler {
-    type Error = Error;
-    type CommandHandler = CommandHandler;
-    type SampleStream = SampleStream;
-
-    async fn accept_connection(
-        &mut self,
-        _address: SocketAddr,
-    ) -> Result<(CommandHandler, SampleStream, mrrp_rtl_tcp::DongleInfo), Self::Error> {
-        let command_handler = CommandHandler {
-            command_sender: self.command_sender.clone(),
-        };
-
-        let sample_stream = SampleStream {
-            data_receiver: self.data_subscriber.subscribe(),
-            log_dropped: self.log_dropped,
-        };
-
-        Ok((command_handler, sample_stream, self.dongle_info))
-    }
-
-    async fn shutdown(&mut self) -> Result<(), Self::Error> {
-        tracing::info!("Shutting down server");
-        let (result_sender, result_receiver) = oneshot::channel();
-        let _ = self
-            .command_sender
-            .send(Command::Shutdown {
-                result_sender: Some(result_sender),
-            })
-            .await;
-        result_receiver.await.unwrap_or(Ok(()))
-    }
-}
-
-#[derive(Debug)]
-pub struct CommandHandler {
-    command_sender: mpsc::Sender<Command>,
-}
-
-impl server::CommandHandler for CommandHandler {
-    type Error = Error;
-
-    async fn handle_command(
-        &mut self,
-        command: mrrp_rtl_tcp::protocol::Command,
-    ) -> Result<(), Self::Error> {
-        let (result_sender, result_receiver) = oneshot::channel();
-
-        self.command_sender
-            .send(Command::Client {
-                command,
-                result_sender,
-            })
-            .await
-            .map_err(|_| anyhow!("reactor dead"))?;
-
-        result_receiver.await?
-    }
-}
-
-pin_project! {
-    #[derive(Debug)]
-    pub struct SampleStream {
-        #[pin]
-        data_receiver: ring_buffer::Receiver<u8>,
-        log_dropped: bool,
-    }
-}
-
-impl server::SampleStream for SampleStream {
-    type Error = Error;
-
-    fn poll_fill_buffer<'a>(
-        self: Pin<&'a mut Self>,
-        cx: &mut Context,
-    ) -> Poll<Result<impl Buf + 'a, Self::Error>> {
-        let this = self.project();
-
-        match this.data_receiver.poll_receive(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(Closed)) => Poll::Ready(Ok(Buffer::Eof)),
-            Poll::Ready(Ok(receive_guard)) => {
-                if *this.log_dropped {
-                    let num_dropped = receive_guard.num_dropped();
-                    if num_dropped > 0 {
-                        tracing::warn!(?num_dropped, "Dropped samples");
-                    }
-                }
-
-                Poll::Ready(Ok(Buffer::Filled(receive_guard)))
-            }
-        }
-    }
-}
-
-#[derive(Debug)]
-pub enum Buffer<'a> {
-    Eof,
-    Filled(ring_buffer::ReceiveGuard<'a, u8>),
-}
-
-impl<'a> Buf for Buffer<'a> {
-    fn remaining(&self) -> usize {
-        match self {
-            Buffer::Eof => 0,
-            Buffer::Filled(receive_guard) => receive_guard.remaining(),
-        }
-    }
-
-    fn chunk(&self) -> &[u8] {
-        match self {
-            Buffer::Eof => &[],
-            Buffer::Filled(receive_guard) => receive_guard.chunk(),
-        }
-    }
-
-    fn advance(&mut self, cnt: usize) {
-        match self {
-            Buffer::Eof => {}
-            Buffer::Filled(receive_guard) => receive_guard.advance(cnt),
-        }
-    }
+    tuner_type.unwrap_or(mrrp_rtl_tcp::TunerType::UNKNOWN)
 }
 
 #[tracing::instrument(skip_all)]
@@ -250,8 +260,11 @@ async fn handle_commands(
             Command::Client {
                 command,
                 result_sender,
+                span,
             } => {
-                let result = handle_command(&mut device, command, &config).await;
+                let result = handle_command(&mut device, command, &config)
+                    .instrument(span)
+                    .await;
                 let _ = result_sender.send(result);
             }
             Command::GetReader { result_sender } => {
@@ -266,10 +279,7 @@ async fn handle_commands(
             }
             Command::Shutdown { result_sender } => {
                 let result = device.close().await.map_err(Into::into);
-
-                if let Some(result_sender) = result_sender {
-                    let _ = result_sender.send(result);
-                }
+                let _ = result_sender.send(result);
 
                 break;
             }
@@ -420,12 +430,13 @@ enum Command {
     Client {
         command: mrrp_rtl_tcp::protocol::Command,
         result_sender: oneshot::Sender<Result<(), Error>>,
+        span: Span,
     },
     GetReader {
         result_sender: oneshot::Sender<Result<mrrp_rtl_sdr::Reader, Error>>,
     },
     Shutdown {
-        result_sender: Option<oneshot::Sender<Result<(), Error>>>,
+        result_sender: oneshot::Sender<Result<(), Error>>,
     },
 }
 

@@ -1,6 +1,7 @@
 use std::{
-    fmt::Debug,
+    convert::Infallible,
     net::SocketAddr,
+    num::NonZero,
     pin::Pin,
     task::{
         Context,
@@ -8,32 +9,39 @@ use std::{
     },
 };
 
-use bytes::Buf;
 use futures_util::{
     SinkExt,
-    TryStreamExt,
+    Stream,
+    StreamExt,
 };
-use pin_project_lite::pin_project;
+use mrrp_core::{
+    sample::Complex,
+    signal::AsyncWriteSamples,
+};
+use mrrp_util::signal::pcm::sink::{
+    PcmSink,
+    RawWriterError,
+};
 use tokio::{
     io::{
         AsyncWrite,
-        AsyncWriteExt,
         BufReader,
         BufWriter,
     },
     net::{
         TcpListener,
         TcpStream,
+        ToSocketAddrs,
+        tcp::{
+            OwnedReadHalf,
+            OwnedWriteHalf,
+        },
     },
 };
-use tokio_util::{
-    codec::{
-        FramedRead,
-        FramedWrite,
-    },
-    sync::CancellationToken,
+use tokio_util::codec::{
+    FramedRead,
+    FramedWrite,
 };
-use tracing::Instrument;
 
 use crate::{
     DongleInfo,
@@ -49,290 +57,203 @@ use crate::{
 
 /// Server errors
 #[derive(Debug, thiserror::Error)]
-pub enum Error<H> {
+pub enum Error {
     #[error(transparent)]
-    Socket(#[from] std::io::Error),
-
-    /// Error from the underlying stream, e.g. the rtlsdr device, or another
-    /// `rtl_tcp`` client.
-    #[error(transparent)]
-    Handler(H),
+    Io(#[from] std::io::Error),
 
     #[error(transparent)]
     InvalidCommand(#[from] InvalidCommand),
 }
 
-impl<H> From<DecoderError<InvalidCommand>> for Error<H> {
+impl From<DecoderError<InvalidCommand>> for Error {
     fn from(value: DecoderError<InvalidCommand>) -> Self {
         match value {
             DecoderError::Protocol(error) => Self::InvalidCommand(error),
-            DecoderError::Io(error) => Self::Socket(error),
+            DecoderError::Io(error) => Self::Io(error),
         }
     }
 }
 
-/// A `rtl_tcp` server.
-///
-/// Different from the original `rtl_tcp` this can accept multiple connections
-/// at once.
-pub struct RtlTcpServer<H> {
-    handler: H,
-    tcp_listener: TcpListener,
-    cancellation_token: CancellationToken,
+#[derive(Clone, Copy, Debug)]
+pub struct AcceptOptions {
+    pub read_buffer_capacity: NonZero<usize>,
+    pub write_buffer_capacity: NonZero<usize>,
 }
 
-impl<H> RtlTcpServer<H> {
-    /// Create a `rtl_tcp` server.
-    ///
-    /// The provided handler accepts clients by returning:
-    ///
-    /// - [`CommandHandler`]: Handles commands (e.g. set sample rate)
-    /// - [`SampleStream`]: Streams the IQ data as bytes
-    /// - [`DongleInfo`]: The initial information about the RTL-SDR that is sent
-    ///   to the client.
-    pub fn new(handler: impl IntoHandler<Handler = H>, tcp_listener: TcpListener) -> Self {
+/// Default read and write buffer size (8 kiB)
+pub const DEFAULT_BUF_SIZE: NonZero<usize> = const { NonZero::new(0x2000).unwrap() };
+
+impl Default for AcceptOptions {
+    fn default() -> Self {
         Self {
-            handler: handler.into_handler(),
-            tcp_listener,
-            cancellation_token: CancellationToken::new(),
-        }
-    }
-
-    pub fn with_graceful_shutdown(mut self, cancellation_token: CancellationToken) -> Self {
-        self.cancellation_token = cancellation_token;
-        self
-    }
-}
-
-impl<H> RtlTcpServer<H>
-where
-    H: Handler,
-    H::CommandHandler: Send + 'static,
-    H::SampleStream: Send + 'static,
-{
-    /// Serve incoming connections
-    pub async fn serve(mut self) -> Result<(), Error<H::Error>> {
-        tracing::debug!("waiting for connections");
-
-        loop {
-            tokio::select! {
-                _ = self.cancellation_token.cancelled() => {
-                    break;
-                }
-                result = self.tcp_listener.accept() => {
-                    let (connection, address) = result?;
-                    self.handle_accept(connection, address, self.cancellation_token.clone()).await?;
-                }
-            }
-        }
-
-        self.handler.shutdown().await.map_err(Error::Handler)?;
-
-        Ok(())
-    }
-
-    async fn handle_accept(
-        &mut self,
-        connection: TcpStream,
-        address: SocketAddr,
-        cancellation_token: CancellationToken,
-    ) -> Result<(), Error<H::Error>> {
-        let span = tracing::info_span!("connection", %address);
-
-        let (command_handler, sample_stream, dongle_info) = self
-            .handler
-            .accept_connection(address)
-            .await
-            .map_err(Error::Handler)?;
-
-        tokio::spawn(
-            async move {
-                tracing::debug!(%address, "new connection");
-                if let Err(error) = serve_connection(
-                    connection,
-                    command_handler,
-                    sample_stream,
-                    dongle_info,
-                    cancellation_token,
-                )
-                .await
-                {
-                    tracing::error!(?error);
-                }
-                tracing::debug!(%address, "connection closed");
-            }
-            .instrument(span),
-        );
-
-        Ok(())
-    }
-}
-
-pin_project! {
-    #[derive(Debug)]
-    struct ForwardDataFuture<S, W> {
-        #[pin]
-        sample_stream: S,
-        #[pin]
-        tcp_write: W,
-    }
-}
-
-impl<S, W> Future for ForwardDataFuture<S, W>
-where
-    S: SampleStream,
-    W: AsyncWrite,
-{
-    type Output = Result<(), Error<S::Error>>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        loop {
-            let mut this = self.as_mut().project();
-
-            match this.sample_stream.poll_fill_buffer(cx) {
-                Poll::Pending => {
-                    return Poll::Pending;
-                }
-                Poll::Ready(Err(error)) => {
-                    return Poll::Ready(Err(Error::Handler(error)));
-                }
-                Poll::Ready(Ok(mut buffer)) => {
-                    if !buffer.has_remaining() {
-                        // sample stream EOF
-                        return Poll::Ready(Ok(()));
-                    }
-
-                    // get chunks from buffer and write them to the socket
-                    loop {
-                        let chunk = buffer.chunk();
-
-                        if chunk.is_empty() {
-                            // sample stream buffer exhausted.
-                            break;
-                        }
-
-                        match this.tcp_write.as_mut().poll_write(cx, chunk) {
-                            Poll::Pending => {
-                                return Poll::Pending;
-                            }
-                            Poll::Ready(Err(error)) => {
-                                return Poll::Ready(Err(Error::Socket(error)));
-                            }
-                            Poll::Ready(Ok(num_written)) => {
-                                if num_written == 0 {
-                                    // socket closed
-                                    return Poll::Ready(Ok(()));
-                                }
-
-                                buffer.advance(num_written);
-                            }
-                        }
-                    }
-                }
-            }
+            read_buffer_capacity: DEFAULT_BUF_SIZE,
+            write_buffer_capacity: DEFAULT_BUF_SIZE,
         }
     }
 }
 
-pub async fn serve_connection<C, S>(
-    mut connection: TcpStream,
-    mut command_handler: C,
-    sample_stream: S,
-    dongle_info: DongleInfo,
-    cancellation_token: CancellationToken,
-) -> Result<(), Error<C::Error>>
-where
-    C: CommandHandler,
-    S: SampleStream<Error = C::Error>,
-{
-    // split connection into read and write part, and buffer it
-    let (tcp_read, tcp_write) = connection.split();
-    let tcp_read = BufReader::new(tcp_read);
-    let mut tcp_write = BufWriter::new(tcp_write);
+#[derive(Debug)]
+pub struct Server {
+    listener: TcpListener,
+}
 
-    // write header
-    let mut header_write = FramedWrite::new(&mut tcp_write, HeaderCodec);
-    header_write.send(Header { dongle_info }).await?;
-    header_write.flush().await?;
-
-    // this reads commands and calls the handler method with them
-    let command_future = async move {
-        let mut command_read = FramedRead::new(tcp_read, CommandCodec);
-
-        while let Some(command) = command_read.try_next().await? {
-            command_handler
-                .handle_command(command)
-                .await
-                .map_err(Error::Handler)?
-        }
-        Ok::<(), Error<C::Error>>(())
-    };
-
-    // this forwards the sample from the handler to the TCP connection
-    let data_future = ForwardDataFuture {
-        sample_stream,
-        tcp_write,
-    };
-
-    tokio::select! {
-        _ = cancellation_token.cancelled() => {},
-        result = command_future => result?,
-        result = data_future => result?,
+impl Server {
+    pub fn from_listener(listener: TcpListener) -> Self {
+        Self { listener }
     }
 
-    // shutdown the connection properly
-    connection.shutdown().await?;
+    pub async fn bind<A: ToSocketAddrs>(address: A) -> Result<Self, Error> {
+        let listener = TcpListener::bind(address).await?;
+        Ok(Self::from_listener(listener))
+    }
 
-    Ok(())
+    pub async fn wait(&self) -> Result<Accept, Error> {
+        let (socket, address) = self.listener.accept().await?;
+
+        Ok(Accept { address, socket })
+    }
 }
 
-pub trait Handler {
-    type Error: Debug + Send;
-    type CommandHandler: CommandHandler<Error = Self::Error>;
-    type SampleStream: SampleStream<Error = Self::Error>;
-
-    fn accept_connection(
-        &mut self,
-        address: SocketAddr,
-    ) -> impl Future<Output = Result<(Self::CommandHandler, Self::SampleStream, DongleInfo), Self::Error>>;
-
-    fn shutdown(&mut self) -> impl Future<Output = Result<(), Self::Error>>;
+#[derive(Debug)]
+pub struct Accept {
+    address: SocketAddr,
+    socket: TcpStream,
 }
 
-pub trait CommandHandler {
-    type Error: Debug;
+impl Accept {
+    pub fn address(&self) -> SocketAddr {
+        self.address
+    }
 
-    fn handle_command(
-        &mut self,
-        command: Command,
-    ) -> impl Future<Output = Result<(), Self::Error>> + Send;
+    pub async fn accept(
+        self,
+        dongle_info: DongleInfo,
+        options: AcceptOptions,
+    ) -> Result<Connection, Error> {
+        let (reader, writer) = self.socket.into_split();
+
+        let mut writer = BufWriter::with_capacity(options.write_buffer_capacity.get(), writer);
+        let reader = BufReader::with_capacity(options.read_buffer_capacity.get(), reader);
+
+        // write header
+        let mut header_writer = FramedWrite::new(&mut writer, HeaderCodec);
+        header_writer.send(Header { dongle_info }).await?;
+        header_writer.flush().await?;
+
+        let command_reader = FramedRead::new(reader, CommandCodec);
+        let pcm_sink = PcmSink::new(writer);
+
+        Ok(Connection {
+            address: self.address,
+            commands: Commands {
+                reader: command_reader,
+            },
+            sink: Sink { inner: pcm_sink },
+        })
+    }
 }
 
-/// # TODO
-///
-/// Replace this with trait from mrrp-core
-pub trait SampleStream {
-    type Error: Debug;
-
-    fn poll_fill_buffer<'a>(
-        self: Pin<&'a mut Self>,
-        cx: &mut Context,
-    ) -> Poll<Result<impl Buf + 'a, Self::Error>>;
+#[derive(Debug)]
+pub struct Connection {
+    pub address: SocketAddr,
+    pub commands: Commands,
+    pub sink: Sink,
 }
 
-pub trait IntoHandler {
-    type Handler: Handler;
-
-    fn into_handler(self) -> Self::Handler;
+#[derive(Debug)]
+pub struct Commands {
+    reader: FramedRead<BufReader<OwnedReadHalf>, CommandCodec>,
 }
 
-impl<H> IntoHandler for H
-where
-    H: Handler,
-{
-    type Handler = H;
+impl Stream for Commands {
+    type Item = Result<Command, Error>;
 
-    fn into_handler(self) -> H {
-        self
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.reader.poll_next_unpin(cx).map_err(Into::into)
+    }
+}
+
+#[derive(Debug)]
+pub struct Sink {
+    // note: the PcmSink itself impls `AsyncWriteSamples` for a bunch of sample
+    // types, but we only allow `Complex<u8>`
+    inner: PcmSink<BufWriter<OwnedWriteHalf>>,
+}
+
+impl Sink {
+    #[inline]
+    pub fn into_raw(self) -> RawSink {
+        RawSink {
+            inner: self.inner.into_inner(),
+        }
+    }
+}
+
+impl AsyncWriteSamples<Complex<u8>> for Sink {
+    type Error = Error;
+
+    #[inline]
+    fn poll_write_samples(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &[Complex<u8>],
+    ) -> Poll<Result<usize, Self::Error>> {
+        // note: this ugly syntax is needed because rustc can't infer the sample
+        // type. here it can, but not in the other methods, and we wanted to
+        // keep it uniform
+        <PcmSink<_> as AsyncWriteSamples<Complex<u8>>>::poll_write_samples(
+            Pin::new(&mut self.inner),
+            cx,
+            buffer,
+        )
+        .map_err(map_sink_err)
+    }
+
+    #[inline]
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // note: this ugly syntax is needed because rustc can't infer the sample
+        // type.
+        <PcmSink<_> as AsyncWriteSamples<Complex<u8>>>::poll_flush(Pin::new(&mut self.inner), cx)
+            .map_err(map_sink_err)
+    }
+
+    #[inline]
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        // note: this ugly syntax is needed because rustc can't infer the sample
+        // type.
+        <PcmSink<_> as AsyncWriteSamples<Complex<u8>>>::poll_close(Pin::new(&mut self.inner), cx)
+            .map_err(map_sink_err)
+    }
+}
+
+#[inline]
+fn map_sink_err(error: RawWriterError<Infallible>) -> Error {
+    match error {
+        RawWriterError::Writer(error) => Error::Io(error),
+        // note: the other variant is uninhabited
+    }
+}
+
+#[derive(Debug)]
+pub struct RawSink {
+    inner: BufWriter<OwnedWriteHalf>,
+}
+
+impl AsyncWrite for RawSink {
+    #[inline]
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.inner).poll_shutdown(cx)
     }
 }

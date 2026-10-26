@@ -28,13 +28,11 @@ use clap::{
     Parser,
     Subcommand,
 };
-use futures_util::TryFutureExt;
 use mrrp_audio::write_stream_to_wav;
 use mrrp_core::sample::Complex;
 use mrrp_rtl_sdr::rtl2832u::register::{
     self as reg,
 };
-use mrrp_rtl_tcp::server::RtlTcpServer;
 use mrrp_util::signal::AsyncReadSamplesExt;
 use tokio::{
     io::AsyncBufReadExt,
@@ -54,10 +52,7 @@ use crate::{
             hexyl,
             print_reg_dump,
         },
-        server::{
-            ServerConfig,
-            ServerHandler,
-        },
+        server::ServerConfig,
     },
     util::{
         SourceInfo,
@@ -281,33 +276,16 @@ pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
             fix_tuner_frequency,
         } => {
             let device = device.open_device().await?;
+
             let tcp_listener = TcpListener::bind(listen_address).await?;
+            let shutdown = shutdown_signal();
             let server_config = ServerConfig {
                 buffer_size,
                 fix_tuner_frequency,
+                log_dropped,
             };
-            let server_handler = ServerHandler::new(device, server_config)
-                .await?
-                .with_log_dropped(log_dropped);
-            let server = RtlTcpServer::new(server_handler, tcp_listener)
-                .with_graceful_shutdown(shutdown_signal());
 
-            server
-                .serve()
-                .map_err(|error| {
-                    // this needs some explicit conversion because anyhow::Error
-                    // doesn't implement std::error::Error.
-                    // we just convert the non-anyhow variants into anyhow
-                    // errors.
-                    match error {
-                        mrrp_rtl_tcp::server::Error::Socket(error) => error.into(),
-                        mrrp_rtl_tcp::server::Error::Handler(error) => error,
-                        mrrp_rtl_tcp::server::Error::InvalidCommand(invalid_command) => {
-                            invalid_command.into()
-                        }
-                    }
-                })
-                .await?;
+            server::run(device, tcp_listener, shutdown, server_config).await?;
         }
         Command::Record {
             device,

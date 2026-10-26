@@ -9,7 +9,6 @@
 //pub mod client;
 pub mod protocol;
 pub mod server;
-
 use std::fmt::Debug;
 
 /// The type of tuner in a RTL-SDR.

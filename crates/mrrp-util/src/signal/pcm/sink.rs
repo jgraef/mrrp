@@ -34,12 +34,18 @@ pin_project! {
 }
 
 impl<W> PcmSink<W> {
+    #[inline]
     pub fn new(writer: W) -> Self {
         Self {
             writer,
             write_pos: 0,
             buffer: vec![],
         }
+    }
+
+    #[inline]
+    pub fn into_inner(self) -> W {
+        self.writer
     }
 }
 
