@@ -28,10 +28,50 @@ use url::Url;
 
 pub const SATNOGS_API_URL: &str = "https://db.satnogs.org/api/";
 
+/// create endpoint URL
+fn endpoint_url(base_url: &Url, endpoint: &str) -> Url {
+    let mut url = base_url.clone();
+    let mut path_segments = url.path_segments_mut().unwrap();
+    path_segments.pop_if_empty();
+    for segment in endpoint.split('/') {
+        path_segments.push(segment);
+    }
+    // the API expects a trailing /
+    path_segments.push("");
+    drop(path_segments);
+    url
+}
+
+/// normalize base URL
+fn normalize_base_url(mut base_url: Url) -> Result<Url, Error> {
+    //
+    // note: unfortunately the borrow checker is a bit annoying here. we can
+    // only return the error outside of the match.
+    let mut ok = true;
+    match base_url.path_segments_mut() {
+        Ok(mut path_segments) => {
+            path_segments.pop_if_empty();
+        }
+        Err(()) => {
+            ok = false;
+        }
+    }
+
+    if ok {
+        Ok(base_url)
+    }
+    else {
+        Err(Error::InvalidUrl { url: base_url })
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
     Http(#[from] reqwest::Error),
+
+    #[error("Invalid URL: {url}")]
+    InvalidUrl { url: Url },
 }
 
 #[derive(Clone, Debug)]
@@ -42,15 +82,24 @@ pub struct SatnogsApi {
 
 impl SatnogsApi {
     pub fn new() -> Self {
+        let base_url = SATNOGS_API_URL
+            .parse()
+            .expect("`SATNOGS_API_URL` is invalid");
+        Self::from_base_url(base_url).expect("Failed to create API client from `SATNOGS_API_URL`")
+    }
+
+    pub fn from_base_url(base_url: Url) -> Result<Self, Error> {
         let client = reqwest::Client::builder()
             .user_agent("reqwest/mrrp-sat")
             .build()
             .expect("http client");
 
-        Self {
+        let base_url = normalize_base_url(base_url)?;
+
+        Ok(Self {
             client,
-            base_url: SATNOGS_API_URL.parse().expect("invalid API URL"),
-        }
+            base_url,
+        })
     }
 
     async fn fetch<T>(
@@ -61,9 +110,7 @@ impl SatnogsApi {
     where
         T: DeserializeOwned,
     {
-        let request = self
-            .client
-            .get(self.base_url.join(endpoint).expect("invalid endpoint URL"));
+        let request = self.client.get(endpoint_url(&self.base_url, endpoint));
 
         let request = if let Some(if_modified_since) = if_modified_since {
             request.header(
@@ -326,5 +373,35 @@ where
     }
     else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::satnogs::{
+        SATNOGS_API_URL,
+        endpoint_url,
+        normalize_base_url,
+    };
+
+    #[test]
+    fn it_creates_well_formed_endpoint_urls() {
+        let url = endpoint_url(&SATNOGS_API_URL.parse().unwrap(), "tle");
+        assert_eq!(url.to_string(), "https://db.satnogs.org/api/tle/");
+
+        let url = endpoint_url(&SATNOGS_API_URL.parse().unwrap(), "tle/historical");
+        assert_eq!(
+            url.to_string(),
+            "https://db.satnogs.org/api/tle/historical/"
+        );
+    }
+
+    #[test]
+    fn it_normalizes_base_urls() {
+        let url = normalize_base_url("https://alt.satnogs.db/a/b".parse().unwrap()).unwrap();
+        assert_eq!(url.to_string(), "https://alt.satnogs.db/a/b");
+
+        let url = normalize_base_url("https://alt.satnogs.db/a/b/".parse().unwrap()).unwrap();
+        assert_eq!(url.to_string(), "https://alt.satnogs.db/a/b");
     }
 }
