@@ -1,6 +1,9 @@
 use std::{
     collections::HashMap,
-    f64::consts::PI,
+    f64::consts::{
+        PI,
+        TAU,
+    },
     fmt::Debug,
     fs::File,
     io::{
@@ -15,6 +18,7 @@ use std::{
         Path,
         PathBuf,
     },
+    time::Duration,
 };
 
 use chrono::{
@@ -22,6 +26,7 @@ use chrono::{
     Utc,
 };
 use itertools::Either;
+use mrrp_core::consts::f64::C;
 use mrrp_geo::Geodetic;
 use numeris::{
     Quaternion,
@@ -30,6 +35,7 @@ use numeris::{
 };
 use satkit::{
     ITRFCoord,
+    TimeLike,
     sgp4::{
         SGP4Source,
         SGP4State,
@@ -475,6 +481,19 @@ impl Tle {
     pub fn source(&self) -> &str {
         &self.satnogs.tle_source
     }
+
+    pub fn orbit_number_and_phase(&self, time: DateTime<Utc>) -> (i32, f64) {
+        // todo: untested
+
+        let days_since_epoch = (time.as_instant() - self.satkit.epoch).as_days();
+        let orbits_since_epoch = days_since_epoch * self.satkit.mean_motion;
+
+        let number = self.satkit.rev_num + (orbits_since_epoch as i32);
+        let phase = (orbits_since_epoch.fract() * TAU + self.satkit.mean_anomaly.to_radians())
+            .rem_euclid(TAU);
+
+        (number, phase)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -638,6 +657,7 @@ pub struct RelativeState {
 
 impl RelativeState {
     /// Azimuth in radians
+    #[inline]
     pub fn azimuth(&self) -> f64 {
         // since we're using North-Clockwise convention atan2(x, y) should be
         // correct.
@@ -651,16 +671,19 @@ impl RelativeState {
     }
 
     /// Elevation in radians
+    #[inline]
     pub fn elevation(&self) -> f64 {
         (self.position.z() / self.position.norm()).asin()
     }
 
     /// Distance in m
+    #[inline]
     pub fn distance(&self) -> f64 {
         self.position.norm()
     }
 
     /// Radial speed in m/s
+    #[inline]
     pub fn radial_speed(&self) -> f64 {
         // The position vector is the vector along which we want to measure the
         // speed, thus we project the velocity onto it. But to get a positive
@@ -670,25 +693,41 @@ impl RelativeState {
     }
 
     /// Free-space Path Loss in dB
+    #[inline]
     pub fn free_space_path_loss_db(&self, frequency: f64) -> f64 {
         free_space_path_loss_db(self.distance(), frequency)
     }
 
     /// Doppler shift in Hz
+    #[inline]
     pub fn doppler_shift(&self, frequency: f64) -> f64 {
         doppler_shift(self.radial_speed(), frequency)
+    }
+
+    /// Signal delay
+    #[inline]
+    pub fn signal_delay(&self) -> Duration {
+        signal_delay(self.distance())
     }
 }
 
 /// Free-space Path Loss in dB
+#[inline]
 pub fn free_space_path_loss_db(distance: f64, frequency: f64) -> f64 {
-    20.0 * (distance.log10() + frequency.log10() + (4.0 * PI / satkit::consts::C))
+    20.0 * (distance.log10() + frequency.log10() + (4.0 * PI / C))
 }
 
 /// Doppler shift in Hz
+#[inline]
 pub fn doppler_shift(radial_speed: f64, frequency: f64) -> f64 {
     // https://en.wikipedia.org/wiki/Doppler_effect#Satellite_communication
-    radial_speed * frequency / satkit::consts::C
+    radial_speed * frequency / C
+}
+
+/// Free-space signal delay
+#[inline]
+pub fn signal_delay(distance: f64) -> Duration {
+    Duration::from_secs_f64(distance / C)
 }
 
 mod serde_itrfcoord {

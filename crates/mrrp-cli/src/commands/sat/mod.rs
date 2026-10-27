@@ -2,6 +2,7 @@ mod capture;
 mod config;
 mod doppler;
 mod list;
+mod show;
 
 use std::{
     path::PathBuf,
@@ -48,6 +49,24 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
         Command::Update => {
             tracing::info!("Performing forced update");
             updater.perform_update(&mut satellites).await?;
+        }
+        Command::Show {
+            sat_id,
+            time,
+            frequency,
+        } => {
+            let time = time.unwrap_or_else(Utc::now);
+
+            let location = context
+                .get_geolocation()
+                .inspect_err(|error| {
+                    tracing::warn!(%error);
+                })
+                .ok();
+
+            let satellite = get_satellite(&satellites, &sat_id)?;
+
+            show::show(satellite, time, location, &frequency)?;
         }
         Command::ListPasses {
             sat_id,
@@ -173,6 +192,19 @@ pub struct Args {
 enum Command {
     /// Update TLEs
     Update,
+    /// Show current satellite state
+    Show {
+        /// Satellite ID
+        ///
+        /// This is the SatNOGs satellite ID.
+        sat_id: SatelliteId,
+
+        #[clap(short, long)]
+        time: Option<DateTime<Utc>>,
+
+        #[clap(short, long, value_parser = si::parse_frequency::<f64>)]
+        frequency: Vec<f64>,
+    },
     /// List satellite passes
     ListPasses {
         #[clap(flatten)]

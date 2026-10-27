@@ -24,7 +24,7 @@ pub fn prefix<F>(value: F) -> Option<(i32, &'static str)>
 where
     F: Float,
 {
-    let exponent = (value.log10() / F::from(3.0f32).unwrap())
+    let exponent = (value.abs().log10() / F::from(3.0f32).unwrap())
         .floor()
         .to_i32()
         .unwrap()

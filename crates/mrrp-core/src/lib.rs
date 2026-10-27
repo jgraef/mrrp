@@ -5,6 +5,7 @@
 
 pub mod buf;
 pub mod chunk;
+pub mod consts;
 pub mod sample;
 pub mod signal;
 mod util;
