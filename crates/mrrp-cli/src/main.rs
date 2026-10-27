@@ -28,6 +28,7 @@ use tabled::{
 use crate::{
     config::Config,
     files::Files,
+    util::partially_obscured,
 };
 
 #[tokio::main]
@@ -106,6 +107,13 @@ impl Context {
 
         // open satellite data
         let mut satellites = SatelliteDatabase::open(data_dir.join("satellites.json"))?;
+        if let Some(api_token) = &self.config.sat.satnogs_api_token {
+            tracing::debug!(
+                "SatNOGS api token set: {}",
+                partially_obscured(api_token, 32, 'x')
+            );
+            satellites.set_satnogs_api_token(api_token.clone());
+        }
 
         // perform update if necessary, but skip this invoked with update
         // command

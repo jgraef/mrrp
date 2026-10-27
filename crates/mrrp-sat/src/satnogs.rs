@@ -12,7 +12,11 @@ use chrono::{
 };
 use reqwest::{
     StatusCode,
-    header,
+    header::{
+        self,
+        HeaderMap,
+        HeaderValue,
+    },
 };
 use serde::{
     Deserialize,
@@ -78,6 +82,7 @@ pub enum Error {
 pub struct SatnogsApi {
     client: reqwest::Client,
     base_url: Url,
+    api_token: Option<String>,
 }
 
 impl SatnogsApi {
@@ -99,7 +104,13 @@ impl SatnogsApi {
         Ok(Self {
             client,
             base_url,
+            api_token: None,
         })
+    }
+
+    #[inline]
+    pub fn set_api_token(&mut self, token: String) {
+        self.api_token = Some(token);
     }
 
     async fn fetch<T>(
@@ -112,17 +123,26 @@ impl SatnogsApi {
     {
         let request = self.client.get(endpoint_url(&self.base_url, endpoint));
 
-        let request = if let Some(if_modified_since) = if_modified_since {
-            request.header(
+        let mut headers = HeaderMap::new();
+
+        if let Some(if_modified_since) = if_modified_since {
+            headers.insert(
                 header::IF_MODIFIED_SINCE,
-                if_modified_since
-                    .format("%a, %d %b %Y %H:%M:%S GMT")
-                    .to_string(),
-            )
+                HeaderValue::from_str(
+                    &if_modified_since
+                        .format("%a, %d %b %Y %H:%M:%S GMT")
+                        .to_string(),
+                )
+                .unwrap(),
+            );
         }
-        else {
-            request
-        };
+
+        if let Some(api_token) = &self.api_token {
+            headers.insert(
+                header::AUTHORIZATION,
+                HeaderValue::from_str(&format!("Token {api_token}")).unwrap(),
+            );
+        }
 
         let response = request.send().await?;
 

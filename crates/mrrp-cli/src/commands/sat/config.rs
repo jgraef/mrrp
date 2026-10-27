@@ -15,6 +15,8 @@ pub struct Config {
         deserialize_with = "crate::util::deserialize_human_time_delta"
     )]
     pub min_update_interval: TimeDelta,
+
+    pub satnogs_api_token: Option<String>,
 }
 
 impl Default for Config {
@@ -22,6 +24,7 @@ impl Default for Config {
         Self {
             location: None,
             min_update_interval: default_min_update_interval(),
+            satnogs_api_token: None,
         }
     }
 }

@@ -4,7 +4,10 @@ pub mod sleep_until;
 
 use std::{
     borrow::Cow,
-    fmt::Display,
+    fmt::{
+        Debug,
+        Display,
+    },
     path::Path,
     str::FromStr,
     sync::OnceLock,
@@ -240,5 +243,45 @@ impl SourceInfo {
             DateTime::<Local>::from(self.start_time).format("%H-%M-%S_%d-%m-%Y"),
             file_extension
         )
+    }
+}
+
+pub fn partially_obscured<'a>(
+    value: &'a str,
+    hide: usize,
+    replacement: char,
+) -> PartiallyObscured<'a> {
+    let hide = hide.min(value.len());
+    let show = value.len() - hide;
+
+    PartiallyObscured {
+        value,
+        show,
+        hide,
+        replacement,
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct PartiallyObscured<'a> {
+    value: &'a str,
+    show: usize,
+    hide: usize,
+    replacement: char,
+}
+
+impl<'a> Display for PartiallyObscured<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", &self.value[..self.show])?;
+        for _ in 0..self.hide {
+            write!(f, "{}", self.replacement)?;
+        }
+        Ok(())
+    }
+}
+
+impl<'a> Debug for PartiallyObscured<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        <str as Debug>::fmt(&self.value[..self.show], f)
     }
 }

@@ -302,6 +302,10 @@ impl SatelliteDatabase {
         })
     }
 
+    pub fn set_satnogs_api_token(&mut self, api_token: String) {
+        self.satnogs_api.set_api_token(api_token);
+    }
+
     pub fn write_to_disk(&self) -> Result<(), Error> {
         self.satellites.write_to_disk(&self.path)
     }
