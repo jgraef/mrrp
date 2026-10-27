@@ -70,6 +70,7 @@ pub async fn run(
         tuner_type,
         tuner_gain_count,
     };
+    tracing::debug!(?dongle_info);
 
     // spawn task handling commands for the rtl-sdr
     let (command_sender, command_receiver) = mpsc::channel(64);
@@ -234,9 +235,14 @@ impl Future for HandleConnectionData {
 async fn tuner_type(device: &mut mrrp_rtl_sdr::Device) -> mrrp_rtl_tcp::TunerType {
     let mrrp_rtl_sdr::device::Inner { rtl2832u: _, tuner } = &*device.inner_mut().await;
 
-    let tuner_type = if let Some(r82xx) = tuner.downcast_ref::<mrrp_rtl_sdr::tuner::r82xx::R82xx>()
-    {
-        match r82xx.model() {
+    let tuner_type = if let Some(tuner) = tuner
+        .downcast_ref::<mrrp_rtl_sdr::tuner::r82xx::R82xx>()
+        .or_else(|| {
+            tuner
+                .downcast_ref::<mrrp_rtl_sdr::tuner::r82xx::blog::BlogTuner>()
+                .map(|blog| &blog.r82xx)
+        }) {
+        match tuner.model() {
             mrrp_rtl_sdr::tuner::r82xx::Model::R820T => Some(mrrp_rtl_tcp::TunerType::R820T),
             mrrp_rtl_sdr::tuner::r82xx::Model::R828D => Some(mrrp_rtl_tcp::TunerType::R828D),
             _ => None,
