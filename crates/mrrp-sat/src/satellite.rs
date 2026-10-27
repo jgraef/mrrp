@@ -356,11 +356,7 @@ impl Satellite {
         tracing::trace!(satellite = ?self, num_times = times.len(), "predicting");
 
         if let Some(tle) = &self.satkit_tle {
-            let mut source = CachedTle {
-                handle: self.handle,
-                tle,
-                cache,
-            };
+            let mut source = CachedTle { tle, cache };
 
             let state = sgp4(&mut source, times)?;
 
@@ -438,7 +434,6 @@ pub struct OrbitPropagationCache {
 /// Thus the TLE doesn't need to be mutable.
 #[derive(Debug)]
 struct CachedTle<'a> {
-    handle: SatelliteHandle,
     tle: &'a satkit::TLE,
     cache: &'a mut OrbitPropagationCache,
 }

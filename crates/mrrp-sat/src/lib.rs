@@ -1,12 +1,8 @@
-// todo
-#![allow(dead_code)]
-
 #[cfg(feature = "doppler-correct")]
 pub mod doppler_correct;
 pub mod pass;
 pub mod satellite;
 pub mod satnogs;
-pub mod tracker;
 pub mod update;
 
 pub use mrrp_geo::Geodetic;
