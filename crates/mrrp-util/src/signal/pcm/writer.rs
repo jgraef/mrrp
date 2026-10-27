@@ -45,7 +45,7 @@ where
         Self {
             writer,
             buffer: Bytes::zero(),
-            buffer_position: 0,
+            buffer_position: <<S as Encoding>::Encoded>::LEN,
             _marker: PhantomData,
         }
     }
@@ -100,6 +100,8 @@ where
         cx: &mut Context<'_>,
         mut buffer: &[S],
     ) -> Poll<Result<usize, Self::Error>> {
+        let mut num_samples_written = 0;
+
         loop {
             let this = self.as_mut().project();
 
@@ -115,10 +117,11 @@ where
                 // get one sample and increment cursor.
                 *this.buffer = buffer[0].encode();
                 buffer = &buffer[1..];
+                num_samples_written += 1;
 
                 // set small internal buffer filled, so the else case will write
                 // it
-                *this.buffer_position = <<S as Encoding>::Encoded>::LEN;
+                *this.buffer_position = 0;
             }
             else {
                 // there's some left-over in the internal buffer that we weren't
@@ -132,7 +135,8 @@ where
                     Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
                     Poll::Ready(Ok(num_bytes_written)) => {
                         if num_bytes_written == 0 {
-                            return Poll::Ready(Ok(0));
+                            // underlying writer doesn't accept any bytes anmore
+                            break;
                         }
                         *this.buffer_position += num_bytes_written;
                     }
@@ -140,7 +144,7 @@ where
             }
         }
 
-        todo!();
+        Poll::Ready(Ok(num_samples_written))
     }
 
     #[inline]
