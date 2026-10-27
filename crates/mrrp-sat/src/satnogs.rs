@@ -1,8 +1,18 @@
+//! SatNOGS API client
+//!
+//! [API schema][1]
+//!
+//! [1]: https://db.satnogs.org/api/schema/docs/#/
+
 use std::borrow::Cow;
 
 use chrono::{
     DateTime,
     Utc,
+};
+use reqwest::{
+    StatusCode,
+    header,
 };
 use serde::{
     Deserialize,
@@ -43,40 +53,71 @@ impl SatnogsApi {
         }
     }
 
-    async fn fetch<T>(&self, endpoint: &str) -> Result<T, Error>
+    async fn fetch<T>(
+        &self,
+        endpoint: &str,
+        if_modified_since: Option<DateTime<Utc>>,
+    ) -> Result<Option<T>, Error>
     where
         T: DeserializeOwned,
     {
-        Ok(self
+        let request = self
             .client
-            .get(self.base_url.join(endpoint).expect("invalid endpoint URL"))
-            .send()
-            .await?
-            .error_for_status()?
-            .json()
-            .await?)
+            .get(self.base_url.join(endpoint).expect("invalid endpoint URL"));
 
-        // for testing we'll use a local copy to not spam their API
-        //let reader =
-        //    BufReader::new(File::open(&format!("tmp/satnogs/{}_pretty.json",
-        // endpoint)).unwrap()); Ok(serde_json::from_reader(reader).
-        // unwrap())
+        let request = if let Some(if_modified_since) = if_modified_since {
+            request.header(
+                header::IF_MODIFIED_SINCE,
+                if_modified_since
+                    .format("%a, %d %b %Y %H:%M:%S GMT")
+                    .to_string(),
+            )
+        }
+        else {
+            request
+        };
+
+        let response = request.send().await?;
+
+        if response.status() == StatusCode::NOT_MODIFIED {
+            tracing::debug!(%endpoint, "not modified");
+            Ok(None)
+        }
+        else {
+            Ok(response.error_for_status()?.json().await?)
+        }
     }
 
-    pub async fn modes(&self) -> Result<Vec<Mode>, Error> {
-        self.fetch("modes").await
+    #[inline]
+    pub async fn modes(
+        &self,
+        if_modified_since: Option<DateTime<Utc>>,
+    ) -> Result<Option<Vec<Mode>>, Error> {
+        self.fetch("modes", if_modified_since).await
     }
 
-    pub async fn satellites(&self) -> Result<Vec<Satellite>, Error> {
-        self.fetch("satellites").await
+    #[inline]
+    pub async fn satellites(
+        &self,
+        if_modified_since: Option<DateTime<Utc>>,
+    ) -> Result<Option<Vec<Satellite>>, Error> {
+        self.fetch("satellites", if_modified_since).await
     }
 
-    pub async fn tle(&self) -> Result<Vec<Tle>, Error> {
-        self.fetch("tle").await
+    #[inline]
+    pub async fn tle(
+        &self,
+        if_modified_since: Option<DateTime<Utc>>,
+    ) -> Result<Option<Vec<Tle>>, Error> {
+        self.fetch("tle", if_modified_since).await
     }
 
-    pub async fn transmitters(&self) -> Result<Vec<Transmitter>, Error> {
-        self.fetch("transmitters").await
+    #[inline]
+    pub async fn transmitters(
+        &self,
+        if_modified_since: Option<DateTime<Utc>>,
+    ) -> Result<Option<Vec<Transmitter>>, Error> {
+        self.fetch("transmitters", if_modified_since).await
     }
 }
 

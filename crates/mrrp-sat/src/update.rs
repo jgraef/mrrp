@@ -46,12 +46,22 @@ impl Updater {
         Ok(())
     }
 
+    #[inline]
     pub async fn perform_update(&self, satellites: &mut SatelliteDatabase) -> Result<(), Error> {
+        self.perform_update_impl(satellites, self.get_last_update_time()?)
+            .await
+    }
+
+    async fn perform_update_impl(
+        &self,
+        satellites: &mut SatelliteDatabase,
+        last_update: Option<DateTime<Utc>>,
+    ) -> Result<(), Error> {
         tracing::info!("Updating satkit data");
         satkit_update().await?;
 
-        tracing::info!("Updating satellite list");
-        satellites.update().await?;
+        tracing::info!(?last_update, "Updating satellite list");
+        satellites.update(last_update).await?;
 
         self.write_last_update_time()?;
 
@@ -70,7 +80,8 @@ impl Updater {
 
         if needs_update {
             tracing::info!(?last_update_time, "Performing automatic update");
-            self.perform_update(satellites).await?;
+            self.perform_update_impl(satellites, last_update_time)
+                .await?;
         }
 
         Ok(())

@@ -70,34 +70,52 @@ impl Satellites {
     ///
     /// This does not clear the DB before inserting new satellites, so anything
     /// removed from the Satnogs DB will be kept.
-    pub async fn update_from_satnogs(&mut self, satnogs_api: &SatnogsApi) -> Result<(), Error> {
+    pub async fn update_from_satnogs(
+        &mut self,
+        satnogs_api: &SatnogsApi,
+        last_update: Option<DateTime<Utc>>,
+    ) -> Result<(), Error> {
         // we only use satnogs API atm, but this is what gpredict uses:
         // https://github.com/csete/gpredict/blob/73937f7e9825747d8482884d25c65904b5ff0ef5/src/sat-cfg.c#L228-L248
 
-        let satellites = satnogs_api.satellites().await?;
-        let tle = satnogs_api.tle().await?;
-        let transmitters = satnogs_api.transmitters().await?;
+        let satellites = satnogs_api.satellites(last_update).await?;
+        let tles = satnogs_api.tle(last_update).await?;
+        let transmitters = satnogs_api.transmitters(last_update).await?;
 
-        let mut tle_index = HashMap::with_capacity(satellites.len());
-        for tle in tle {
-            tle_index.insert(tle.sat_id.clone(), tle);
-        }
+        let mut tle_index = tles.map(|tles| {
+            let mut tle_index = HashMap::with_capacity(tles.len());
+            for tle in tles {
+                let removed = tle_index.insert(tle.sat_id.clone(), tle);
+                assert!(removed.is_none());
+            }
+            tle_index
+        });
 
-        let mut transmitter_index = HashMap::with_capacity(satellites.len());
-        for transmitter in transmitters {
+        let mut transmitter_index = transmitters.map(|transmitters| {
+            let mut transmitter_index = HashMap::with_capacity(transmitters.len());
+            for transmitter in transmitters {
+                transmitter_index
+                    .entry(transmitter.sat_id.clone())
+                    .or_insert(vec![])
+                    .push(transmitter);
+            }
             transmitter_index
-                .entry(transmitter.sat_id.clone())
-                .or_insert(vec![])
-                .push(transmitter);
-        }
+        });
 
-        for satellite in satellites {
-            let tle = tle_index.remove(&satellite.sat_id);
-            let transmitters = transmitter_index
-                .remove(&satellite.sat_id)
-                .unwrap_or_default();
+        if let Some(satellites) = satellites {
+            for satellite in satellites {
+                let tle = tle_index
+                    .as_mut()
+                    .and_then(|tle_index| tle_index.remove(&satellite.sat_id));
 
-            self.insert_or_replace_from_satnogs(satellite, tle, transmitters, true);
+                let transmitters = transmitter_index.as_mut().map(|transmitter_index| {
+                    transmitter_index
+                        .remove(&satellite.sat_id)
+                        .unwrap_or_default()
+                });
+
+                self.insert_or_replace_from_satnogs(satellite, tle, transmitters, true);
+            }
         }
 
         Ok(())
@@ -107,19 +125,26 @@ impl Satellites {
         &mut self,
         satellite: satnogs::Satellite,
         tle: Option<satnogs::Tle>,
-        transmitters: Vec<satnogs::Transmitter>,
+        transmitters: Option<Vec<satnogs::Transmitter>>,
         replace_existing: bool,
     ) {
         if let Some(&handle) = self.by_satnogs_id.get(&satellite.sat_id) {
             if replace_existing {
-                *self
+                let existing = self
                     .get_mut(handle)
-                    .expect("invalid handle from satnogs id") =
-                    Satellite::new(handle, satellite, tle, transmitters);
+                    .expect("invalid handle from satnogs id");
+
+                let tle = tle.or_else(|| existing.satnogs_tle.take());
+                let transmitters = transmitters
+                    .unwrap_or_else(|| std::mem::take(&mut existing.satnogs_transmitters));
+
+                *existing = Satellite::new(handle, satellite, tle, transmitters);
             }
         }
         else {
-            self.insert(|handle| Satellite::new(handle, satellite, tle, transmitters));
+            self.insert(|handle| {
+                Satellite::new(handle, satellite, tle, transmitters.unwrap_or_default())
+            });
         }
     }
 
@@ -162,7 +187,7 @@ impl Satellites {
             self.insert_or_replace_from_satnogs(
                 satellite.satellite,
                 satellite.tle,
-                satellite.transmitters,
+                Some(satellite.transmitters),
                 replace_existing,
             );
         }
@@ -269,9 +294,9 @@ impl SatelliteDatabase {
         self.satellites.read_from_disk(&self.path, replace_existing)
     }
 
-    pub async fn update(&mut self) -> Result<(), Error> {
+    pub async fn update(&mut self, last_update: Option<DateTime<Utc>>) -> Result<(), Error> {
         self.satellites
-            .update_from_satnogs(&self.satnogs_api)
+            .update_from_satnogs(&self.satnogs_api, last_update)
             .await?;
         self.write_to_disk()?;
         Ok(())
