@@ -9,6 +9,10 @@ use std::{
         Seek,
     },
     path::PathBuf,
+    time::{
+        Duration,
+        Instant,
+    },
 };
 
 use anyhow::{
@@ -36,6 +40,7 @@ use mrrp_file::riff::{
     self,
     ChunkId,
 };
+use mrrp_rtl_tcp::client::Client;
 use mrrp_util::signal::{
     AsyncReadSamplesExt,
     EofError,
@@ -98,6 +103,38 @@ pub async fn run(args: Args, context: Context) -> Result<(), Error> {
             image.save(&output)?;
         }
         Command::Miq(args) => miq::run(args, context).await?,
+        Command::Client { address } => {
+            let mut client = Client::connect(&address, Default::default()).await?;
+
+            println!("{:#?}", client.dongle_info);
+
+            client.command_sender.set_sample_rate(2_400_000).await?;
+            client
+                .command_sender
+                .set_center_frequency(437_400_000)
+                .await?;
+
+            let mut buf = vec![Complex::ZERO; 0x1000];
+            let mut samples_per_second = 0;
+            let mut last_report = Instant::now();
+            let report_interval = Duration::from_secs(2);
+
+            loop {
+                let num_samples = client.source.read_samples(&mut buf).await?;
+                samples_per_second += num_samples;
+
+                let now = Instant::now();
+                let time_since_last_report = now - last_report;
+                if time_since_last_report >= report_interval {
+                    let sps = samples_per_second as f32 / time_since_last_report.as_secs_f32();
+
+                    println!("{sps:.3} samples per second");
+
+                    last_report = now;
+                    samples_per_second = 0;
+                }
+            }
+        }
     }
 
     Ok(())
@@ -133,6 +170,9 @@ enum Command {
         input: PathBuf,
     },
     Miq(miq::Args),
+    Client {
+        address: String,
+    },
 }
 
 async fn render_waterfall<R>(

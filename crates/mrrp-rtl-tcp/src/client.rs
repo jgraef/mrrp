@@ -1,369 +1,243 @@
-use bytes::Buf;
+use std::{
+    num::NonZero,
+    pin::Pin,
+    task::{
+        Context,
+        Poll,
+    },
+};
+
+use futures_util::{
+    SinkExt,
+    TryStreamExt,
+};
+use mrrp_core::{
+    sample::{
+        Complex,
+        encoding::BigEndian,
+    },
+    signal::{
+        AsyncReadSamples,
+        ReadBuf,
+        Remaining,
+        StreamLength,
+    },
+};
+use mrrp_util::signal::pcm::PcmReader;
 use tokio::{
     io::{
-        AsyncRead,
         AsyncReadExt,
         BufReader,
-        BufWriter,
     },
     net::{
         TcpStream,
         ToSocketAddrs,
+        tcp::{
+            OwnedReadHalf,
+            OwnedWriteHalf,
+        },
     },
-    sync::{
-        mpsc,
-        oneshot,
-    },
+};
+use tokio_util::codec::{
+    FramedRead,
+    FramedWrite,
 };
 
 use crate::{
-    BufReadBytesExt,
-    Command,
+    DEFAULT_BUF_SIZE,
     DongleInfo,
-    HEADER_LENGTH,
-    MAGIC,
-    TunerType,
+    protocol::{
+        Command,
+        CommandCodec,
+        DecoderError,
+        HEADER_LENGTH,
+        HeaderCodec,
+        InvalidHeader,
+    },
 };
 
-/// size of the read buffer: 8 KiB
-const READ_BUFFER_SIZE: usize = 0x2000;
-
-/// size of the write buffer: 1 KiB, plenty for a few command
-const WRITE_BUFFER_SIZE: usize = 0x400;
-
-const COMMAND_QUEUE_SIZE: usize = 32;
-//const SAMPLE_BUFFER_QUEUE_SIZE: usize = 32;
-//const SAMPLE_BUFFER_SIZE: usize = READ_BUFFER_SIZE;
-
+/// Client errors
 #[derive(Debug, thiserror::Error)]
-#[error("rtl_tcp client error")]
 pub enum Error {
+    #[error(transparent)]
     Io(#[from] std::io::Error),
-    InvalidMagic([u8; 4]),
-    ConnectionClosed,
+
+    #[error(transparent)]
+    InvalidHeader(#[from] InvalidHeader),
+}
+
+impl From<DecoderError<InvalidHeader>> for Error {
+    #[inline]
+    fn from(value: DecoderError<InvalidHeader>) -> Self {
+        match value {
+            DecoderError::Protocol(error) => Self::InvalidHeader(error),
+            DecoderError::Io(error) => Self::Io(error),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ConnectOptions {
+    pub read_buffer_capacity: NonZero<usize>,
+    pub write_buffer_capacity: NonZero<usize>,
+}
+
+impl Default for ConnectOptions {
+    fn default() -> Self {
+        Self {
+            read_buffer_capacity: DEFAULT_BUF_SIZE,
+            write_buffer_capacity: DEFAULT_BUF_SIZE,
+        }
+    }
 }
 
 /// A client for `rtl_tcp`
-#[derive(Clone, Debug)]
-pub struct RtlTcpClient {
-    dongle_info: DongleInfo,
-    command_sender: mpsc::Sender<ControlMessage>,
-    //buffer_queue_subscriber: buffer_queue::Subscriber,
+#[derive(Debug)]
+pub struct Client {
+    pub dongle_info: DongleInfo,
+    pub command_sender: CommandSender,
+    pub source: Source,
 }
 
-impl RtlTcpClient {
+impl Client {
     /// Connnect to a `rtl_tcp` server.
     ///
     /// This implements [`AsyncReadSamples`] for async reading of IQ samples,
     /// and [`Configure`] to configure the receiver.
-    pub async fn connect<A: ToSocketAddrs>(address: A) -> Result<Self, Error> {
-        let (connect_result_sender, connect_result_receiver) = oneshot::channel();
-        let (command_sender, command_receiver) = mpsc::channel(COMMAND_QUEUE_SIZE);
-        //let (buffer_queue_sender, buffer_queue_subscriber) =
-        //    buffer_queue::channel(SAMPLE_BUFFER_QUEUE_SIZE);
+    pub async fn connect<A: ToSocketAddrs>(
+        address: A,
+        options: ConnectOptions,
+    ) -> Result<Self, Error> {
+        let socket = TcpStream::connect(address).await?;
+        let address = socket.peer_addr()?;
 
-        let tcp = TcpStream::connect(address).await?;
+        let (reader, writer) = socket.into_split();
+        let mut reader = BufReader::with_capacity(options.read_buffer_capacity.get(), reader);
 
-        tokio::spawn(async move {
-            if let Err(error) = handle_connection(
-                tcp,
-                connect_result_sender,
-                command_receiver,
-                //buffer_queue_sender,
-            )
-            .await
-            {
-                // todo: propagate error correctly
-                tracing::error!(?error);
-            }
-        });
+        // read header
+        //
+        // note: we limit the reader to the header length. otherwise
+        // `FramedRead` might read more and buffer it and we would need to pull
+        // it out and then create an adapter `AsyncRead` that consumes the
+        // left-over from `FramedRead` first. This is simpler.
+        let mut header_reader = FramedRead::with_capacity(
+            (&mut reader).take(HEADER_LENGTH.try_into().unwrap()),
+            HeaderCodec,
+            HEADER_LENGTH,
+        );
+        let header = header_reader
+            .try_next()
+            .await?
+            .ok_or_else(|| Error::Io(std::io::ErrorKind::UnexpectedEof.into()))?;
 
-        let dongle_info = connect_result_receiver
-            .await
-            .map_err(|_| Error::ConnectionClosed)??;
+        // note: we don't wrap this in a `BufWriter`, since the `FramedWrite`
+        // already has a buffer.
+        let command_writer =
+            FramedWrite::with_capacity(writer, CommandCodec, options.write_buffer_capacity.get());
 
-        tracing::debug!(?dongle_info);
+        let pcm_reader = PcmReader::new(reader);
+
+        tracing::debug!(?address, dongle_info = ?header.dongle_info, "connected to server");
 
         Ok(Self {
-            dongle_info,
-            command_sender,
-            //buffer_queue_subscriber,
+            dongle_info: header.dongle_info,
+            command_sender: CommandSender { command_writer },
+            source: Source { pcm_reader },
         })
     }
+}
 
-    pub fn dongle_info(&self) -> &DongleInfo {
-        &self.dongle_info
-    }
+/// Sends commands to the `rtl_tcp` server.
+///
+/// # TODO
+///
+/// Implement `set_tuner_gain`. What argument should this method take, or should
+/// the method be split into set mode, set gain in tenths of a dB, and index.
+#[derive(Debug)]
+pub struct CommandSender {
+    command_writer: FramedWrite<OwnedWriteHalf, CommandCodec>,
+}
 
+impl CommandSender {
     /// Sends a command to the server.
-    pub async fn send_command(&self, command: Command) -> Result<(), Error> {
+    pub async fn send_command(&mut self, command: Command) -> Result<(), Error> {
         tracing::debug!(?command, "sending command");
-        let (result_sender, result_receiver) = oneshot::channel();
-        self.command_sender
-            .send(ControlMessage {
-                command,
-                result_sender: Some(result_sender),
-            })
-            .await
-            .map_err(|_| Error::ConnectionClosed)?;
-        result_receiver.await.map_err(|_| Error::ConnectionClosed)?
+        self.command_writer.send(command).await?;
+        Ok(())
     }
 
-    pub async fn set_center_frequency(&self, frequency: u32) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_center_frequency(&mut self, frequency: u32) -> Result<(), Error> {
         self.send_command(Command::SetCenterFrequency { frequency })
             .await
     }
 
-    pub async fn set_sample_rate(&self, sample_rate: u32) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_sample_rate(&mut self, sample_rate: u32) -> Result<(), Error> {
         self.send_command(Command::SetSampleRate { sample_rate })
             .await
     }
 
-    /*pub async fn set_tuner_gain(&self, gain: Gain) -> Result<(), Error> {
-        match gain {
-            Gain::ManualValue(gain) => {
-                self.send_command(Command::SetTunerGainMode {
-                    mode: TunerGainMode::Manual,
-                })
-                .await?;
-                self.send_command(Command::SetTunerGain { gain }).await?;
-            }
-            Gain::ManualIndex(index) => {
-                if let Ok(index) = index.try_into() {
-                    self.send_command(Command::SetTunerGainMode {
-                        mode: TunerGainMode::Manual,
-                    })
-                    .await?;
-                    self.send_command(Command::SetTunerGainIndex { index })
-                        .await?;
-                }
-                else {
-                    tracing::error!(?index, "gain index doesn't fit into an u32!");
-                }
-            }
-            Gain::Auto => {
-                self.send_command(Command::SetTunerGainMode {
-                    mode: TunerGainMode::Auto,
-                })
-                .await?;
-            }
-        }
-        Ok(())
-    }*/
-
-    pub async fn set_agc_mode(&self, enable: bool) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_agc_mode(&mut self, enable: bool) -> Result<(), Error> {
         self.send_command(Command::SetAgcMode { enable }).await
     }
 
-    pub async fn set_frequency_correction(&self, ppm: i32) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_frequency_correction(&mut self, ppm: i32) -> Result<(), Error> {
         self.send_command(Command::SetFrequencyCorrection { ppm })
             .await
     }
 
-    pub async fn set_tuner_if_gain(&self, stage: i16, gain: i16) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_tuner_if_gain(&mut self, stage: i16, gain: i16) -> Result<(), Error> {
         self.send_command(Command::SetTunerIfGain { stage, gain })
             .await
     }
 
-    pub async fn set_offset_tuning(&self, enable: bool) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_offset_tuning(&mut self, enable: bool) -> Result<(), Error> {
         self.send_command(Command::SetOffsetTuning { enable }).await
     }
 
-    pub async fn set_rtl_xtal(&self, frequency: u32) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_rtl_xtal(&mut self, frequency: u32) -> Result<(), Error> {
         self.send_command(Command::SetRtlXtal { frequency }).await
     }
 
-    pub async fn set_tuner_xtal(&self, frequency: u32) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_tuner_xtal(&mut self, frequency: u32) -> Result<(), Error> {
         self.send_command(Command::SetTunerXtal { frequency }).await
     }
 
-    pub async fn set_bias_tee(&self, enable: bool) -> Result<(), Error> {
+    #[inline]
+    pub async fn set_bias_tee(&mut self, enable: bool) -> Result<(), Error> {
         self.send_command(Command::SetBiasT { enable }).await
     }
-
-    /*pub async fn samples(&self) -> Result<Samples<Iq>, Error> {
-        self.send_command(Command::SetDirectSampling { mode: None })
-            .await?;
-        Ok(Samples {
-            receiver: self.buffer_queue_subscriber.receiver(),
-            sample_type: SampleType::Iq,
-            _phantom: PhantomData,
-        })
-    }
-
-    pub async fn direct_samples(&self, mode: DirectSamplingMode) -> Result<Samples<u8>, Error> {
-        self.send_command(Command::SetDirectSampling { mode: Some(mode) })
-            .await?;
-        Ok(Samples {
-            receiver: self.buffer_queue_subscriber.receiver(),
-            sample_type: mode.into(),
-            _phantom: PhantomData,
-        })
-    }*/
 }
 
 #[derive(Debug)]
-struct ControlMessage {
-    command: Command,
-    result_sender: Option<oneshot::Sender<Result<(), Error>>>,
+pub struct Source {
+    pcm_reader: PcmReader<BufReader<OwnedReadHalf>, Complex<u8>, BigEndian>,
 }
 
-async fn handle_connection(
-    mut tcp: TcpStream,
-    connect_result_sender: oneshot::Sender<Result<DongleInfo, Error>>,
-    _command_receiver: mpsc::Receiver<ControlMessage>,
-    //buffer_queue_sender: buffer_queue::Sender,
-) -> Result<(), Error> {
-    let (tcp_read, tcp_write) = tcp.split();
-    let mut tcp_read = BufReader::with_capacity(READ_BUFFER_SIZE, tcp_read);
-    let _tcp_write = BufWriter::with_capacity(WRITE_BUFFER_SIZE, tcp_write);
+impl AsyncReadSamples for Source {
+    type Sample = Complex<u8>;
+    type Error = std::io::Error;
 
-    match read_dongle_info(&mut tcp_read).await {
-        Ok(dongle_info) => {
-            let _ = connect_result_sender.send(Ok(dongle_info));
-        }
-        Err(error) => {
-            let _ = connect_result_sender.send(Err(error));
-            return Ok(());
-        }
+    #[inline]
+    fn poll_read_samples(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<Self::Sample>,
+    ) -> Poll<Result<(), Self::Error>> {
+        Pin::new(&mut self.pcm_reader).poll_read_samples(cx, buffer)
     }
-
-    //let receiver_state = Mutex::new(Default::default());
-    //
-    //tokio::select! {
-    //    result = forward_commands(command_receiver, tcp_write, &receiver_state) =>
-    // result?,    result = forward_samples(tcp_read, buffer_queue_sender,
-    // &receiver_state, SAMPLE_BUFFER_SIZE) => result?,
-    //}
-
-    Ok(())
 }
 
-#[derive(Debug, Default)]
-struct ReceiverState {
-    sample_rate: u32,
-    //sample_type: SampleType,
-}
-
-async fn read_dongle_info<R: AsyncRead + Unpin>(mut reader: R) -> Result<DongleInfo, Error> {
-    // read dongle info
-    let mut header_buffer = [0; HEADER_LENGTH];
-    reader.read_exact(&mut header_buffer).await?;
-
-    let mut header_buffer = &header_buffer[..];
-    let magic = header_buffer.get_bytes();
-    if &magic != MAGIC {
-        return Err(Error::InvalidMagic(magic));
+impl StreamLength for Source {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        Remaining::Unknown
     }
-
-    let tuner_type = TunerType(header_buffer.get_u32());
-    let tuner_gain_count = header_buffer.get_u32();
-
-    Ok(DongleInfo {
-        tuner_type,
-        tuner_gain_count,
-    })
 }
-
-/*
-async fn forward_commands<W: AsyncWrite + Unpin>(
-    mut command_receiver: mpsc::Receiver<ControlMessage>,
-    mut tcp_write: W,
-    receiver_state: &Mutex<ReceiverState>,
-) -> Result<(), Error> {
-    //let mut messages = Vec::with_capacity(COMMAND_QUEUE_SIZE);
-
-    loop {
-        tracing::debug!("waiting for control messages");
-        /*if command_receiver
-            .recv_many(&mut messages, COMMAND_QUEUE_SIZE)
-            .await
-            == 0
-        {
-            break;
-        }
-
-        for message in messages.drain(..) {*/
-        let Some(message) = command_receiver.recv().await
-        else {
-            break;
-        };
-
-        tracing::debug!(?message);
-
-        match &message.command {
-            Command::SetSampleRate { sample_rate } => {
-                let mut receiver_state = receiver_state.lock();
-                receiver_state.sample_rate = *sample_rate;
-            }
-            Command::SetDirectSampling { mode } => {
-                let mut receiver_state = receiver_state.lock();
-                receiver_state.sample_type = (*mode).into();
-            }
-            _ => {}
-        }
-
-        let mut buf = [0; 5];
-        message.command.encode(&mut buf[..]);
-        match tcp_write.write_all(&buf[..]).await {
-            Ok(_) => {
-                if let Some(result_sender) = message.result_sender {
-                    let _ = result_sender.send(Ok(()));
-                }
-            }
-            Err(error) => {
-                if let Some(result_sender) = message.result_sender {
-                    let _ = result_sender.send(Err(error.into()));
-                }
-                break;
-            }
-        }
-        //}
-
-        tcp_write.flush().await?;
-    }
-
-    Ok(())
-}
-
-async fn forward_samples<R: AsyncRead + Unpin>(
-    mut tcp_read: R,
-    mut buffer_queue_sender: buffer_queue::Sender,
-    receiver_state: &Mutex<ReceiverState>,
-    buffer_size: usize,
-) -> Result<(), Error> {
-    let mut push_buffer = None;
-
-    loop {
-        let Some(mut buffer) =
-            buffer_queue_sender.swap_buffers(push_buffer.take(), buffer_size, false)
-        else {
-            // all receivers and subscribers dropped
-            tracing::debug!("all readers dropped. exiting");
-            break;
-        };
-
-        let buffer_mut = buffer.reclaim_or_allocate(buffer_size);
-        match tcp_read.read_exact(buffer_mut).await {
-            Ok(n_read) => {
-                assert_eq!(n_read, buffer_mut.len());
-
-                buffer.end = n_read;
-
-                let receiver_state = receiver_state.lock();
-                buffer.sample_rate = receiver_state.sample_rate;
-                buffer.sample_type = receiver_state.sample_type;
-
-                push_buffer = Some(buffer);
-            }
-            Err(error) => {
-                // todo: propagate error
-                tracing::error!(?error);
-                break;
-            }
-        }
-    }
-
-    Ok(())
-}
- */

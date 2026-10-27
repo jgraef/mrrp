@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use num_complex::Complex;
 
 #[derive(Clone, Copy, Debug)]
@@ -26,11 +28,13 @@ mod sealed {
     pub trait Sealed {}
 }
 
-pub trait Bytes: Sized {
+pub trait Bytes: Sized + Clone + Debug {
     const LEN: usize = 1;
 
     fn from_slice(slice: &[u8]) -> Self;
     fn as_slice(&self) -> &[u8];
+    fn as_slice_mut(&mut self) -> &mut [u8];
+    fn zero() -> Self;
 }
 
 impl<const N: usize> Bytes for [u8; N] {
@@ -45,6 +49,16 @@ impl<const N: usize> Bytes for [u8; N] {
     fn as_slice(&self) -> &[u8] {
         self
     }
+
+    #[inline]
+    fn as_slice_mut(&mut self) -> &mut [u8] {
+        self
+    }
+
+    #[inline]
+    fn zero() -> Self {
+        [0; _]
+    }
 }
 
 pub trait Encoding {
@@ -55,18 +69,14 @@ pub trait Encode<E>: Encoding
 where
     E: Endianess,
 {
-    type Error;
-
-    fn encode(&self) -> Result<Self::Encoded, Self::Error>;
+    fn encode(&self) -> Self::Encoded;
 }
 
 pub trait Decode<E>: Encoding + Sized
 where
     E: Endianess,
 {
-    type Error;
-
-    fn decode(bytes: Self::Encoded) -> Result<Self, Self::Error>;
+    fn decode(bytes: &Self::Encoded) -> Self;
 }
 
 macro_rules! impl_int {
@@ -84,43 +94,35 @@ macro_rules! impl_int {
     };
     (@for($ty:ty, $bytes:expr, $endianess:ident, $from_bytes:ident, $to_bytes:ident)) => {
         impl Encode<$endianess> for $ty {
-            type Error = !;
-
             #[inline]
-            fn encode(&self) -> Result<Self::Encoded, Self::Error> {
-                Ok(self.$to_bytes())
+            fn encode(&self) -> Self::Encoded {
+                self.$to_bytes()
             }
         }
 
         impl Decode<$endianess> for $ty {
-            type Error = !;
-
             #[inline]
-            fn decode(bytes: Self::Encoded) -> Result<Self, Self::Error> {
-                Ok(Self::$from_bytes(bytes))
+            fn decode(bytes: &Self::Encoded) -> Self {
+                Self::$from_bytes(*bytes)
             }
         }
 
         impl Encode<$endianess> for Complex<$ty> {
-            type Error = !;
-
             #[inline]
-            fn encode(&self) -> Result<Self::Encoded, Self::Error> {
+            fn encode(&self) -> Self::Encoded {
                 let mut buf = [0; $bytes * 2];
                 buf[..$bytes].copy_from_slice(&self.re.$to_bytes());
                 buf[$bytes..].copy_from_slice(&self.im.$to_bytes());
-                Ok(buf)
+                buf
             }
         }
 
         impl Decode<$endianess> for Complex<$ty> {
-            type Error = !;
-
             #[inline]
-            fn decode(bytes: Self::Encoded) -> Result<Self, Self::Error> {
+            fn decode(bytes: &Self::Encoded) -> Self {
                 let re = <$ty>::$from_bytes(bytes[..$bytes].try_into().unwrap());
                 let im = <$ty>::$from_bytes(bytes[$bytes..].try_into().unwrap());
-                Ok(Complex { re, im })
+                Complex { re, im }
             }
         }
     };

@@ -6,10 +6,13 @@
 //! [1]: https://k3xec.com/rtl-tcp/
 //! [2]: https://github.com/rtlsdrblog/rtl-sdr-blog/blob/master/src/rtl_tcp.c
 
-//pub mod client;
+pub mod client;
 pub mod protocol;
 pub mod server;
-use std::fmt::Debug;
+use std::{
+    fmt::Debug,
+    num::NonZero,
+};
 
 /// The type of tuner in a RTL-SDR.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -55,3 +58,12 @@ pub struct DongleInfo {
     /// Number of gain levels supported by the tuner.
     pub tuner_gain_count: u32,
 }
+
+/// Default read and write buffer size (8 kiB)
+///
+/// # TODO
+///
+/// We should probably optimized read/write buffers for client/server. The
+/// client doesn't need a large write buffer, since it only sends small
+/// commands. Similar for server.
+pub const DEFAULT_BUF_SIZE: NonZero<usize> = const { NonZero::new(0x2000).unwrap() };

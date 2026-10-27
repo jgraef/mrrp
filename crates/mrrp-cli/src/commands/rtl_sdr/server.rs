@@ -20,7 +20,7 @@ use mrrp_rtl_sdr::{
 use mrrp_rtl_tcp::{
     protocol::TunerGainMode,
     server::{
-        Commands,
+        CommandReceiver,
         Connection,
         RawSink,
         Server,
@@ -103,7 +103,7 @@ pub async fn run(
 
         let Connection {
             address: _,
-            commands,
+            command_receiver,
             sink,
         } = accept.accept(dongle_info, Default::default()).await?;
 
@@ -111,7 +111,9 @@ pub async fn run(
             let command_sender = command_sender.clone();
 
             async move {
-                if let Err(error) = handle_connection_commands(commands, command_sender).await {
+                if let Err(error) =
+                    handle_connection_commands(command_receiver, command_sender).await
+                {
                     tracing::error!(?error, "Error in connection command handler");
                 }
 
@@ -149,23 +151,34 @@ pub async fn run(
 }
 
 async fn handle_connection_commands(
-    mut commands: Commands,
+    mut command_receiver: CommandReceiver,
     command_sender: mpsc::Sender<Command>,
 ) -> Result<(), Error> {
-    while let Some(command) = commands.try_next().await? {
-        let (result_sender, result_receiver) = oneshot::channel();
-        command_sender
-            .send(Command::Client {
-                command,
-                result_sender,
-                span: Span::current(),
-            })
-            .await
-            .map_err(|_| anyhow!("command handling task dead"))?;
+    loop {
+        match command_receiver.try_next().await {
+            Ok(None) => break,
+            Err(mrrp_rtl_tcp::server::Error::Io(error))
+                if error.kind() == std::io::ErrorKind::ConnectionReset =>
+            {
+                break;
+            }
+            Err(error) => return Err(error.into()),
+            Ok(Some(command)) => {
+                let (result_sender, result_receiver) = oneshot::channel();
+                command_sender
+                    .send(Command::Client {
+                        command,
+                        result_sender,
+                        span: Span::current(),
+                    })
+                    .await
+                    .map_err(|_| anyhow!("command handling task dead"))?;
 
-        result_receiver
-            .await
-            .map_err(|_| anyhow!("command handling task didn't reply with result"))??;
+                result_receiver
+                    .await
+                    .map_err(|_| anyhow!("command handling task didn't reply with result"))??;
+            }
+        }
     }
 
     Ok(())
