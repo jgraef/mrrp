@@ -8,6 +8,7 @@ repository.workspace = true
 [dependencies]
 chrono = { workspace = true, features = ["serde"] }
 derive_more = { workspace = true, features = ["display", "from_str"] }
+itertools = "0.15.0"
 mrrp-core = { workspace = true, optional = true }
 mrrp-geo = { workspace = true, features = ["serde"] }
 mrrp-util = { workspace = true, optional = true }

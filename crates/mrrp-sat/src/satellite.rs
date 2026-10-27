@@ -21,6 +21,7 @@ use chrono::{
     DateTime,
     Utc,
 };
+use itertools::Either;
 use mrrp_geo::Geodetic;
 use numeris::{
     Quaternion,
@@ -124,8 +125,8 @@ impl Satellites {
     fn insert_or_replace_from_satnogs(
         &mut self,
         satellite: satnogs::Satellite,
-        tle: Option<satnogs::Tle>,
-        transmitters: Option<Vec<satnogs::Transmitter>>,
+        tles: impl IntoIterator<Item = satnogs::Tle>,
+        transmitters: Option<impl IntoIterator<Item = satnogs::Transmitter>>,
         replace_existing: bool,
     ) {
         if let Some(&handle) = self.by_satnogs_id.get(&satellite.sat_id) {
@@ -134,16 +135,21 @@ impl Satellites {
                     .get_mut(handle)
                     .expect("invalid handle from satnogs id");
 
-                let tle = tle.or_else(|| existing.satnogs_tle.take());
-                let transmitters = transmitters
-                    .unwrap_or_else(|| std::mem::take(&mut existing.satnogs_transmitters));
+                let tles = tles
+                    .into_iter()
+                    .chain(existing.tles.drain(..).map(|tle| tle.satnogs));
 
-                *existing = Satellite::new(handle, satellite, tle, transmitters);
+                let transmitters = transmitters.map_or_else(
+                    || Either::Left(existing.satnogs_transmitters.drain(..)),
+                    |updated| Either::Right(updated.into_iter()),
+                );
+
+                *existing = Satellite::new(handle, satellite, tles, transmitters);
             }
         }
         else {
             self.insert(|handle| {
-                Satellite::new(handle, satellite, tle, transmitters.unwrap_or_default())
+                Satellite::new(handle, satellite, tles, transmitters.into_iter().flatten())
             });
         }
     }
@@ -158,7 +164,11 @@ impl Satellites {
                 satellite.as_ref().map(|satellite| {
                     SerializedSatellite {
                         satellite: satellite.satnogs_satellite.clone(),
-                        tle: satellite.satnogs_tle.clone(),
+                        tles: satellite
+                            .tles
+                            .iter()
+                            .map(|tle| tle.satnogs.clone())
+                            .collect(),
                         transmitters: satellite.satnogs_transmitters.clone(),
                     }
                 })
@@ -186,7 +196,7 @@ impl Satellites {
         for satellite in serialized {
             self.insert_or_replace_from_satnogs(
                 satellite.satellite,
-                satellite.tle,
+                satellite.tles,
                 Some(satellite.transmitters),
                 replace_existing,
             );
@@ -322,33 +332,29 @@ pub struct Satellite {
     handle: SatelliteHandle,
 
     satnogs_satellite: satnogs::Satellite,
-    satnogs_tle: Option<satnogs::Tle>,
     satnogs_transmitters: Vec<satnogs::Transmitter>,
 
-    satkit_tle: Option<satkit::TLE>,
+    tles: Vec<Tle>,
 }
 
 impl Satellite {
     fn new(
         handle: SatelliteHandle,
         satnogs_satellite: satnogs::Satellite,
-        satnogs_tle: Option<satnogs::Tle>,
-        satnogs_transmitters: Vec<satnogs::Transmitter>,
+        satnogs_tles: impl IntoIterator<Item = satnogs::Tle>,
+        satnogs_transmitters: impl IntoIterator<Item = satnogs::Transmitter>,
     ) -> Self {
-        let satkit_tle = satnogs_tle.as_ref().and_then(|tle| {
-            satkit::TLE::load_3line(&tle.tle0, &tle.tle1, &tle.tle2)
-                .inspect_err(|error| {
-                    tracing::error!("Can't parse TLE: {error}");
-                })
-                .ok()
-        });
+        let mut tles = satnogs_tles
+            .into_iter()
+            .filter_map(|tle| Tle::from_satnogs(tle))
+            .collect::<Vec<_>>();
+        tles.sort_by_key(|tle| tle.updated());
 
         Self {
             handle,
             satnogs_satellite,
-            satnogs_tle,
-            satnogs_transmitters,
-            satkit_tle,
+            satnogs_transmitters: satnogs_transmitters.into_iter().collect(),
+            tles,
         }
     }
 
@@ -368,8 +374,8 @@ impl Satellite {
         self.satnogs_satellite.norad_cat_id
     }
 
-    pub fn tle(&self) -> Option<&satkit::TLE> {
-        self.satkit_tle.as_ref()
+    pub fn most_recent_tle(&self) -> Option<&Tle> {
+        self.tles.last()
     }
 
     pub fn predict_state_into(
@@ -380,8 +386,12 @@ impl Satellite {
     ) -> Result<(), Error> {
         tracing::trace!(satellite = ?self, num_times = times.len(), "predicting");
 
-        if let Some(tle) = &self.satkit_tle {
-            let mut source = CachedTle { tle, cache };
+        // todo: use TLEs that are valid for the given timestamps
+        if let Some(tle) = self.most_recent_tle() {
+            let mut source = CachedTle {
+                tle: &tle.satkit,
+                cache,
+            };
 
             let state = sgp4(&mut source, times)?;
 
@@ -431,10 +441,46 @@ impl Debug for Satellite {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct Tle {
+    satnogs: satnogs::Tle,
+    satkit: satkit::TLE,
+}
+
+impl Tle {
+    fn from_satnogs(tle: satnogs::Tle) -> Option<Self> {
+        let satkit = satkit::TLE::load_3line(&tle.tle0, &tle.tle1, &tle.tle2)
+            .inspect_err(|error| {
+                tracing::error!("Can't parse TLE: {error}");
+            })
+            .ok()?;
+
+        Some(Self {
+            satnogs: tle,
+            satkit,
+        })
+    }
+
+    #[inline]
+    pub fn updated(&self) -> DateTime<Utc> {
+        self.satnogs.updated
+    }
+
+    #[inline]
+    pub fn lines(&self) -> [&str; 3] {
+        [&self.satnogs.tle0, &self.satnogs.tle1, &self.satnogs.tle2]
+    }
+
+    #[inline]
+    pub fn source(&self) -> &str {
+        &self.satnogs.tle_source
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct SerializedSatellite {
     satellite: satnogs::Satellite,
-    tle: Option<satnogs::Tle>,
+    tles: Vec<satnogs::Tle>,
     transmitters: Vec<satnogs::Transmitter>,
 }
 

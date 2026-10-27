@@ -60,7 +60,11 @@ impl DopplerCorrection {
         sample_rate: f32,
         duration: Duration,
     ) -> Result<Self, Error> {
-        tracing::debug!(sat=satellite.name(), tle=?satellite.tle(), nominal_frequency, "Correcting doppler");
+        tracing::debug!(
+            sat = satellite.name(),
+            nominal_frequency,
+            "Correcting doppler"
+        );
 
         let num_intervals =
             (duration.as_secs_f32() / predict_interval.as_secs_f32()).ceil() as usize;

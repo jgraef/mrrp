@@ -43,7 +43,7 @@ pub async fn correct(
     let input = input.as_ref();
     let output = output.as_ref();
 
-    tracing::debug!(sat=%satellite.id(), tle=?satellite.tle(), "Correcting doppler");
+    tracing::debug!(sat=%satellite.id(), tle=?satellite.most_recent_tle(), "Correcting doppler");
 
     // open source file
     let source = WavSource::<_, Complex<i16>>::from_path(&input)?.convert::<Complex<f32>>();
