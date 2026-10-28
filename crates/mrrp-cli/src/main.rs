@@ -88,6 +88,7 @@ macro_rules! subcommands {
 }
 
 subcommands! {
+    File => file,
     RtlSdr => rtl_sdr,
     Modem => modem,
     Sat => sat,

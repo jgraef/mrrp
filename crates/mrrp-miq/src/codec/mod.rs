@@ -1,14 +1,7 @@
 pub mod pcm;
 
-// todo: this whole thing is very generic and useful outside of miq. in fact we
-// already have something very similar in `mrrp_util::signal::pcm`.
-
-// todo: we really don't want to use std::io::Write here. its contract is a
-// little bit inconvenient, and we know that we're writing into a Vec<u8> or
-// some other kind of buffer. either way it must accept all bytes, as we don't
-// want to handle half-written samples here (and should not have to).
-
-// todo: should these use `SampleBuf`, `SampleBufMut` or `ReadBuf`?
+// todo: these traits definitely need some work. but we can figure out what
+// works best once we write a encoder that produces packets.
 
 pub trait Encoder<T> {
     type Error: std::error::Error + Send + Sync + 'static;
