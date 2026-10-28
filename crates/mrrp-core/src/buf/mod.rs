@@ -269,6 +269,7 @@ where
             })
         }
         else {
+            self.limit -= amount;
             self.inner.try_advance(amount)?;
             Ok(())
         }
@@ -276,7 +277,7 @@ where
 
     #[inline]
     fn remaining(&self) -> usize {
-        self.limit
+        self.limit.min(self.inner.remaining())
     }
 
     fn chunk(&self) -> &[S] {
@@ -285,6 +286,11 @@ where
             chunk = &chunk[..self.limit];
         }
         chunk
+    }
+
+    #[inline]
+    fn has_remaining(&self) -> bool {
+        self.limit > 0 && self.inner.has_remaining()
     }
 }
 
