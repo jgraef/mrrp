@@ -3,6 +3,7 @@ use std::io::{
     Write,
 };
 
+use bytes::Buf;
 use serde::Serialize;
 
 use crate::container::chunk::{
@@ -54,7 +55,10 @@ where
     /// This is unbuffered. It first writes the header, using the size of the
     /// slice for the `size` field. Then it writes the data directly.
     #[inline]
-    pub fn write_data_chunk(&mut self, tag: Tag, flags: Flags, data: &[u8]) -> Result<(), Error> {
+    pub fn write_data_chunk<B>(&mut self, tag: Tag, flags: Flags, data: B) -> Result<(), Error>
+    where
+        B: Buf,
+    {
         write_chunk(&mut self.writer, tag, flags, data)?;
         Ok(())
     }
@@ -109,7 +113,7 @@ where
     /// Writes the buffered chunk to the underlying writer.
     pub fn finish(mut self) -> Result<(), Error> {
         let buffer = self.buffer.into_inner();
-        write_chunk(&mut self.writer, self.tag, self.flags, &buffer)?;
+        write_chunk(&mut self.writer, self.tag, self.flags, &**buffer)?;
         buffer.clear();
         Ok(())
     }
@@ -143,30 +147,38 @@ where
 }
 
 /// Low-level function to write a chunk to a [`Write`].
-pub fn write_chunk<W>(
+pub fn write_chunk<W, B>(
     mut writer: W,
     tag: Tag,
     flags: Flags,
-    data: &[u8],
+    mut data: B,
 ) -> Result<(), std::io::Error>
 where
     W: Write,
+    B: Buf,
 {
+    let size = data.remaining();
+
     write_chunk_header(
         &mut writer,
         &ChunkHeader {
             tag,
             flags,
-            size: data.len().try_into().expect("chunk size overflow"),
+            size: size.try_into().expect("chunk size overflow"),
         },
     )?;
 
-    writer.write_all(data)?;
+    // write data
+    while data.has_remaining() {
+        let chunk = data.chunk();
+        writer.write_all(chunk)?;
+        data.advance(chunk.len());
+    }
 
     // pad chunk so that its length is a multiple if 8, but at least 8 bytes.
     const PADDING: [u8; 8] = [0; _];
-    let padded_length = data.len().max(8).next_multiple_of(8);
-    let padding = padded_length - data.len();
+    let padded_length = size.max(8).next_multiple_of(8);
+    let padding = padded_length - size;
     writer.write_all(&PADDING[..padding])?;
 
     Ok(())

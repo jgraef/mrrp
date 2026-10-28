@@ -101,7 +101,7 @@ mod tests {
             .write_data_chunk(
                 Tag::from_bytes(*b"TEST").unwrap(),
                 Default::default(),
-                b"Hello World!",
+                b"Hello World!".as_slice(),
             )
             .unwrap();
 
@@ -127,14 +127,14 @@ mod tests {
             .write_data_chunk(
                 Tag::from_bytes(*b"TES1").unwrap(),
                 Default::default(),
-                b"Hello",
+                b"Hello".as_slice(),
             )
             .unwrap();
         writer
             .write_data_chunk(
                 Tag::from_bytes(*b"TES2").unwrap(),
                 Default::default(),
-                b" World!",
+                b" World!".as_slice(),
             )
             .unwrap();
 
@@ -172,14 +172,14 @@ mod tests {
             .write_data_chunk(
                 Tag::from_bytes(*b"TES1").unwrap(),
                 Default::default(),
-                b"Hello",
+                b"Hello".as_slice(),
             )
             .unwrap();
         writer
             .write_data_chunk(
                 Tag::from_bytes(*b"TES2").unwrap(),
                 Default::default(),
-                b" World!",
+                b" World!".as_slice(),
             )
             .unwrap();
 

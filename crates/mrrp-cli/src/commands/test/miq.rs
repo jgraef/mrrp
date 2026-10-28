@@ -18,7 +18,10 @@ use clap::{
 };
 use futures_util::pin_mut;
 use mrrp_core::{
-    buf::SampleBufMut,
+    buf::{
+        SampleBuf,
+        SampleBufMut,
+    },
     sample::{
         Complex,
         encoding::BigEndian,
@@ -27,7 +30,7 @@ use mrrp_core::{
 };
 use mrrp_file::{
     miq::{
-        codec::pcm::Pcm,
+        codec::pcm::PcmEncoder,
         container::reader::Reader as MiqContainerReader,
         stream::{
             StreamInfo,
@@ -73,7 +76,7 @@ enum Command {
 
         /// Overwrite output file if it already exists.
         #[clap(short, long)]
-        force: bool,
+        clobber: bool,
     },
     Inspect {
         file: PathBuf,
@@ -93,9 +96,9 @@ pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
             input,
             stream_info,
             file_name_info,
-            force,
+            clobber,
         } => {
-            encode(output, input, stream_info, file_name_info, force).await?;
+            encode(output, input, stream_info, file_name_info, clobber).await?;
         }
         Command::Inspect { file } => {
             inspect(file)?;
@@ -110,7 +113,7 @@ async fn encode(
     input: impl AsRef<Path>,
     stream_info_file: Option<impl AsRef<Path>>,
     file_name_info_kind: Option<FileNameInfoKind>,
-    force: bool,
+    clobber: bool,
 ) -> Result<(), Error> {
     let mut stream_info: StreamInfo<toml::Value> = Default::default();
 
@@ -151,7 +154,7 @@ async fn encode(
             .to_string_lossy();
         let output = directory.join(format!("{file_prefix}.miq"));
 
-        if output.exists() && !force {
+        if output.exists() && !clobber {
             bail!("The derive output file already exists: {output:?}");
         }
 
@@ -166,8 +169,8 @@ async fn encode(
     }
 
     let mut output = MiqWriter::from_path(&output)?;
-    let mut stream_writer =
-        output.start_stream::<Complex<i16>, _, _>(stream_info, Pcm::<BigEndian>::default())?;
+    let mut stream_writer = output
+        .start_stream::<Complex<i16>, _, _>(stream_info, PcmEncoder::<BigEndian>::default())?;
 
     let chunk_size = 0x10000; // 64 kB
     let mut buffer = Vec::with_capacity(chunk_size);
@@ -177,13 +180,23 @@ async fn encode(
         input
             .read_into_buf(&mut (&mut buffer).limit(chunk_size))
             .await?;
+        tracing::debug!(len = buffer.len(), "read samples");
         if buffer.is_empty() {
             break;
         }
 
         assert!(buffer.len() <= chunk_size, "{}", buffer.len());
 
-        stream_writer.write_samples(&mut output, &buffer)?;
+        let mut buffer = &*buffer;
+        while buffer.has_remaining() {
+            let stream_position = stream_writer.stream_position();
+            tracing::debug!(
+                remaining = buffer.remaining(),
+                ?stream_position,
+                "writing samples"
+            );
+            stream_writer.write_samples(&mut output, &mut buffer)?;
+        }
     }
 
     Ok(())

@@ -1,3 +1,6 @@
+use bytes::BufMut;
+use mrrp_core::buf::SampleBuf;
+
 pub mod pcm;
 
 // todo: these traits definitely need some work. but we can figure out what
@@ -6,7 +9,10 @@ pub mod pcm;
 pub trait Encoder<T> {
     type Error: std::error::Error + Send + Sync + 'static;
 
-    fn write_samples(&mut self, samples: &[T], buffer: &mut Vec<u8>) -> Result<Flush, Self::Error>;
+    fn write_samples<R, W>(&mut self, samples: R, buffer: W) -> Result<Flush, Self::Error>
+    where
+        R: SampleBuf<T>,
+        W: BufMut;
 }
 
 pub trait Decoder<T> {
@@ -27,7 +33,16 @@ pub enum Flush {
 
     /// Flush now.
     Flush,
+}
 
-    /// Flush or don't.
-    Any,
+impl Flush {
+    #[inline]
+    pub fn flush_if(condition: bool) -> Self {
+        if condition {
+            Flush::Flush
+        }
+        else {
+            Flush::Buffer
+        }
+    }
 }
