@@ -1,9 +1,10 @@
-use std::io::{
-    Cursor,
-    Write,
-};
+use std::io::Write;
 
-use bytes::Buf;
+use bytes::{
+    Buf,
+    BufMut,
+    BytesMut,
+};
 use serde::Serialize;
 
 use crate::container::chunk::{
@@ -25,14 +26,14 @@ pub enum Error {
 #[derive(Debug)]
 pub struct Writer<W> {
     writer: W,
-    buffer: Vec<u8>,
+    buffer: BytesMut,
 }
 
 impl<W> Writer<W> {
     pub fn new(writer: W) -> Self {
         Self {
             writer,
-            buffer: vec![],
+            buffer: BytesMut::new(),
         }
     }
 }
@@ -88,7 +89,7 @@ where
 #[derive(Debug)]
 pub struct BufferedChunkWriter<'a, W> {
     writer: &'a mut W,
-    buffer: Cursor<&'a mut Vec<u8>>,
+    buffer: &'a mut BytesMut,
     pub tag: Tag,
     pub flags: Flags,
 }
@@ -99,7 +100,7 @@ impl<'a, W> BufferedChunkWriter<'a, W> {
         writer.buffer.clear();
         Self {
             writer: &mut writer.writer,
-            buffer: Cursor::new(&mut writer.buffer),
+            buffer: &mut writer.buffer,
             tag,
             flags,
         }
@@ -112,9 +113,8 @@ where
 {
     /// Writes the buffered chunk to the underlying writer.
     pub fn finish(mut self) -> Result<(), Error> {
-        let buffer = self.buffer.into_inner();
-        write_chunk(&mut self.writer, self.tag, self.flags, &**buffer)?;
-        buffer.clear();
+        write_chunk(&mut self.writer, self.tag, self.flags, &**self.buffer)?;
+        self.buffer.clear();
         Ok(())
     }
 }
@@ -122,13 +122,35 @@ where
 impl<'a, W> Write for BufferedChunkWriter<'a, W> {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.buffer.write(buf)
+        self.buffer.put_slice(buf);
+        Ok(buf.len())
     }
 
     #[inline]
     fn flush(&mut self) -> std::io::Result<()> {
-        // note: at the time of writing, this is a NOP
-        self.buffer.flush()
+        Ok(())
+    }
+}
+
+// SAFETY: All methods on this trait just delegate to the internal
+// buffer. Thus the safety guarantuees are inherited from
+// `BytesMut`.
+unsafe impl<'a, W> BufMut for BufferedChunkWriter<'a, W> {
+    #[inline]
+    fn remaining_mut(&self) -> usize {
+        self.buffer.remaining_mut()
+    }
+
+    #[inline]
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        unsafe {
+            self.buffer.advance_mut(cnt);
+        }
+    }
+
+    #[inline]
+    fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
+        self.buffer.chunk_mut()
     }
 }
 
