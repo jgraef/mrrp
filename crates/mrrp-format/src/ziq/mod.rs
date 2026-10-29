@@ -82,7 +82,6 @@ impl From<Compression> for u8 {
 
 #[cfg(test)]
 mod tests {
-
     use mrrp_util::signal::{
         AsyncReadSamplesExt,
         write::AsyncWriteSamplesExt,

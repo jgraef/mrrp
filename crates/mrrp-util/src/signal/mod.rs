@@ -2,7 +2,6 @@ mod combinators;
 pub mod coop;
 mod generator;
 mod noise;
-pub mod pcm;
 mod read;
 mod sine;
 pub mod test;

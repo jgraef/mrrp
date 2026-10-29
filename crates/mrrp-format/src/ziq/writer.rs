@@ -22,7 +22,6 @@ use mrrp_core::{
     },
     signal::AsyncWriteSamples,
 };
-use mrrp_util::signal::pcm::PcmWriter;
 use num_complex::Complex;
 use serde::Serialize;
 use tokio::io::{
@@ -30,9 +29,12 @@ use tokio::io::{
     AsyncWriteExt,
 };
 
-use crate::ziq::{
-    HEADER_SIZE,
-    Header,
+use crate::{
+    pcm::PcmWriter,
+    ziq::{
+        HEADER_SIZE,
+        Header,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]

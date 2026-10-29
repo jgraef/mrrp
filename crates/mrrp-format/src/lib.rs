@@ -1,3 +1,5 @@
+#[cfg(feature = "pcm")]
+pub mod pcm;
 #[cfg(feature = "riff")]
 pub mod riff;
 mod util;

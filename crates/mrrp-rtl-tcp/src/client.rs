@@ -24,7 +24,7 @@ use mrrp_core::{
         StreamLength,
     },
 };
-use mrrp_util::signal::pcm::PcmReader;
+use mrrp_format::pcm::PcmReader;
 use tokio::{
     io::{
         AsyncReadExt,

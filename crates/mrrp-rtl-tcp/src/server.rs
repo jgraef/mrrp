@@ -20,7 +20,7 @@ use mrrp_core::{
     },
     signal::AsyncWriteSamples,
 };
-use mrrp_util::signal::pcm::PcmWriter;
+use mrrp_format::pcm::PcmWriter;
 use tokio::{
     io::{
         AsyncWrite,

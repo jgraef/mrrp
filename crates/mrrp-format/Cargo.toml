@@ -15,6 +15,7 @@ mrrp-core.workspace = true
 mrrp-miq = { workspace = true, optional = true }
 mrrp-util = { workspace = true, optional = true }
 num-complex.workspace = true
+pin-project-lite.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
@@ -24,16 +25,20 @@ tracing.workspace = true
 
 [dev-dependencies]
 byteorder = { workspace = true, features = ["std"] }
+mrrp-util.workspace = true
 tokio = { workspace = true, features = ["rt", "macros"] }
 zstd = "0.14.3"
 
 [features]
 default = []
 full = ["all-formats", "all-compressions"]
-all-formats = ["wav", "miq", "riff", "ziq"]
-all-compressions = []
+all-formats = ["pcm", "wav", "miq", "riff", "ziq"]
+all-compressions = ["zstd"]
+
+pcm = []
 wav = ["dep:hound", "dep:mrrp-util"]
 riff = ["dep:byteorder"]
 miq = ["dep:mrrp-miq"]
-ziq = ["dep:serde", "dep:serde_json", "dep:mrrp-util"]
+ziq = ["dep:serde", "dep:serde_json", "pcm"]
+
 zstd = ["async-compression/zstd"]

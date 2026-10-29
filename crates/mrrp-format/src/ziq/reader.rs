@@ -26,7 +26,6 @@ use mrrp_core::{
         StreamLength,
     },
 };
-use mrrp_util::signal::pcm::PcmReader;
 use num_complex::Complex;
 use serde::de::DeserializeOwned;
 use tokio::io::{
@@ -35,9 +34,12 @@ use tokio::io::{
     AsyncReadExt,
 };
 
-use crate::ziq::{
-    Compression,
-    Header,
+use crate::{
+    pcm::PcmReader,
+    ziq::{
+        Compression,
+        Header,
+    },
 };
 
 #[derive(Debug, thiserror::Error)]

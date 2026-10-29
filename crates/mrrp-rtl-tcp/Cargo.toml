@@ -11,7 +11,7 @@ futures-util = { workspace = true, default-features = false, features = [
     "sink",
 ] }
 mrrp-core.workspace = true
-mrrp-util.workspace = true
+mrrp-format = { workspace = true, features = ["pcm"] }
 pin-project-lite.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "net", "io-util", "sync"] }
