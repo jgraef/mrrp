@@ -24,7 +24,7 @@ pin_project! {
     /// Sink that writes samples to a [`AsyncWrite`].
     pub struct PcmWriter<W, S, E>
     where
-        S: Encode<E>,
+        S: Encoding,
         E: Endianess,
     {
         #[pin]
@@ -37,7 +37,7 @@ pin_project! {
 
 impl<W, S, E> PcmWriter<W, S, E>
 where
-    S: Encode<E>,
+    S: Encoding,
     E: Endianess,
 {
     #[inline]

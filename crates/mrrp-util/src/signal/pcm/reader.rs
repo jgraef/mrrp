@@ -26,6 +26,52 @@ use mrrp_core::{
 use pin_project_lite::pin_project;
 use tokio::io::AsyncRead;
 
+pub struct ReadBuffer<S>
+where
+    S: Encoding,
+{
+    data: <S as Encoding>::Encoded,
+    filled: usize,
+}
+
+impl<S> Default for ReadBuffer<S>
+where
+    S: Encoding,
+{
+    #[inline]
+    fn default() -> Self {
+        Self {
+            data: Bytes::zero(),
+            filled: 0,
+        }
+    }
+}
+
+impl<S> Clone for ReadBuffer<S>
+where
+    S: Encoding,
+{
+    #[inline]
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            filled: self.filled,
+        }
+    }
+}
+
+impl<S> Debug for ReadBuffer<S>
+where
+    S: Encoding,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Buffer")
+            .field("data", &self.data)
+            .field("filled", &self.filled)
+            .finish()
+    }
+}
+
 pin_project! {
     /// Reads `u8` or `Complex<u8>` samples from a byte stream.
     pub struct PcmReader<R, S, E>
@@ -35,8 +81,7 @@ pin_project! {
     {
         #[pin]
         reader: R,
-        buffer: <S as Encoding>::Encoded,
-        buffer_filled: usize,
+        buffer: ReadBuffer<S>,
         _marker: PhantomData<fn() -> E>,
     }
 }
@@ -46,11 +91,16 @@ where
     S: Decode<E>,
     E: Endianess,
 {
+    #[inline]
     pub fn new(reader: R) -> Self {
+        Self::from_parts(reader, Default::default())
+    }
+
+    #[inline]
+    pub fn from_parts(reader: R, buffer: ReadBuffer<S>) -> Self {
         Self {
             reader,
-            buffer: Bytes::zero(),
-            buffer_filled: 0,
+            buffer,
             _marker: PhantomData,
         }
     }
@@ -64,6 +114,10 @@ where
     pub fn get_ref(&self) -> &R {
         &self.reader
     }
+
+    pub fn into_parts(self) -> (R, ReadBuffer<S>) {
+        (self.reader, self.buffer)
+    }
 }
 
 impl<R, S, E> Clone for PcmReader<R, S, E>
@@ -76,7 +130,6 @@ where
         Self {
             reader: self.reader.clone(),
             buffer: self.buffer.clone(),
-            buffer_filled: self.buffer_filled,
             _marker: PhantomData,
         }
     }
@@ -92,7 +145,6 @@ where
         f.debug_struct("PcmReader")
             .field("reader", &self.reader)
             .field("buffer", &self.buffer)
-            .field("buffer_filled", &self.buffer_filled)
             .finish()
     }
 }
@@ -129,7 +181,7 @@ where
             // create tokio::io::ReadBuf with our small internal buffer - only
             // passing the portion that isn't filled yet.
             let mut read_buf =
-                tokio::io::ReadBuf::new(&mut this.buffer.as_slice_mut()[*this.buffer_filled..]);
+                tokio::io::ReadBuf::new(&mut this.buffer.data.as_slice_mut()[this.buffer.filled..]);
 
             match this.reader.poll_read(cx, &mut read_buf) {
                 Poll::Pending => return Poll::Pending,
@@ -144,14 +196,14 @@ where
                     // any bytes in the tokio ReadBuf are new (since we only
                     // passed it the unfilled portion of our buffer), so we add
                     // them to our counter.
-                    *this.buffer_filled += read_buf.filled().len();
+                    this.buffer.filled += read_buf.filled().len();
 
-                    if *this.buffer_filled == <<S as Encoding>::Encoded>::LEN {
+                    if this.buffer.filled == <<S as Encoding>::Encoded>::LEN {
                         // small internal buffer contains enough to create one
                         // sample
-                        let sample = S::decode(this.buffer);
+                        let sample = S::decode(&this.buffer.data);
                         buffer.put_sample(sample);
-                        *this.buffer_filled = 0;
+                        this.buffer.filled = 0;
                     }
                 }
             }
@@ -166,6 +218,7 @@ where
     S: Decode<E>,
     E: Endianess,
 {
+    #[inline]
     fn remaining(&self) -> Remaining {
         Remaining::Unknown
     }

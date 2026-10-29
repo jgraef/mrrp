@@ -86,6 +86,18 @@ pub trait AsyncWriteSamplesExt<S>: AsyncWriteSamples<S> {
     }
 
     #[inline]
+    fn write_sample<'a>(&'a mut self, sample: S) -> WriteSample<'a, Self, S>
+    where
+        Self: Unpin,
+    {
+        WriteSample {
+            write_samples: self,
+            sample,
+            was_written: false,
+        }
+    }
+
+    #[inline]
     fn throttled(self, sample_duration: Duration) -> Throttled<Self>
     where
         Self: Sized,
@@ -183,6 +195,44 @@ where
                 Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
                 Poll::Ready(Ok(num_samples_written)) => {
                     this.buffer = &this.buffer[num_samples_written..];
+                }
+            }
+        }
+
+        Poll::Ready(Ok(()))
+    }
+}
+
+#[derive(Debug)]
+pub struct WriteSample<'a, W, S>
+where
+    W: ?Sized,
+{
+    write_samples: &'a mut W,
+    sample: S,
+    was_written: bool,
+}
+
+impl<'a, W, S> Future for WriteSample<'a, W, S>
+where
+    W: AsyncWriteSamples<S> + Unpin + ?Sized,
+    S: Clone + Unpin,
+{
+    type Output = Result<(), W::Error>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        while !self.was_written {
+            let this = &mut *self;
+            match this
+                .write_samples
+                .poll_write_samples_unpin(cx, &[this.sample.clone()])
+            {
+                Poll::Pending => return Poll::Pending,
+                Poll::Ready(Err(error)) => return Poll::Ready(Err(error)),
+                Poll::Ready(Ok(num_samples_written)) => {
+                    assert!(num_samples_written <= 1);
+                    this.was_written = num_samples_written == 1;
+                    break;
                 }
             }
         }
