@@ -63,8 +63,8 @@ use serde::{
 };
 
 use crate::{
-    Context,
     commands::{
+        Context,
         modem::sstv::vis::VisDetect,
         sat::{
             PredictOptions,

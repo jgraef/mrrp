@@ -49,7 +49,7 @@ use mrrp_util::signal::{
 use rustfft::FftPlanner;
 
 use crate::{
-    Context,
+    commands::Context,
     util::ColorGradient,
 };
 

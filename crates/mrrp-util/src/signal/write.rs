@@ -10,7 +10,10 @@ use std::{
 
 use mrrp_core::signal::AsyncWriteSamples;
 
-use crate::signal::Throttled;
+use crate::signal::{
+    MapErr,
+    Throttled,
+};
 
 pub trait AsyncWriteSamplesExt<S>: AsyncWriteSamples<S> {
     #[inline]
@@ -103,6 +106,17 @@ pub trait AsyncWriteSamplesExt<S>: AsyncWriteSamples<S> {
         Self: Sized,
     {
         Throttled::new(self, sample_duration)
+    }
+
+    /// Maps any errors returned by the underlying sink with the provided
+    /// closure.
+    #[inline]
+    fn map_err<E, F>(self, f: F) -> MapErr<Self, F>
+    where
+        F: FnMut(Self::Error) -> E,
+        Self: Sized,
+    {
+        MapErr::new(self, f)
     }
 }
 

@@ -8,7 +8,7 @@ use mrrp_geo::{
     Qth,
 };
 
-use crate::Context;
+use crate::commands::Context;
 
 pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
     match args.command {
