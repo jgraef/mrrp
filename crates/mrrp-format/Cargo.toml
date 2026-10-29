@@ -13,14 +13,12 @@ derive_more = { workspace = true, features = ["debug"] }
 hound = { version = "3.5.1", optional = true }
 mrrp-core.workspace = true
 mrrp-miq = { workspace = true, optional = true }
-mrrp-util = { workspace = true, optional = true }
 num-complex.workspace = true
 pin-project-lite.workspace = true
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
-# TODO: rt feature is only needed for tokio::coop, which we can remove once we stop using sync io
-tokio = { workspace = true, features = ["rt", "io-util"] }
+tokio = { workspace = true, features = ["io-util"] }
 tracing.workspace = true
 
 [dev-dependencies]
@@ -36,7 +34,7 @@ all-formats = ["pcm", "wav", "miq", "riff", "ziq"]
 all-compressions = ["zstd"]
 
 pcm = []
-wav = ["dep:hound", "dep:mrrp-util"]
+wav = ["dep:hound", "tokio/rt"]
 riff = ["dep:byteorder"]
 miq = ["dep:mrrp-miq"]
 ziq = ["dep:serde", "dep:serde_json", "pcm"]

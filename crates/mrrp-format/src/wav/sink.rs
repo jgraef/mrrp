@@ -15,15 +15,7 @@ use std::{
     },
 };
 
-use mrrp_core::signal::{
-    AsyncReadSamples,
-    AsyncWriteSamples,
-    GetSampleRate,
-};
-use mrrp_util::signal::{
-    AsyncReadSamplesExt,
-    ForwardError,
-};
+use mrrp_core::signal::AsyncWriteSamples;
 use num_complex::Complex;
 use tokio::task::coop;
 
@@ -201,18 +193,4 @@ impl_into_wav_samples! {
     (i16, 16, hound::SampleFormat::Int);
     (i32, 32, hound::SampleFormat::Int);
     (f32, 32, hound::SampleFormat::Float);
-}
-
-pub async fn write_stream_to_wav<R>(
-    path: impl AsRef<Path>,
-    source: R,
-) -> Result<(), ForwardError<R::Error, Error>>
-where
-    R: AsyncReadSamples + GetSampleRate,
-    R::Sample: IntoWavSamples,
-{
-    let sink = WavSink::<_, R::Sample>::from_path(path, source.sample_rate())
-        .map_err(ForwardError::Sink)?;
-    source.forward(sink, 0x4000).await?;
-    Ok(())
 }
