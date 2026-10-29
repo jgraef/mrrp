@@ -69,6 +69,43 @@ use crate::signal::{
 
 /// Extension trait for [`AsyncReadSamples`] with some useful methods.
 pub trait AsyncReadSamplesExt: AsyncReadSamples {
+    #[inline]
+    fn poll_read_samples_unpin(
+        &mut self,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<Self::Sample>,
+    ) -> Poll<Result<(), Self::Error>>
+    where
+        Self: Unpin,
+    {
+        Pin::new(self).poll_read_samples(cx, buffer)
+    }
+
+    /// Poll for a single sample.
+    #[inline]
+    fn poll_read_sample(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<Self::Sample, EofError<Self::Error>>> {
+        let mut buffer = [MaybeUninit::uninit(); 1];
+        let mut read_buf = ReadBuf::uninit(UninitSlice::slice_mut_from_uninit(&mut buffer));
+        match self.poll_read_samples(cx, &mut read_buf) {
+            Poll::Pending => Poll::Pending,
+            Poll::Ready(Err(error)) => Poll::Ready(Err(EofError::Other(error))),
+            Poll::Ready(Ok(())) => {
+                if read_buf.filled().is_empty() {
+                    Poll::Ready(Err(EofError::Eof {
+                        num_samples_read: 0,
+                    }))
+                }
+                else {
+                    let sample = unsafe { MaybeUninit::assume_init_read(&buffer[0]) };
+                    Poll::Ready(Ok(sample))
+                }
+            }
+        }
+    }
+
     /// Read a single sample
     #[inline]
     fn read_sample(&mut self) -> ReadSample<'_, Self>
@@ -446,35 +483,9 @@ where
 {
     type Output = Result<R::Sample, EofError<R::Error>>;
 
+    #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        let mut buffer = [MaybeUninit::uninit(); 1];
-        let mut read_buf = ReadBuf::uninit(UninitSlice::slice_mut_from_uninit(&mut buffer[..]));
-
-        match self
-            .read_samples
-            .as_mut()
-            .poll_read_samples(cx, &mut read_buf)
-        {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(error)) => Poll::Ready(Err(error.into())),
-            Poll::Ready(Ok(())) => {
-                if read_buf.filled().len() == 0 {
-                    Poll::Ready(Err(EofError::Eof {
-                        num_samples_read: 0,
-                    }))
-                }
-                else {
-                    let [sample] = buffer;
-                    let sample = unsafe {
-                        // SAFETY: the buffer has been filled. since our buffer
-                        // is only 1 sample wide, this
-                        // has to have been filled.
-                        sample.assume_init()
-                    };
-                    Poll::Ready(Ok(sample))
-                }
-            }
-        }
+        self.read_samples.as_mut().poll_read_sample(cx)
     }
 }
 
@@ -493,15 +504,16 @@ where
 {
     type Output = Result<Option<R::Sample>, R::Error>;
 
+    #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.read_sample.poll_unpin(cx) {
-            Poll::Pending => Poll::Pending,
-            Poll::Ready(Ok(sample)) => Poll::Ready(Ok(Some(sample))),
-            Poll::Ready(Err(EofError::Eof {
+        let result = match ready!(self.read_sample.poll_unpin(cx)) {
+            Ok(sample) => Ok(Some(sample)),
+            Err(EofError::Eof {
                 num_samples_read: _,
-            })) => Poll::Ready(Ok(None)),
-            Poll::Ready(Err(EofError::Other(error))) => Poll::Ready(Err(error)),
-        }
+            }) => Ok(None),
+            Err(EofError::Other(error)) => Err(error),
+        };
+        Poll::Ready(result)
     }
 }
 
@@ -522,6 +534,7 @@ where
 {
     type Output = Result<usize, R::Error>;
 
+    #[inline]
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = &mut *self;
         this.read_samples
@@ -687,6 +700,7 @@ where
     type Sample = S;
     type Error = !;
 
+    #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -721,6 +735,7 @@ impl<S> AsyncReadSamples for PendingSource<S> {
     type Sample = S;
     type Error = !;
 
+    #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -741,6 +756,7 @@ impl<S> StreamLength for PendingSource<S> {
 }
 
 impl<S> Clone for PendingSource<S> {
+    #[inline]
     fn clone(&self) -> Self {
         Self {
             _marker: self._marker,
@@ -751,6 +767,7 @@ impl<S> Clone for PendingSource<S> {
 impl<S> Copy for PendingSource<S> {}
 
 impl<S> Debug for PendingSource<S> {
+    #[inline]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NullSource").finish_non_exhaustive()
     }
@@ -775,6 +792,7 @@ where
     type Sample = S;
     type Error = !;
 
+    #[inline]
     fn poll_read_samples(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -817,6 +835,7 @@ impl<B, S> Cursor<B, S>
 where
     B: AsRef<[S]>,
 {
+    #[inline]
     pub fn new(buffer: B) -> Self {
         Self {
             buffer,
@@ -825,18 +844,22 @@ where
         }
     }
 
+    #[inline]
     pub fn position(&self) -> usize {
         self.position
     }
 
+    #[inline]
     pub fn set_position(&mut self, position: usize) {
         assert!(position <= self.buffer.as_ref().len());
     }
 
+    #[inline]
     pub fn data(&self) -> &B {
         &self.buffer
     }
 
+    #[inline]
     pub fn data_mut(&mut self) -> &mut B {
         &mut self.buffer
     }
@@ -872,6 +895,7 @@ impl<B, S> StreamLength for Cursor<B, S>
 where
     B: AsRef<[S]>,
 {
+    #[inline]
     fn remaining(&self) -> Remaining {
         Remaining::Finite {
             num_samples: self.buffer.as_ref().len() - self.position,
@@ -891,6 +915,7 @@ impl<B, S> BufSource<B, S>
 where
     B: SampleBuf<S>,
 {
+    #[inline]
     pub fn new(buffer: B) -> Self {
         Self {
             buffer,
@@ -929,6 +954,7 @@ impl<B, S> StreamLength for BufSource<B, S>
 where
     B: SampleBuf<S>,
 {
+    #[inline]
     fn remaining(&self) -> Remaining {
         Remaining::Finite {
             num_samples: self.buffer.remaining(),
