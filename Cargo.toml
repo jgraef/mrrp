@@ -12,6 +12,7 @@ members = [
     "crates/mrrp-hamlib",
     "crates/mrrp-miq",
     "crates/mrrp-modem",
+    "crates/mrrp-plex",
     "crates/mrrp-rtl-sdr",
     "crates/mrrp-rtl-tcp",
     "crates/mrrp-sat",
@@ -63,6 +64,7 @@ mrrp-format = { path = "crates/mrrp-format", default-features = false }
 mrrp-geo = { path = "crates/mrrp-geo", default-features = false }
 mrrp-miq = { path = "crates/mrrp-miq", default-features = false }
 mrrp-modem = { path = "crates/mrrp-modem", default-features = false }
+mrrp-plex = { path = "crates/mrrp-plex", default-features = false }
 mrrp-rtl-sdr = { path = "crates/mrrp-rtl-sdr", default-features = false }
 mrrp-rtl-tcp = { path = "crates/mrrp-rtl-tcp", default-features = false }
 mrrp-sat = { path = "crates/mrrp-sat", default-features = false }
@@ -71,11 +73,16 @@ mrrp-util = { path = "crates/mrrp-util", default-features = false }
 mrrp-widgets = { path = "crates/mrrp-widgets", default-features = false }
 
 anyhow = "1.0.102"
+async-compression = { version = "0.4.51", default-features = false, features = [
+    "tokio",
+] }
+axum = { version = "0.8.9", default-features = false }
 bytemuck = { version = "1.25.0", default-features = false }
 byteorder = { version = "1.5.0", default-features = false }
 bytes = { version = "1.11.1", default-features = false }
 chrono = { version = "0.4.45", default-features = false }
-clap = { version = "4.6.1", features = ["derive"] }
+ciborium = "0.2.2"
+clap = { version = "4.6.1", features = ["derive", "env"] }
 colorgrad = "0.9.0"
 const-hex = "1.19.3"
 derive_more = { version = "2.1.1", default-features = false }
@@ -99,3 +106,4 @@ tokio-util = { version = "0.7.18", default-features = false }
 toml = "1.1.2"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+uuid = { version = "1.29.0", default-features = false }

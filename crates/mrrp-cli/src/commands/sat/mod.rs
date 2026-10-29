@@ -34,8 +34,10 @@ use mrrp_sat::{
 
 pub use self::config::Config;
 use crate::{
-    Context,
-    commands::rtl_sdr::open::DeviceArgs,
+    commands::{
+        Context,
+        rtl_sdr::open::DeviceArgs,
+    },
     files::create_parent_dir_if_not_exists,
     util::si,
 };

@@ -1,5 +1,6 @@
 use std::{
     collections::VecDeque,
+    num::NonZero,
     pin::Pin,
     sync::Arc,
     task::{
@@ -48,10 +49,10 @@ pub struct NoReceivers;
 pub struct NoSubscribers;
 
 /// Creates a broadcast pipe
-pub fn pipe<T>(buffer_size: usize) -> (Sender<T>, Subscriber<T>) {
+pub fn pipe<T>(buffer_size: NonZero<usize>) -> (Sender<T>, Subscriber<T>) {
     let shared = Arc::new(Shared {
         state: RwLock::new(State {
-            buffer: VecDeque::with_capacity(buffer_size),
+            buffer: VecDeque::with_capacity(buffer_size.get()),
             head_pos: 0,
             receiver_slots: vec![],
             sender_slot: Some(Slot { waker: None }),
@@ -543,6 +544,8 @@ impl<T> Drop for Subscriber<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::num::NonZero;
+
     use futures_util::future;
 
     use crate::signal::{
@@ -554,7 +557,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_to_single_receiver() {
-        let (mut sender, subscriber) = pipe(1024);
+        let (mut sender, subscriber) = pipe(NonZero::new(1024).unwrap());
         let mut receiver = subscriber.subscribe().unwrap();
 
         let data = (0..10).collect::<Vec<_>>();
@@ -568,7 +571,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_to_multiple_receiver() {
-        let (mut sender, subscriber) = pipe(1024);
+        let (mut sender, subscriber) = pipe(NonZero::new(1024).unwrap());
         let mut receiver = subscriber.subscribe().unwrap();
         let mut receiver2 = subscriber.subscribe().unwrap();
 
@@ -587,7 +590,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_receive_twice() {
-        let (mut sender, subscriber) = pipe(1024);
+        let (mut sender, subscriber) = pipe(NonZero::new(1024).unwrap());
         let mut receiver = subscriber.subscribe().unwrap();
 
         let data = (0..10).collect::<Vec<_>>();
@@ -607,7 +610,7 @@ mod tests {
 
     #[tokio::test]
     async fn send_dropping() {
-        let (mut sender, subscriber) = pipe(10);
+        let (mut sender, subscriber) = pipe(NonZero::new(10).unwrap());
         let mut receiver = subscriber.subscribe().unwrap();
 
         let data = (0..20).collect::<Vec<_>>();
@@ -623,7 +626,7 @@ mod tests {
 
     #[tokio::test]
     async fn pipe_closing() {
-        let (mut sender, subscriber) = pipe(1024);
+        let (mut sender, subscriber) = pipe(NonZero::new(1024).unwrap());
         let mut receiver = subscriber.subscribe().unwrap();
 
         let data = (0..10).collect::<Vec<_>>();
@@ -647,7 +650,7 @@ mod tests {
 
     #[tokio::test]
     async fn async_broadcast() {
-        let (mut sender, subscriber) = pipe(1024);
+        let (mut sender, subscriber) = pipe(NonZero::new(1024).unwrap());
 
         let mut join_handles = vec![];
 
