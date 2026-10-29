@@ -19,5 +19,7 @@ thiserror.workspace = true
 tracing.workspace = true
 
 [features]
+default = []
+full = ["image", "serde"]
 image = ["dep:image"]
 serde = ["dep:serde"]

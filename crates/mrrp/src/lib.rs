@@ -2,10 +2,12 @@
 pub use mrrp_audio as audio;
 #[cfg(feature = "filter")]
 pub use mrrp_filter as filter;
-#[cfg(feature = "modem")]
-pub use mrrp_modem as modem;
+#[cfg(feature = "geo")]
+pub use mrrp_geo as geo;
 #[cfg(feature = "rtl_sdr")]
 pub use mrrp_rtl_sdr as rtl_sdr;
+#[cfg(feature = "sat")]
+pub use mrrp_sat as sat;
 
 pub mod signal {
     pub use mrrp_core::{
@@ -13,8 +15,15 @@ pub mod signal {
         sample,
         signal::*,
     };
+    #[cfg(feature = "util")]
     pub use mrrp_util::signal::*;
 }
 
-//#[cfg(feature = "rtl_tcp")]
-//pub use mrrp_rtl_sdr as rtl_tcp;
+pub mod modem {
+    #[cfg(feature = "adsb")]
+    pub use mrrp_adsb as adsb;
+    #[cfg(feature = "modem-base")]
+    pub use mrrp_modem::*;
+    #[cfg(feature = "sstv")]
+    pub use mrrp_sstv as sstv;
+}

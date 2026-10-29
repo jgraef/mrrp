@@ -24,6 +24,7 @@ approx = "0.5.1"
 tokio = { workspace = true, features = ["macros", "rt"] }
 
 [features]
-default = ["serde", "rtl_adsb_command"]
+default = []
+full = ["serde", "rtl_adsb_command"]
 serde = ["dep:serde_with"]
 rtl_adsb_command = ["tokio/process", "tokio/io-util"]

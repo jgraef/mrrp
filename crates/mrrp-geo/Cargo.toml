@@ -11,6 +11,7 @@ thiserror.workspace = true
 
 [features]
 default = []
+full = ["serde"]
 serde = ["dep:serde"]
 
 [dev-dependencies]
