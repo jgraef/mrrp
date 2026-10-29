@@ -17,7 +17,7 @@
 #[cfg(feature = "rodio")]
 pub mod rodio;
 #[cfg(feature = "wav")]
-pub use mrrp_file::wav::{
+pub use mrrp_format::wav::{
     self,
     sink::{
         WavSink,

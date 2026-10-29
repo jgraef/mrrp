@@ -15,6 +15,6 @@ mrrp-core.workspace = true
 pin-project-lite.workspace = true
 rand.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["time"] }
+tokio = { workspace = true, features = ["time", "rt"] }
 tokio-util.workspace = true
 tracing.workspace = true

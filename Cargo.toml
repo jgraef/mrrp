@@ -6,8 +6,8 @@ members = [
     "crates/mrrp-audio",
     "crates/mrrp-cli",
     "crates/mrrp-core",
-    "crates/mrrp-file",
     "crates/mrrp-filter",
+    "crates/mrrp-format",
     "crates/mrrp-geo",
     "crates/mrrp-hamlib",
     "crates/mrrp-miq",
@@ -58,9 +58,9 @@ mrrp-audio = { path = "crates/mrrp-audio", default-features = false }
 mrrp-core = { path = "crates/mrrp-core", default-features = false, features = [
     "std",
 ] }
-mrrp-file = { path = "crates/mrrp-file", default-features = false }
-mrrp-geo = { path = "crates/mrrp-geo", default-features = false }
 mrrp-filter = { path = "crates/mrrp-filter", default-features = false }
+mrrp-format = { path = "crates/mrrp-format", default-features = false }
+mrrp-geo = { path = "crates/mrrp-geo", default-features = false }
 mrrp-miq = { path = "crates/mrrp-miq", default-features = false }
 mrrp-modem = { path = "crates/mrrp-modem", default-features = false }
 mrrp-rtl-sdr = { path = "crates/mrrp-rtl-sdr", default-features = false }

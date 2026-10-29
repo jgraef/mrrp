@@ -8,6 +8,7 @@ use std::{
 };
 
 pub use async_compression::Level;
+#[cfg(feature = "zstd")]
 use async_compression::tokio::write::ZstdEncoder;
 use bytes::{
     BufMut,
@@ -171,11 +172,13 @@ impl Compression for Uncompressed {
 
 impl sealed::Sealed for Uncompressed {}
 
+#[cfg(feature = "zstd")]
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Zstd {
     level: Level,
 }
 
+#[cfg(feature = "zstd")]
 impl Compression for Zstd {
     type Writer<W> = ZstdEncoder<W>;
 
@@ -190,6 +193,7 @@ impl Compression for Zstd {
     }
 }
 
+#[cfg(feature = "zstd")]
 impl sealed::Sealed for Zstd {}
 
 pub trait BitsPerSample: sealed::Sealed {
@@ -219,6 +223,8 @@ mod tests {
     use mrrp_util::signal::write::AsyncWriteSamplesExt;
     use num_complex::Complex;
 
+    #[cfg(feature = "zstd")]
+    use crate::ziq::writer::Zstd;
     use crate::ziq::{
         Compression,
         HEADER_SIZE,
@@ -226,7 +232,6 @@ mod tests {
         writer::{
             Uncompressed,
             Writer,
-            Zstd,
         },
     };
 
@@ -277,6 +282,7 @@ mod tests {
         assert_eq!(i, 1024);
     }
 
+    #[cfg(feature = "zstd")]
     #[tokio::test]
     async fn write_compressed_file() {
         let mut buffer = vec![];

@@ -250,6 +250,7 @@ where
                     .poll_read_samples(cx, buffer)
                     .map_err(Into::into)
             }
+            #[cfg(feature = "zstd")]
             CompressedReader::Zstd(pcm_reader) => {
                 Pin::new(pcm_reader)
                     .poll_read_samples(cx, buffer)
@@ -267,6 +268,7 @@ where
     fn remaining(&self) -> Remaining {
         match self {
             CompressedReader::None(pcm_reader) => pcm_reader.remaining(),
+            #[cfg(feature = "zstd")]
             CompressedReader::Zstd(pcm_reader) => pcm_reader.remaining(),
         }
     }
@@ -275,6 +277,7 @@ where
     fn size_hint(&self) -> SizeHint {
         match self {
             CompressedReader::None(pcm_reader) => pcm_reader.size_hint(),
+            #[cfg(feature = "zstd")]
             CompressedReader::Zstd(pcm_reader) => pcm_reader.size_hint(),
         }
     }
@@ -324,6 +327,7 @@ samples! {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(feature = "zstd")]
     use byteorder::{
         LittleEndian,
         WriteBytesExt,
@@ -381,6 +385,7 @@ mod tests {
         assert_eq!(i, 1024);
     }
 
+    #[cfg(feature = "zstd")]
     #[tokio::test]
     async fn read_compressed_file() {
         let mut buffer = BytesMut::new();

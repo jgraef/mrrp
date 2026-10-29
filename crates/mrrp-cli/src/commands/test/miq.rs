@@ -28,7 +28,7 @@ use mrrp_core::{
     },
     signal::GetSampleRate,
 };
-use mrrp_file::{
+use mrrp_format::{
     miq::{
         codec::pcm::PcmEncoder,
         container::reader::Reader as MiqContainerReader,

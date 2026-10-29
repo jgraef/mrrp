@@ -27,8 +27,8 @@ md-5 = "0.11.0"
 mrrp-adsb.workspace = true
 mrrp-audio = { workspace = true, features = ["rodio", "wav"] }
 mrrp-core.workspace = true
-mrrp-file = { workspace = true, features = ["miq", "wav", "riff"] }
 mrrp-filter = { workspace = true, features = ["biquad", "pm-remez"] }
+mrrp-format = { workspace = true, features = ["full"] }
 mrrp-geo.workspace = true
 mrrp-modem.workspace = true
 mrrp-rtl-sdr = { workspace = true, features = ["mrrp"] }

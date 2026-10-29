@@ -37,7 +37,7 @@ use mrrp_core::{
         GetSampleRate,
     },
 };
-use mrrp_file::riff::{
+use mrrp_format::riff::{
     self,
     ChunkId,
 };

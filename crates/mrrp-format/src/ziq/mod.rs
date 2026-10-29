@@ -93,13 +93,14 @@ mod tests {
         Serialize,
     };
 
+    #[cfg(feature = "zstd")]
+    use crate::ziq::writer::Zstd;
     use crate::ziq::{
         Compression,
         reader::Reader,
         writer::{
             Uncompressed,
             Writer,
-            Zstd,
         },
     };
 
@@ -182,6 +183,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "zstd")]
     #[tokio::test]
     async fn test_compressed_roundtrip() {
         let mut buffer = vec![];

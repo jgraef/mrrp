@@ -7,7 +7,7 @@ repository.workspace = true
 
 [dependencies]
 mrrp-core.workspace = true
-mrrp-file = { workspace = true, features = ["wav"], optional = true }
+mrrp-format = { workspace = true, features = ["wav"], optional = true }
 mrrp-util.workspace = true
 parking_lot = { workspace = true, optional = true }
 rodio = { version = "0.23.0", optional = true }
@@ -17,5 +17,5 @@ tokio = { workspace = true, features = ["rt", "sync"], optional = true }
 [features]
 default = ["full"]
 full = ["wav", "rodio"]
-wav = ["dep:mrrp-file"]
+wav = ["dep:mrrp-format"]
 rodio = ["dep:rodio", "dep:parking_lot", "dep:tokio"]
