@@ -408,10 +408,7 @@ mod tests {
             demodulator.push(*sample, &mut output);
         }
 
-        if !output.into_iter().any(|frame| {
-            dbg!(&frame);
-            check(&frame)
-        }) {
+        if !output.into_iter().any(|frame| check(&frame)) {
             panic!("None of the matched frames is the correct one.")
         };
     }

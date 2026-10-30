@@ -231,7 +231,6 @@ where
     S: DesiredFrequencyResponse,
 {
     let length = length.to_concrete_filter_length(&filter_specification);
-    dbg!(length);
 
     let fft_size = fft_size
         .into()

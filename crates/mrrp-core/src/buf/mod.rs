@@ -102,12 +102,7 @@ pub trait SampleBuf<S> {
     where
         Self: Sized,
     {
-        let limit = limit.min(self.remaining());
-        Take {
-            inner: self,
-            limit,
-            _phantom: PhantomData,
-        }
+        Take::new(self, limit)
     }
 
     fn try_copy_to_samples(&mut self, length: usize) -> Result<Samples<S>, TryGetError>
@@ -256,16 +251,37 @@ pub struct Take<B, S> {
     _phantom: PhantomData<fn() -> S>,
 }
 
+impl<B, S> Take<B, S> {
+    pub fn new(inner: B, limit: usize) -> Self {
+        // note: we could take the minimum here:
+        //
+        // ```rust
+        // let limit = limit.min(inner.remaining());
+        // ```
+        //
+        // but this would cause bugs if the underlying `SampleBuf` changes its
+        // remaining unpredictably. not sure if that would be a break of
+        // contract (don't think so). `SampleBufMut`'s `remaining_mut` can
+        // certainly change that way when e.g. a `Vec` allocates more space.
+        Take {
+            inner,
+            limit,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<B, S> SampleBuf<S> for Take<B, S>
 where
     B: SampleBuf<S>,
 {
-    #[inline]
     fn try_advance(&mut self, amount: usize) -> Result<(), TryAdvanceError> {
-        if amount > self.limit {
+        let remaining = self.remaining();
+
+        if amount > remaining {
             Err(TryAdvanceError {
                 requested: amount,
-                available: self.limit,
+                available: remaining,
             })
         }
         else {
@@ -282,6 +298,7 @@ where
 
     fn chunk(&self) -> &[S] {
         let mut chunk = self.inner.chunk();
+
         if chunk.len() > self.limit {
             chunk = &chunk[..self.limit];
         }
@@ -302,6 +319,14 @@ pub trait SampleBufMut<S> {
     #[inline]
     fn has_remaining_mut(&self) -> bool {
         self.remaining_mut() > 0
+    }
+
+    /// Reserve additional space if possible.
+    ///
+    /// The default implementation does nothing.
+    #[inline]
+    fn reserve(&mut self, additional: usize) {
+        let _ = additional;
     }
 
     fn try_put_sample(&mut self, sample: S) -> Result<(), TryPutError> {
@@ -338,11 +363,19 @@ pub trait SampleBufMut<S> {
             })
         }
         else {
+            self.reserve(source.remaining());
+
             loop {
                 let source_chunk = source.chunk();
                 let destination_chunk = self.chunk_mut();
+
                 let n = source_chunk.len().min(destination_chunk.len());
-                destination_chunk.clone_from_slice(&source_chunk[..n]);
+                if n == 0 {
+                    return Ok(());
+                }
+
+                destination_chunk[..n].clone_from_slice(&source_chunk[..n]);
+
                 source.advance(n);
                 unsafe {
                     self.advance_mut(n);
@@ -436,6 +469,7 @@ impl<S> SampleBufMut<S> for &mut [S] {
 }
 
 impl<S> SampleBufMut<S> for Vec<S> {
+    #[inline]
     unsafe fn advance_mut(&mut self, amount: usize) {
         let new_length = self.len() + amount;
         assert!(new_length <= self.capacity());
@@ -444,13 +478,20 @@ impl<S> SampleBufMut<S> for Vec<S> {
         }
     }
 
+    #[inline]
     fn remaining_mut(&self) -> usize {
         usize::MAX.saturating_sub(self.len())
     }
 
+    #[inline]
     fn chunk_mut(&mut self) -> &mut UninitSlice<S> {
         self.reserve(1);
         UninitSlice::slice_mut_from_uninit(self.spare_capacity_mut())
+    }
+
+    #[inline]
+    fn reserve(&mut self, additional: usize) {
+        Vec::reserve(self, additional);
     }
 }
 
@@ -533,5 +574,76 @@ fn slice_bounds(
     }
     else {
         Ok((start, end))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::buf::{
+        SampleBuf,
+        SampleBufMut,
+    };
+
+    #[test]
+    fn put_into_vec() {
+        let source = (0..10).collect::<Vec<i16>>();
+        let mut buffer = vec![];
+        buffer.put(&*source);
+        assert_eq!(buffer, source);
+    }
+
+    #[test]
+    fn take() {
+        let data = (0..10).collect::<Vec<i16>>();
+        let mut source = &*data;
+
+        let mut take = (&mut source).take(5);
+
+        assert_eq!(take.remaining(), 5);
+        assert!(take.has_remaining());
+        let chunk = take.chunk();
+        assert_eq!(chunk, &data[..5]);
+        take.advance(1);
+
+        assert_eq!(take.remaining(), 4);
+        assert!(take.has_remaining());
+        assert_eq!(take.chunk(), &data[1..5]);
+
+        let err = take.try_advance(5).unwrap_err();
+        assert_eq!(err.requested, 5);
+        assert_eq!(err.available, 4);
+
+        take.advance(4);
+
+        assert_eq!(take.remaining(), 0);
+        assert!(!take.has_remaining());
+        assert!(take.chunk().is_empty());
+        let err = take.try_advance(1).unwrap_err();
+        assert_eq!(err.requested, 1);
+        assert_eq!(err.available, 0);
+
+        let mut rest = vec![];
+        rest.put(source);
+        assert_eq!(rest, &data[5..]);
+    }
+
+    #[test]
+    fn vec_as_buf_mut() {
+        let mut vec = Vec::<i16>::new();
+
+        // Vec's have 0 capacity at this point, but this doesn't affect the
+        // SampleBufMUt behavior, i.e. it's not reported as remaining capacity,
+        // and it doesn't return an empty slice for chunks.
+        assert_eq!(vec.capacity(), 0);
+
+        // Vec's have virtually unlimited remaining space
+        assert_eq!(vec.remaining_mut(), usize::MAX);
+
+        // Vec's always return chunks
+        let chunk = vec.chunk_mut();
+        assert!(!chunk.is_empty());
+
+        // after requesting a chunk, the Vec will have reserved some capacity
+        assert!(vec.capacity() > 0);
     }
 }

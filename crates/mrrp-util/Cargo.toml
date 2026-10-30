@@ -12,6 +12,7 @@ derive_more = { workspace = true, features = ["debug"] }
 futures-core.workspace = true
 futures-util.workspace = true
 mrrp-core.workspace = true
+parking_lot.workspace = true
 pin-project-lite.workspace = true
 rand.workspace = true
 thiserror.workspace = true

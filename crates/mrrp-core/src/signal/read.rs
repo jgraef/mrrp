@@ -133,7 +133,6 @@ impl<'a, S> ReadBuf<'a, S> {
         self.initialized = self.initialized.max(self.filled + n);
     }
 
-    #[inline]
     pub fn put_slice(&mut self, samples: &[S])
     where
         S: Clone,
