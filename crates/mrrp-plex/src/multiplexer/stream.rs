@@ -81,8 +81,7 @@ impl Default for StreamOptions {
 #[derive(Clone, Debug)]
 pub struct StreamHandle {
     stream_id: StreamId,
-    state_receiver: StateReceiver,
-    command_sender: CommandSender,
+    stream_control: StreamControl,
     samples_subscriber: broadcast::Subscriber<Complex<f32>>,
 }
 
@@ -119,8 +118,10 @@ impl StreamHandle {
 
         Self {
             stream_id,
-            state_receiver: StateReceiver { state_receiver },
-            command_sender: CommandSender { command_sender },
+            stream_control: StreamControl {
+                state_receiver: StateReceiver { state_receiver },
+                command_sender: CommandSender { command_sender },
+            },
             samples_subscriber,
         }
     }
@@ -131,16 +132,21 @@ impl StreamHandle {
     }
 
     #[inline]
+    pub fn stream_control(&self) -> &StreamControl {
+        &self.stream_control
+    }
+
+    #[inline]
     pub async fn wait_stream_info<R>(
         &mut self,
         f: impl FnMut(&StreamInfo) -> Option<R>,
     ) -> Result<R, Closed> {
-        self.state_receiver.wait_stream_info(f).await
+        self.stream_control.wait_stream_info(f).await
     }
 
     #[inline]
     pub fn stream_info(&self) -> StreamInfo {
-        self.state_receiver.stream_info()
+        self.stream_control.stream_info()
     }
 
     pub fn subscribe(&self) -> Result<Stream, Closed> {
@@ -151,9 +157,8 @@ impl StreamHandle {
 
         Ok(Stream {
             stream_id: self.stream_id,
-            state_receiver: self.state_receiver.clone(),
-            command_sender: self.command_sender.clone(),
-            samples_receiver: samples_receiver,
+            stream_control: self.stream_control.clone(),
+            stream_reader: StreamReader { samples_receiver },
         })
     }
 }
@@ -161,9 +166,8 @@ impl StreamHandle {
 #[derive(Debug)]
 pub struct Stream {
     stream_id: StreamId,
-    state_receiver: StateReceiver,
-    command_sender: CommandSender,
-    samples_receiver: broadcast::Receiver<Complex<f32>>,
+    stream_control: StreamControl,
+    stream_reader: StreamReader,
 }
 
 impl Stream {
@@ -171,9 +175,8 @@ impl Stream {
     pub fn stream_handle(&self) -> StreamHandle {
         StreamHandle {
             stream_id: self.stream_id,
-            state_receiver: self.state_receiver.clone(),
-            command_sender: self.command_sender.clone(),
-            samples_subscriber: self.samples_receiver.subscriber(),
+            stream_control: self.stream_control.clone(),
+            samples_subscriber: self.stream_reader.samples_receiver.subscriber(),
         }
     }
 
@@ -183,8 +186,23 @@ impl Stream {
     }
 
     #[inline]
+    pub fn stream_control(&self) -> &StreamControl {
+        &self.stream_control
+    }
+
+    #[inline]
+    pub fn stream_reader(&self) -> &StreamReader {
+        &self.stream_reader
+    }
+
+    #[inline]
+    pub fn split(self) -> (StreamControl, StreamReader) {
+        (self.stream_control, self.stream_reader)
+    }
+
+    #[inline]
     pub fn stream_info(&self) -> StreamInfo {
-        self.state_receiver.stream_info()
+        self.stream_control.stream_info()
     }
 
     #[inline]
@@ -192,7 +210,7 @@ impl Stream {
         &mut self,
         f: impl FnMut(&StreamInfo) -> Option<R>,
     ) -> Result<R, Closed> {
-        self.state_receiver.wait_stream_info(f).await
+        self.stream_control.wait_stream_info(f).await
     }
 
     // todo: pause, resume, and other aux commands
@@ -208,24 +226,71 @@ impl AsyncReadSamples for Stream {
         cx: &mut Context<'_>,
         buffer: &mut ReadBuf<Self::Sample>,
     ) -> Poll<Result<(), Self::Error>> {
-        self.samples_receiver.poll_read_samples_unpin(cx, buffer)
+        self.stream_reader.poll_read_samples_unpin(cx, buffer)
     }
 }
 
 impl StreamLength for Stream {
     #[inline]
     fn remaining(&self) -> Remaining {
-        self.samples_receiver.remaining()
+        self.stream_reader.remaining()
     }
 
     #[inline]
     fn size_hint(&self) -> SizeHint {
-        self.samples_receiver.size_hint()
+        self.stream_reader.size_hint()
     }
 }
 
 #[derive(Clone, Debug)]
-struct StateReceiver {
+pub struct StreamControl {
+    command_sender: CommandSender,
+    state_receiver: StateReceiver,
+}
+
+impl StreamControl {
+    #[inline]
+    pub fn stream_info(&self) -> StreamInfo {
+        self.state_receiver.stream_info()
+    }
+
+    #[inline]
+    pub fn command_sender(&self) -> &CommandSender {
+        &self.command_sender
+    }
+
+    #[inline]
+    pub fn state_receiver(&self) -> &StateReceiver {
+        &self.state_receiver
+    }
+
+    pub fn split(self) -> (CommandSender, StateReceiver) {
+        (self.command_sender, self.state_receiver)
+    }
+
+    #[inline]
+    pub async fn wait_stream_info<R>(
+        &mut self,
+        f: impl FnMut(&StreamInfo) -> Option<R>,
+    ) -> Result<R, Closed> {
+        self.state_receiver.wait_stream_info(f).await
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CommandSender {
+    command_sender: mpsc::Sender<Command>,
+}
+
+impl CommandSender {
+    #[inline]
+    async fn send_command(&self, command: Command) -> Result<(), Closed> {
+        self.command_sender.send(command).await.map_err(|_| Closed)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct StateReceiver {
     state_receiver: watch::Receiver<State>,
 }
 
@@ -236,6 +301,13 @@ impl StateReceiver {
         state_guard.stream_info.clone()
     }
 
+    /// Wait for a stream info update
+    ///
+    /// The provided closure can be used for filtering and mapping.
+    ///
+    /// # Cancel safety
+    ///
+    /// This method is cancel safe.
     pub async fn wait_stream_info<R>(
         &mut self,
         mut f: impl FnMut(&StreamInfo) -> Option<R>,
@@ -250,15 +322,53 @@ impl StateReceiver {
     }
 }
 
-#[derive(Clone, Debug)]
-struct CommandSender {
-    command_sender: mpsc::Sender<Command>,
+/*
+impl futures_util::Stream for StateReceiver {
+    type Item = StreamInfo;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        {
+            let fut = self.state_receiver.changed();
+            pin_mut!(fut);
+            if let Err(_error) = ready!(fut.poll_unpin(cx)) {
+                return Poll::Ready(None);
+            }
+        }
+
+        let state = self.state_receiver.borrow_and_update();
+        Poll::Ready(Some(state.stream_info.clone()))
+    }
+}
+*/
+
+#[derive(Debug)]
+pub struct StreamReader {
+    samples_receiver: broadcast::Receiver<Complex<f32>>,
 }
 
-impl CommandSender {
+impl AsyncReadSamples for StreamReader {
+    type Sample = Complex<f32>;
+    type Error = !;
+
     #[inline]
-    async fn send_command(&self, command: Command) -> Result<(), Closed> {
-        self.command_sender.send(command).await.map_err(|_| Closed)
+    fn poll_read_samples(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buffer: &mut ReadBuf<Self::Sample>,
+    ) -> Poll<Result<(), Self::Error>> {
+        self.samples_receiver.poll_read_samples_unpin(cx, buffer)
+    }
+}
+
+impl StreamLength for StreamReader {
+    #[inline]
+    fn remaining(&self) -> Remaining {
+        self.samples_receiver.remaining()
+    }
+
+    #[inline]
+    fn size_hint(&self) -> SizeHint {
+        self.samples_receiver.size_hint()
     }
 }
 

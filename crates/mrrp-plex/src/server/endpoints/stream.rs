@@ -50,8 +50,12 @@ use tokio::{
 use tokio_util::sync::PollSender;
 
 use crate::{
-    multiplexer::stream::StreamHandle,
+    multiplexer::stream::{
+        Stream,
+        StreamControl,
+    },
     protocol::{
+        CreateStreamOptions,
         StreamCommand,
         StreamEvent,
         StreamId,
@@ -85,12 +89,12 @@ pub enum Error {
 
     #[error("Unexpected data frame")]
     UnexpectedData,
-
-    #[error("Stream is closed: {stream_id}")]
-    StreamClosed { stream_id: StreamId },
 }
 
-pub async fn create_stream(State(_state): State<ServerState>) -> impl IntoResponse {
+pub async fn create_stream(
+    State(_state): State<ServerState>,
+    Cbor(options): Cbor<CreateStreamOptions>,
+) -> impl IntoResponse {
     todo!();
 }
 
@@ -102,8 +106,8 @@ pub async fn list_streams(State(state): State<ServerState>) -> Cbor<Vec<StreamLi
             .iter()
             .map(|handle| {
                 StreamListEntry {
-                    id: handle.stream_id(),
-                    info: handle.stream_info(),
+                    stream_id: handle.stream_id(),
+                    stream_info: handle.stream_info(),
                 }
             })
             .collect(),
@@ -122,6 +126,12 @@ pub async fn get_stream(
         .get_stream(stream_id)
         .ok_or_else(|| ApiError::StreamNotFound { stream_id })?;
 
+    let stream = stream_handle.subscribe().map_err(|_| {
+        ApiError::StreamClosed {
+            stream_id: stream_handle.stream_id(),
+        }
+    })?;
+
     let response = ws
         .protocols([PROTOCOL])
         .on_upgrade(async move |socket: WebSocket| {
@@ -135,7 +145,7 @@ pub async fn get_stream(
             let mut connection = Connection::new(socket);
 
             let handler = async {
-                let handler = ConnectionHandler::new(&mut connection, stream_handle).await?;
+                let handler = ConnectionHandler::new(&mut connection, stream).await?;
                 handler.run().await
             };
 
@@ -154,31 +164,27 @@ pub async fn get_stream(
 #[derive(Debug)]
 struct ConnectionHandler<'a> {
     connection: &'a mut Connection,
-    stream_handle: StreamHandle,
+    stream_control: StreamControl,
     frame_receiver: mpsc::Receiver<Bytes>,
 }
 
 impl<'a> ConnectionHandler<'a> {
-    pub async fn new(
-        connection: &'a mut Connection,
-        stream_handle: StreamHandle,
-    ) -> Result<Self, Error> {
+    pub async fn new(connection: &'a mut Connection, stream: Stream) -> Result<Self, Error> {
         let (frame_sender, frame_receiver) = mpsc::channel(64);
 
         // todo: optional compression
         let sink = PcmWriter::<_, Complex<f32>, BigEndian>::new(FrameWriter::new(frame_sender));
 
-        let stream = stream_handle.subscribe().map_err(|_| {
-            Error::StreamClosed {
-                stream_id: stream_handle.stream_id(),
-            }
-        })?;
+        // split stream into parts
+        let stream_id = stream.stream_id();
+        let stream_info = stream.stream_info();
+        let (stream_control, stream_reader) = stream.split();
 
         // todo: make buffer size adjustable. there's also some hard-coded
         // values in `FrameWriter` that should be adjustable and relative to
         // this.
         let _join_handle = tokio::spawn(async move {
-            if let Err(error) = stream.forward(sink, 4096).await {
+            if let Err(error) = stream_reader.forward(sink, 4096).await {
                 match error {
                     // source error is !, so this variant is uninhabited
                     //
@@ -195,14 +201,14 @@ impl<'a> ConnectionHandler<'a> {
         // tell client that the stream started
         connection
             .send_message(&StreamStart {
-                id: stream_handle.stream_id(),
-                info: stream_handle.stream_info(),
+                stream_id,
+                stream_info,
             })
             .await?;
 
         Ok(Self {
             connection,
-            stream_handle,
+            stream_control,
             frame_receiver,
         })
     }
@@ -215,9 +221,9 @@ impl<'a> ConnectionHandler<'a> {
                     let Some(command) = result? else { break; };
                     self.handle_command(command).await?;
                 }
-                result = self.stream_handle.wait_stream_info(|stream_info| Some(stream_info.clone())) => {
-                    let Ok(info) = result else { break; };
-                    self.connection.send_message(&StreamEvent::InfoChanged { info }).await?;
+                result = self.stream_control.wait_stream_info(|stream_info| Some(stream_info.clone())) => {
+                    let Ok(stream_info) = result else { break; };
+                    self.connection.send_message(&StreamEvent::InfoChanged { stream_info }).await?;
                 }
                 option = self.frame_receiver.recv() => {
                     let Some(frame) = option else { break; };
@@ -359,10 +365,6 @@ impl AsCloseCode for Error {
             Error::CborDeserialize(_) | Error::UnexpectedData | Error::UnexpectedEmptyFrame => {
                 // Invalid Payload data
                 1007
-            }
-            Error::StreamClosed { stream_id: _ } => {
-                // Going away
-                1001
             }
             _ => {
                 // Internal error

@@ -25,8 +25,8 @@ use serde::Serialize;
 
 use crate::{
     multiplexer::{
-        Lagged,
         Multiplexer,
+        events::Lagged,
     },
     server::{
         ServerState,

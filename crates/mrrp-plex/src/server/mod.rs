@@ -48,15 +48,20 @@ impl ServerState {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, thiserror::Error)]
 enum ApiError {
+    #[error("Stream does not exist: {stream_id}")]
     StreamNotFound { stream_id: StreamId },
+
+    #[error("Stream is closed: {stream_id}")]
+    StreamClosed { stream_id: StreamId },
 }
 
 impl ApiError {
     pub fn status_code(&self) -> StatusCode {
         match self {
             ApiError::StreamNotFound { stream_id: _ } => StatusCode::NOT_FOUND,
+            ApiError::StreamClosed { stream_id: _ } => StatusCode::GONE,
         }
     }
 }

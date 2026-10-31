@@ -1,3 +1,4 @@
+pub mod events;
 pub mod stream;
 
 use std::{
@@ -7,22 +8,20 @@ use std::{
     sync::Arc,
 };
 
-use futures_util::TryStreamExt;
 use parking_lot::RwLock;
-use tokio::sync::broadcast;
-use tokio_stream::{
-    Stream,
-    wrappers::{
-        BroadcastStream,
-        errors::BroadcastStreamRecvError,
-    },
-};
+use tokio_stream::Stream;
 
 use crate::{
-    multiplexer::stream::{
-        Source,
-        StreamHandle,
-        StreamOptions,
+    multiplexer::{
+        events::{
+            EventDispatcher,
+            Lagged,
+        },
+        stream::{
+            Source,
+            StreamHandle,
+            StreamOptions,
+        },
     },
     protocol::{
         Event,
@@ -54,7 +53,7 @@ pub struct Multiplexer {
 #[derive(Debug)]
 struct Shared {
     state: RwLock<State>,
-    events_sender: broadcast::Sender<Event>,
+    event_dispatcher: EventDispatcher,
 }
 
 #[derive(Debug)]
@@ -71,14 +70,12 @@ impl Default for Multiplexer {
 
 impl Multiplexer {
     pub fn new(options: Options) -> Self {
-        let events_sender = broadcast::Sender::new(options.event_channel_capacity.get());
-
         Self {
             shared: Arc::new(Shared {
                 state: RwLock::new(State {
                     streams: HashMap::new(),
                 }),
-                events_sender,
+                event_dispatcher: EventDispatcher::new(options.event_channel_capacity),
             }),
         }
     }
@@ -89,14 +86,19 @@ impl Multiplexer {
         options: StreamOptions,
     ) -> StreamHandle {
         let stream_handle = StreamHandle::from_source(source, options);
-        let mut state_guard = self.shared.state.write();
-        state_guard
-            .streams
-            .insert(stream_handle.stream_id(), stream_handle.clone());
+        self.insert_stream(stream_handle.clone());
         stream_handle
     }
 
-    #[inline]
+    pub fn insert_stream(&self, stream_handle: StreamHandle) {
+        self.shared.event_dispatcher.register_stream(&stream_handle);
+
+        let mut state_guard = self.shared.state.write();
+        state_guard
+            .streams
+            .insert(stream_handle.stream_id(), stream_handle);
+    }
+
     pub fn get_stream(&self, stream_id: StreamId) -> Option<StreamHandle> {
         let state_guard = self.shared.state.read();
         state_guard.streams.get(&stream_id).cloned()
@@ -107,14 +109,8 @@ impl Multiplexer {
         state_guard.streams.values().cloned().collect()
     }
 
+    #[inline]
     pub fn events(&self) -> impl Stream<Item = Result<Event, Lagged>> {
-        BroadcastStream::new(self.shared.events_sender.subscribe())
-            .map_err(|BroadcastStreamRecvError::Lagged(lag)| Lagged { lag })
+        self.shared.event_dispatcher.subscribe()
     }
-}
-
-#[derive(Clone, Copy, Debug, thiserror::Error)]
-#[error("Receiver lagging behind: {lag}")]
-pub struct Lagged {
-    pub lag: u64,
 }

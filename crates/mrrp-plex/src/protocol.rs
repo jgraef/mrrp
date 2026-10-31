@@ -30,11 +30,11 @@ impl StreamId {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamStart {
-    pub id: StreamId,
-    pub info: StreamInfo,
+    pub stream_id: StreamId,
+    pub stream_info: StreamInfo,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct StreamInfo {
     pub center_frequency: Option<f32>,
     pub sample_rate: f32,
@@ -42,7 +42,7 @@ pub struct StreamInfo {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum StreamEvent {
-    InfoChanged { info: StreamInfo },
+    InfoChanged { stream_info: StreamInfo },
     CenterFrequencyChanged { center_frequency: f32 },
 }
 
@@ -54,11 +54,26 @@ pub enum StreamCommand {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StreamListEntry {
-    pub id: StreamId,
-    pub info: StreamInfo,
+    pub stream_id: StreamId,
+    pub stream_info: StreamInfo,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Event {
+    StreamList {
+        streams: Vec<StreamListEntry>,
+    },
+    StreamCreated {
+        stream_id: StreamId,
+        stream_info: StreamInfo,
+    },
+    StreamEvent {
+        stream_id: StreamId,
+        event: StreamEvent,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CreateStreamOptions {
     // todo
 }
