@@ -18,9 +18,9 @@ use tabled::{
     Tabled,
 };
 
-use crate::{
+use crate::commands::{
     TableStyle,
-    commands::sat::PassOptions,
+    sat::PassOptions,
 };
 
 #[derive(Clone, Debug, clap::Args)]

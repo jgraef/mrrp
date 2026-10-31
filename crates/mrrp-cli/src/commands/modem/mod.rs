@@ -7,7 +7,7 @@ use clap::{
     Subcommand,
 };
 
-use crate::Context;
+use crate::commands::Context;
 
 pub async fn run(args: Args, context: Context) -> Result<(), Error> {
     match args.command {

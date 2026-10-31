@@ -33,8 +33,10 @@ use mrrp_util::signal::AsyncReadSamplesExt;
 use pin_project_lite::pin_project;
 
 use crate::{
-    Context,
-    commands::rtl_sdr::open::DeviceArgs,
+    commands::{
+        Context,
+        rtl_sdr::open::DeviceArgs,
+    },
     util::run_til_shutdown,
 };
 

@@ -9,6 +9,7 @@ use std::{
         BufWriter,
         Write,
     },
+    num::NonZero,
     path::{
         Path,
         PathBuf,
@@ -40,19 +41,21 @@ use tokio::{
 };
 
 use crate::{
-    Context,
-    commands::rtl_sdr::{
-        gpio::{
-            GpioCommand,
-            gpio_command,
+    commands::{
+        Context,
+        rtl_sdr::{
+            gpio::{
+                GpioCommand,
+                gpio_command,
+            },
+            open::DeviceArgs,
+            regdump::{
+                dump_regs,
+                hexyl,
+                print_reg_dump,
+            },
+            server::ServerConfig,
         },
-        open::DeviceArgs,
-        regdump::{
-            dump_regs,
-            hexyl,
-            print_reg_dump,
-        },
-        server::ServerConfig,
     },
     util::{
         SourceInfo,
@@ -602,7 +605,7 @@ enum Command {
         /// should be choosen much larger than that. 64 kB seems to be an
         /// approproate size.
         #[clap(short, long, default_value = "65536")]
-        buffer_size: usize,
+        buffer_size: NonZero<usize>,
 
         /// Logs if samples have been dropped
         ///

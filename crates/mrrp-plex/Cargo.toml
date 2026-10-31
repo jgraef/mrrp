@@ -1,0 +1,32 @@
+[package]
+name = "mrrp-plex"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-compression = { workspace = true, features = ["zstd"] }
+axum = { workspace = true, features = [
+    "tokio",
+    "tracing",
+    "json",
+    "ws",
+    "http1",
+] }
+bytes.workspace = true
+ciborium.workspace = true
+derive_more = { workspace = true, features = ["deref", "deref_mut", "display", "from_str"] }
+futures-util.workspace = true
+mrrp-core.workspace = true
+mrrp-format = { workspace = true, features = ["pcm"] }
+mrrp-util.workspace = true
+parking_lot.workspace = true
+pin-project-lite.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-stream = { version = "0.1.19", features = ["sync"] }
+tokio-util.workspace = true
+tracing.workspace = true
+uuid = { workspace = true, features = ["serde", "v4"] }

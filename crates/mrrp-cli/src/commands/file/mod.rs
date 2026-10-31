@@ -33,7 +33,7 @@ use tokio::io::AsyncBufReadExt;
 use tracing::Instrument;
 
 use crate::{
-    Context,
+    commands::Context,
     util::sdrpp::{
         self,
         FileInfo,

@@ -1,4 +1,5 @@
 use std::{
+    num::NonZero,
     pin::Pin,
     task::{
         Context,
@@ -50,7 +51,7 @@ use tracing::{
 
 #[derive(Clone, Copy, Debug)]
 pub struct ServerConfig {
-    pub buffer_size: usize,
+    pub buffer_size: NonZero<usize>,
     pub fix_tuner_frequency: Option<f32>,
     pub log_dropped: bool,
 }
@@ -296,7 +297,7 @@ async fn handle_commands(
             Command::GetReader { result_sender } => {
                 let result = device
                     .reader(ReaderOptions {
-                        buffer_size: config.buffer_size,
+                        buffer_size: config.buffer_size.get(),
                         ..Default::default()
                     })
                     .await
