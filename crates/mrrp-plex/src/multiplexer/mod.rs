@@ -10,13 +10,12 @@ use std::{
 };
 
 use parking_lot::RwLock;
-use tokio_stream::Stream;
 
 use crate::{
     multiplexer::{
         events::{
-            EventDispatcher,
-            Lagged,
+            EventBroadcaster,
+            Events,
         },
         sources::SourceScanners,
         stream::{
@@ -25,11 +24,7 @@ use crate::{
             StreamOptions,
         },
     },
-    protocol::{
-        Event,
-        SourceListEntry,
-        StreamId,
-    },
+    protocol::StreamId,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -56,8 +51,8 @@ pub struct Multiplexer {
 #[derive(Debug)]
 struct Shared {
     state: RwLock<State>,
-    event_dispatcher: EventDispatcher,
     source_scanners: SourceScanners,
+    event_broadcaster: EventBroadcaster,
 }
 
 #[derive(Debug)]
@@ -79,8 +74,8 @@ impl Multiplexer {
                 state: RwLock::new(State {
                     streams: HashMap::new(),
                 }),
-                event_dispatcher: EventDispatcher::new(options.event_channel_capacity),
                 source_scanners: SourceScanners::default(),
+                event_broadcaster: EventBroadcaster::new(options.event_channel_capacity),
             }),
         }
     }
@@ -96,7 +91,19 @@ impl Multiplexer {
     }
 
     pub fn insert_stream(&self, stream_handle: StreamHandle) {
-        self.shared.event_dispatcher.register_stream(&stream_handle);
+        // todo: this is a bit silly, but we kind of don't want this method to
+        // be async
+        tokio::spawn({
+            let mut command_sender = stream_handle.stream_control().command_sender().clone();
+            let event_broadcaster = self.shared.event_broadcaster.clone();
+
+            async move {
+                command_sender
+                    .set_event_broadcaster(Some(event_broadcaster))
+                    .await
+                    .unwrap();
+            }
+        });
 
         let mut state_guard = self.shared.state.write();
         state_guard
@@ -114,7 +121,7 @@ impl Multiplexer {
         state_guard.streams.values().cloned().collect()
     }
 
-    pub fn events(&self) -> impl Stream<Item = Result<Event, Lagged>> {
-        self.shared.event_dispatcher.subscribe()
+    pub fn events(&self) -> Events {
+        self.shared.event_broadcaster.subscribe()
     }
 }

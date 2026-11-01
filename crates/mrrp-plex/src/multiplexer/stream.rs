@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{
     fmt::Debug,
     num::NonZero,
@@ -31,9 +29,13 @@ use tokio::sync::{
 };
 use tracing::Instrument;
 
-use crate::protocol::{
-    StreamId,
-    StreamInfo,
+use crate::{
+    multiplexer::events::EventBroadcaster,
+    protocol::{
+        Event,
+        StreamId,
+        StreamInfo,
+    },
 };
 
 pub type SourceError = Box<dyn std::error::Error + Send + Sync + 'static>;
@@ -287,6 +289,15 @@ impl CommandSender {
     async fn send_command(&self, command: Command) -> Result<(), Closed> {
         self.command_sender.send(command).await.map_err(|_| Closed)
     }
+
+    #[inline]
+    pub(super) async fn set_event_broadcaster(
+        &mut self,
+        event_broadcaster: Option<EventBroadcaster>,
+    ) -> Result<(), Closed> {
+        self.send_command(Command::SetEventBroadcaster { event_broadcaster })
+            .await
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -384,12 +395,21 @@ struct State {
 
 #[derive(Debug)]
 enum Command {
+    SetEventBroadcaster {
+        event_broadcaster: Option<EventBroadcaster>,
+    },
     Stop,
     Pause,
     Resume,
-    Seek { position: usize },
-    SetCenterFrequency { center_frequency: f32 },
-    SetSampleRate { sample_rate: f32 },
+    Seek {
+        position: usize,
+    },
+    SetCenterFrequency {
+        center_frequency: f32,
+    },
+    SetSampleRate {
+        sample_rate: f32,
+    },
 }
 
 #[derive(Debug)]
@@ -401,6 +421,7 @@ struct StreamTask {
     read_buffer: Vec<Complex<f32>>,
     manually_paused: bool,
     no_receivers: bool,
+    event_broadcaster: Option<EventBroadcaster>,
 }
 
 impl StreamTask {
@@ -421,6 +442,7 @@ impl StreamTask {
             read_buffer,
             manually_paused: false,
             no_receivers: true,
+            event_broadcaster: None,
         }
     }
 
@@ -444,6 +466,9 @@ impl StreamTask {
                     tracing::debug!(?command);
 
                     match command {
+                        Command::SetEventBroadcaster { event_broadcaster } => {
+                            self.event_broadcaster = event_broadcaster;
+                        }
                         Command::Stop => {
                             break;
                         },
@@ -515,5 +540,11 @@ impl StreamTask {
         // todo: tell source to resume (#51)
 
         Ok(())
+    }
+
+    async fn send_event(&self, event: Event) {
+        if let Some(event_broadcaster) = &self.event_broadcaster {
+            event_broadcaster.send(event);
+        }
     }
 }
