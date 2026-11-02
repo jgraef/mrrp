@@ -5,11 +5,6 @@ use serde::{
 };
 use uuid::Uuid;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SourceListEntry {
-    // todo
-}
-
 #[derive(
     Clone,
     Copy,
@@ -66,23 +61,16 @@ pub struct StreamListEntry {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum Event {
-    StreamList {
-        streams: Vec<StreamListEntry>,
-    },
     StreamCreated {
         stream_id: StreamId,
         stream_info: StreamInfo,
     },
     StreamClosed {
         stream_id: StreamId,
+        close_reason: Option<String>,
     },
     StreamEvent {
         stream_id: StreamId,
         event: StreamEvent,
     },
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct CreateStreamOptions {
-    // todo
 }

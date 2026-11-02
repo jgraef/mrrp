@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_variables)]
+
 use std::{
     fmt::Debug,
     num::NonZero,
@@ -12,7 +14,6 @@ use mrrp_core::{
     sample::Complex,
     signal::{
         AsyncReadSamples,
-        GetSampleRate,
         ReadBuf,
         Remaining,
         SizeHint,
@@ -30,38 +31,20 @@ use tokio::sync::{
 use tracing::Instrument;
 
 use crate::{
-    multiplexer::events::EventBroadcaster,
+    multiplexer::{
+        events::EventBroadcaster,
+        source::{
+            IntoSource,
+            Source,
+            SourceError,
+        },
+    },
     protocol::{
         Event,
         StreamId,
         StreamInfo,
     },
 };
-
-pub type SourceError = Box<dyn std::error::Error + Send + Sync + 'static>;
-
-// todo: add `Seek + Pause`, and maybe `GetSampleRate`, etc.
-pub trait Source:
-    AsyncReadSamples<Sample = Complex<f32>, Error = SourceError>
-    + GetSampleRate
-    + Debug
-    + Send
-    + Sync
-    + Unpin
-    + 'static
-{
-}
-
-impl<T> Source for T where
-    T: AsyncReadSamples<Sample = Complex<f32>, Error = SourceError>
-        + GetSampleRate
-        + Debug
-        + Send
-        + Sync
-        + Unpin
-        + 'static
-{
-}
 
 #[derive(Clone, Debug)]
 pub struct StreamOptions {
@@ -88,8 +71,12 @@ pub struct StreamHandle {
 }
 
 impl StreamHandle {
-    pub fn from_source(source: impl Into<Box<dyn Source>>, options: StreamOptions) -> StreamHandle {
-        let source = source.into();
+    pub fn from_source(
+        source: impl IntoSource,
+        event_broadcaster: Option<EventBroadcaster>,
+        options: StreamOptions,
+    ) -> StreamHandle {
+        let source = source.into_source();
         let stream_id = StreamId::generate();
 
         // create initial StreamInfo
@@ -110,10 +97,12 @@ impl StreamHandle {
         // spawn stream task
         let span = tracing::debug_span!("stream", ?stream_id);
         let stream_task = StreamTask::new(
+            stream_id,
             source,
             state_sender,
             command_receiver,
             samples_sender,
+            event_broadcaster,
             options.read_buffer_size,
         );
         tokio::spawn(stream_task.run().instrument(span));
@@ -289,15 +278,6 @@ impl CommandSender {
     async fn send_command(&self, command: Command) -> Result<(), Closed> {
         self.command_sender.send(command).await.map_err(|_| Closed)
     }
-
-    #[inline]
-    pub(super) async fn set_event_broadcaster(
-        &mut self,
-        event_broadcaster: Option<EventBroadcaster>,
-    ) -> Result<(), Closed> {
-        self.send_command(Command::SetEventBroadcaster { event_broadcaster })
-            .await
-    }
 }
 
 #[derive(Clone, Debug)]
@@ -395,46 +375,41 @@ struct State {
 
 #[derive(Debug)]
 enum Command {
-    SetEventBroadcaster {
-        event_broadcaster: Option<EventBroadcaster>,
-    },
     Stop,
     Pause,
     Resume,
-    Seek {
-        position: usize,
-    },
-    SetCenterFrequency {
-        center_frequency: f32,
-    },
-    SetSampleRate {
-        sample_rate: f32,
-    },
+    Seek { position: usize },
+    SetCenterFrequency { center_frequency: f32 },
+    SetSampleRate { sample_rate: f32 },
 }
 
 #[derive(Debug)]
 struct StreamTask {
+    stream_id: StreamId,
     source: Box<dyn Source>,
     state_sender: watch::Sender<State>,
     command_receiver: mpsc::Receiver<Command>,
     samples_sender: broadcast::Sender<Complex<f32>>,
+    event_broadcaster: Option<EventBroadcaster>,
     read_buffer: Vec<Complex<f32>>,
     manually_paused: bool,
     no_receivers: bool,
-    event_broadcaster: Option<EventBroadcaster>,
 }
 
 impl StreamTask {
     fn new(
+        stream_id: StreamId,
         source: Box<dyn Source>,
         state_sender: watch::Sender<State>,
         command_receiver: mpsc::Receiver<Command>,
         samples_sender: broadcast::Sender<Complex<f32>>,
+        event_broadcaster: Option<EventBroadcaster>,
         read_buffer_size: NonZero<usize>,
     ) -> Self {
         let read_buffer = vec![Complex::ZERO; read_buffer_size.get()];
 
         Self {
+            stream_id,
             source,
             state_sender,
             command_receiver,
@@ -447,10 +422,32 @@ impl StreamTask {
     }
 
     async fn run(mut self) {
-        if let Err(error) = self.run_inner().await {
-            tracing::error!(%error);
-            self.state_sender
-                .send_modify(move |state| state.error = Some(error));
+        match self.run_inner().await {
+            Ok(()) => {
+                tracing::debug!("Stream closing");
+
+                self.send_event(|| {
+                    Event::StreamClosed {
+                        stream_id: self.stream_id,
+                        close_reason: None,
+                    }
+                })
+                .await;
+            }
+            Err(error) => {
+                tracing::error!(%error, "Stream closing due to error");
+
+                self.send_event(|| {
+                    Event::StreamClosed {
+                        stream_id: self.stream_id,
+                        close_reason: Some(error.to_string()),
+                    }
+                })
+                .await;
+
+                self.state_sender
+                    .send_modify(move |state| state.error = Some(error));
+            }
         }
     }
 
@@ -466,9 +463,6 @@ impl StreamTask {
                     tracing::debug!(?command);
 
                     match command {
-                        Command::SetEventBroadcaster { event_broadcaster } => {
-                            self.event_broadcaster = event_broadcaster;
-                        }
                         Command::Stop => {
                             break;
                         },
@@ -542,9 +536,9 @@ impl StreamTask {
         Ok(())
     }
 
-    async fn send_event(&self, event: Event) {
+    async fn send_event(&self, make_event: impl FnOnce() -> Event) {
         if let Some(event_broadcaster) = &self.event_broadcaster {
-            event_broadcaster.send(event);
+            event_broadcaster.send(make_event());
         }
     }
 }

@@ -19,34 +19,53 @@ use serde::{
 };
 
 use crate::{
-    multiplexer::Multiplexer,
+    multiplexer::{
+        Multiplexer,
+        events::EventBroadcaster,
+        stream::StreamHandle,
+    },
     protocol::StreamId,
+    server::endpoints::streams::StreamIdOrAlias,
 };
 
-pub fn router(multiplexer: Multiplexer) -> Router<()> {
+pub fn router(multiplexer: Multiplexer, events: EventBroadcaster) -> Router<()> {
     Router::new()
-        .route("/sources", routing::get(endpoints::sources::list_sources))
+        .route("/streams", routing::get(endpoints::streams::list_streams))
         .route(
-            "/streams",
-            routing::put(endpoints::streams::create_stream).get(endpoints::streams::list_streams),
-        )
-        .route(
-            "/streams/{stream_id}.cf32.zstd",
-            routing::get(endpoints::streams::get_stream),
+            "/streams/{stream_id}/ws",
+            routing::get(endpoints::streams::get_stream_websocket),
         )
         .route("/events", routing::get(endpoints::events::get_events))
-        .with_state(ServerState { multiplexer })
+        .with_state(ServerState {
+            multiplexer,
+            events,
+        })
 }
 
 #[derive(Clone, Debug)]
 struct ServerState {
     multiplexer: Multiplexer,
+    events: EventBroadcaster,
+}
+
+impl ServerState {
+    pub fn get_stream(&self, stream_id: StreamIdOrAlias) -> Result<StreamHandle, ApiError> {
+        let stream_handle = match &stream_id {
+            StreamIdOrAlias::StreamId(stream_id) => self.multiplexer.get_stream(*stream_id),
+            StreamIdOrAlias::Alias(_alias) => {
+                // todo
+                None
+            }
+        };
+
+        stream_handle.ok_or_else(|| ApiError::StreamNotFound { stream_id })
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, thiserror::Error)]
 enum ApiError {
     #[error("Stream does not exist: {stream_id}")]
-    StreamNotFound { stream_id: StreamId },
+    StreamNotFound { stream_id: StreamIdOrAlias },
 
     #[error("Stream is closed: {stream_id}")]
     StreamClosed { stream_id: StreamId },
@@ -55,8 +74,8 @@ enum ApiError {
 impl ApiError {
     pub fn status_code(&self) -> StatusCode {
         match self {
-            ApiError::StreamNotFound { stream_id: _ } => StatusCode::NOT_FOUND,
-            ApiError::StreamClosed { stream_id: _ } => StatusCode::GONE,
+            Self::StreamNotFound { stream_id: _ } => StatusCode::NOT_FOUND,
+            Self::StreamClosed { stream_id: _ } => StatusCode::GONE,
         }
     }
 }

@@ -16,10 +16,16 @@ axum = { workspace = true, features = [
 ] }
 bytes.workspace = true
 ciborium.workspace = true
-derive_more = { workspace = true, features = ["deref", "deref_mut", "display", "from_str"] }
+derive_more = { workspace = true, features = [
+    "deref",
+    "deref_mut",
+    "display",
+    "from_str",
+] }
 futures-util.workspace = true
 mrrp-core.workspace = true
 mrrp-format = { workspace = true, features = ["pcm"] }
+mrrp-rtl-sdr = { workspace = true, features = ["mrrp"], optional = true }
 mrrp-util.workspace = true
 parking_lot.workspace = true
 pin-project-lite.workspace = true
@@ -30,3 +36,6 @@ tokio-stream = { version = "0.1.19", features = ["sync"] }
 tokio-util.workspace = true
 tracing.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
+
+[features]
+rtl-sdr = ["dep:mrrp-rtl-sdr"]

@@ -48,8 +48,14 @@ impl Stream for Events {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct EventBroadcaster {
+pub struct EventBroadcaster {
     sender: broadcast::Sender<Event>,
+}
+
+impl Default for EventBroadcaster {
+    fn default() -> Self {
+        Self::new(NonZero::new(128).unwrap())
+    }
 }
 
 impl EventBroadcaster {
@@ -69,6 +75,9 @@ impl EventBroadcaster {
 
     #[inline]
     pub fn send(&self, event: Event) {
+        // we don't care if the channel is closed. this usually only happens
+        // when the `Multiplexer` is shutdown and then also the command senders
+        // are dropped.
         self.sender.send(event).ok();
     }
 }

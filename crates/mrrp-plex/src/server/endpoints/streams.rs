@@ -2,6 +2,7 @@ use std::{
     fmt::Display,
     num::NonZero,
     pin::Pin,
+    str::FromStr,
     task::{
         Poll,
         ready,
@@ -19,10 +20,7 @@ use axum::{
             WebSocket,
         },
     },
-    response::{
-        IntoResponse,
-        Response,
-    },
+    response::Response,
 };
 use bytes::{
     Buf,
@@ -40,6 +38,7 @@ use mrrp_util::signal::{
     ForwardError,
 };
 use serde::{
+    Deserialize,
     Serialize,
     de::DeserializeOwned,
 };
@@ -55,7 +54,6 @@ use crate::{
         StreamControl,
     },
     protocol::{
-        CreateStreamOptions,
         StreamCommand,
         StreamEvent,
         StreamId,
@@ -73,9 +71,6 @@ use crate::{
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
-    Multiplexer(#[from] crate::multiplexer::Error),
-
-    #[error(transparent)]
     Axum(#[from] axum::Error),
 
     #[error(transparent)]
@@ -91,11 +86,33 @@ pub enum Error {
     UnexpectedData,
 }
 
-pub async fn create_stream(
-    State(_state): State<ServerState>,
-    Cbor(options): Cbor<CreateStreamOptions>,
-) -> impl IntoResponse {
-    todo!();
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum StreamIdOrAlias {
+    StreamId(StreamId),
+    Alias(String),
+}
+
+impl FromStr for StreamIdOrAlias {
+    type Err = !;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if let Ok(stream_id) = StreamId::from_str(s) {
+            Ok(Self::StreamId(stream_id))
+        }
+        else {
+            Ok(Self::Alias(s.to_owned()))
+        }
+    }
+}
+
+impl Display for StreamIdOrAlias {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StreamIdOrAlias::StreamId(stream_id) => Display::fmt(stream_id, f),
+            StreamIdOrAlias::Alias(alias) => Display::fmt(alias, f),
+        }
+    }
 }
 
 pub async fn list_streams(State(state): State<ServerState>) -> Cbor<Vec<StreamListEntry>> {
@@ -114,17 +131,14 @@ pub async fn list_streams(State(state): State<ServerState>) -> Cbor<Vec<StreamLi
     )
 }
 
-pub async fn get_stream(
+pub async fn get_stream_websocket(
     State(state): State<ServerState>,
-    Path(stream_id): Path<StreamId>,
+    Path(stream_id): Path<StreamIdOrAlias>,
     ws: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
     const PROTOCOL: &str = "mrrp-plex/stream";
 
-    let stream_handle = state
-        .multiplexer
-        .get_stream(stream_id)
-        .ok_or_else(|| ApiError::StreamNotFound { stream_id })?;
+    let stream_handle = state.get_stream(stream_id)?;
 
     let stream = stream_handle.subscribe().map_err(|_| {
         ApiError::StreamClosed {

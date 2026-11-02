@@ -24,9 +24,9 @@ use futures_util::{
 use serde::Serialize;
 
 use crate::{
-    multiplexer::{
-        Multiplexer,
-        events::Lagged,
+    multiplexer::events::{
+        Events,
+        Lagged,
     },
     server::{
         ServerState,
@@ -57,16 +57,15 @@ pub async fn get_events(State(state): State<ServerState>, ws: WebSocketUpgrade) 
     ws.on_upgrade(async move |socket: WebSocket| {
         let mut connection = Connection::new(socket);
 
-        if let Err(error) = stream_events(state.multiplexer, &mut connection).await {
+        if let Err(error) = stream_events(state.events.subscribe(), &mut connection).await {
             tracing::error!(%error);
             connection.close_with_error(&error).await.ok();
         }
     })
 }
 
-async fn stream_events(multiplexer: Multiplexer, connection: &mut Connection) -> Result<(), Error> {
-    let events = multiplexer
-        .events()
+async fn stream_events(events: Events, connection: &mut Connection) -> Result<(), Error> {
+    let events = events
         .inspect_err(|Lagged { lag }| tracing::warn!(?lag, "Event stream lagging behind"))
         .filter_map(async |result| result.ok());
     pin_mut!(events);
