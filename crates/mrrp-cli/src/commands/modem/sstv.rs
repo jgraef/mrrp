@@ -20,7 +20,7 @@ use mrrp_sstv::modes::{
 };
 use mrrp_util::signal::AsyncReadSamplesExt;
 
-use crate::Context;
+use crate::commands::Context;
 
 pub async fn run(args: Args, _context: Context) -> Result<(), Error> {
     let mut source = WavSource::<_, i16>::from_path(&args.path)?.convert::<f32>();

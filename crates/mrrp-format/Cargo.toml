@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-async-compression = { version = "0.4.51", features = ["tokio"] }
+async-compression.workspace = true
 byteorder = { workspace = true, features = ["std"], optional = true }
 bytes.workspace = true
 derive_more = { workspace = true, features = ["debug"] }

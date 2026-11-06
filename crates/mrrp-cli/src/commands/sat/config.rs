@@ -12,7 +12,7 @@ pub struct Config {
 
     #[serde(
         default = "default_min_update_interval",
-        deserialize_with = "crate::util::deserialize_human_time_delta"
+        with = "crate::util::serde::human_time_delta"
     )]
     pub min_update_interval: TimeDelta,
 

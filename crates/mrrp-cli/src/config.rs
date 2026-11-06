@@ -9,4 +9,7 @@ use crate::commands;
 pub struct Config {
     #[serde(default)]
     pub sat: commands::sat::Config,
+
+    #[serde(default)]
+    pub plex: commands::server::Config,
 }

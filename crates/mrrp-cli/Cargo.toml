@@ -7,9 +7,10 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+axum.workspace = true
 bytes.workspace = true
 chrono.workspace = true
-clap = { workspace = true, features = ["env"] }
+clap.workspace = true
 colorgrad = { workspace = true, features = ["preset"] }
 const-hex.workspace = true
 crossterm = { version = "0.29.0", features = ["event-stream"] }
@@ -21,6 +22,7 @@ futures-util.workspace = true
 hexyl = "0.17.0"
 humansize = "2.1.3"
 humantime = "2.3.0"
+humantime-serde = "1.1.1"
 image = "0.25.10"
 indicatif = "0.18.6"
 md-5 = "0.11.0"
@@ -31,6 +33,7 @@ mrrp-filter = { workspace = true, features = ["biquad", "pm-remez"] }
 mrrp-format = { workspace = true, features = ["full"] }
 mrrp-geo.workspace = true
 mrrp-modem.workspace = true
+mrrp-plex = { workspace = true, features = ["rtl-sdr"] }
 mrrp-rtl-sdr = { workspace = true, features = ["mrrp"] }
 mrrp-rtl-tcp.workspace = true
 mrrp-sat = { workspace = true, features = ["doppler-correct"] }
@@ -40,8 +43,9 @@ num-traits.workspace = true
 parking_lot.workspace = true
 pin-project-lite.workspace = true
 ratatui = { version = "0.30.2", features = ["scrolling-regions", "crossterm"] }
+regex = "1.13.1"
 rustfft.workspace = true
-serde = { workspace = true, features = ["derive"] }
+serde.workspace = true
 serde_json.workspace = true
 tabled = "0.22.0"
 tokio = { workspace = true, features = [
@@ -54,5 +58,6 @@ tokio = { workspace = true, features = [
 ] }
 tokio-util.workspace = true
 toml.workspace = true
+tower-http = { version = "0.7.1", features = ["trace"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["tracing-log"] }

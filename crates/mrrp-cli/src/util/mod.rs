@@ -1,9 +1,9 @@
 pub mod sdrpp;
+pub mod serde;
 pub mod si;
 pub mod sleep_until;
 
 use std::{
-    borrow::Cow,
     fmt::{
         Debug,
         Display,
@@ -11,7 +11,6 @@ use std::{
     path::Path,
     str::FromStr,
     sync::OnceLock,
-    time::Duration,
 };
 
 use anyhow::{
@@ -22,17 +21,12 @@ use anyhow::{
 use chrono::{
     DateTime,
     Local,
-    TimeDelta,
     Utc,
 };
 use clap::ValueEnum;
 use colorgrad::Gradient;
 use mrrp_core::signal::Frequency;
 use num_traits::float::FloatCore;
-use serde::{
-    Deserialize,
-    Deserializer,
-};
 use tokio_util::sync::CancellationToken;
 
 pub fn parse_degrees_as_radians<T>(s: &str) -> Result<T, T::Err>
@@ -74,22 +68,6 @@ pub async fn run_til_shutdown<R>(fut: impl Future<Output = R>) -> Option<R> {
         _ = cancellation_token.cancelled() => None,
         output = fut => Some(output),
     }
-}
-
-pub fn deserialize_human_duration<'de, D>(deserializer: D) -> Result<Duration, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let s: Cow<'de, str> = Deserialize::deserialize(deserializer)?;
-    humantime::parse_duration(&s).map_err(serde::de::Error::custom)
-}
-
-pub fn deserialize_human_time_delta<'de, D>(deserializer: D) -> Result<TimeDelta, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    let duration = deserialize_human_duration(deserializer)?;
-    TimeDelta::from_std(duration).map_err(serde::de::Error::custom)
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum, Default)]
