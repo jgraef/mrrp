@@ -2,6 +2,7 @@ use mrrp_core::signal::{
     Frequency,
     GetSampleRate,
 };
+use num_traits::AsPrimitive;
 
 use crate::fir::FirFilter;
 
@@ -87,6 +88,23 @@ pub trait FilterDesign<C> {
         C: Clone,
     {
         FirFilter::new(self.coefficients().to_owned())
+    }
+
+    /// Builds a FIR filter by casting each coefficient to `T`.
+    ///
+    /// The cast uses Rust's `as` semantics and can lose precision.
+    #[inline]
+    fn fir_filter_as<S, T>(&self) -> FirFilter<S, T>
+    where
+        C: AsPrimitive<T>,
+        T: Copy + 'static,
+    {
+        FirFilter::new(
+            self.coefficients()
+                .iter()
+                .map(|&coefficient| coefficient.as_())
+                .collect(),
+        )
     }
 }
 
@@ -401,12 +419,25 @@ pub fn fft_size_for_filter_length(length: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use approx::assert_abs_diff_eq;
+    use mrrp_util::signal::Scanner;
+    use num_complex::Complex;
 
     use crate::design::{
         EstimateFilterLength,
+        FilterDesign,
         Lowpass,
         Normalize,
     };
+
+    #[test]
+    fn fir_filter_as_converts_f64_coefficients_for_f32_samples() {
+        let design = vec![0.5_f64, 0.25];
+        let mut filter = design.fir_filter_as::<Complex<f32>, f32>();
+        let sample = Complex::new(4.0, 8.0);
+
+        assert_eq!(filter.scan(sample), Complex::new(2.0, 4.0));
+        assert_eq!(filter.scan(sample), Complex::new(3.0, 6.0));
+    }
 
     #[test]
     fn it_estimates_lowpass_filter_length_correctly() {

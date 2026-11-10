@@ -74,8 +74,7 @@ impl HilbertFilter {
         )
         .expect("failed to design hilbert filter");
         Self {
-            // <https://github.com/jgraef/mrrp/issues/53>
-            hilbert: FirFilter::new(hilbert.coefficients().iter().map(|c| *c as f32).collect()),
+            hilbert: hilbert.fir_filter_as(),
         }
     }
 }
