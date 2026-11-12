@@ -54,6 +54,7 @@ use crate::{
         HEADER_LENGTH,
         HeaderCodec,
         InvalidHeader,
+        TunerGainMode,
     },
 };
 
@@ -155,12 +156,18 @@ impl Client {
     }
 }
 
+/// The tuner gain to request from the server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TunerGain {
+    /// Let the tuner set its gain automatically.
+    Auto,
+    /// Select a gain by its zero-based index in the tuner's gain table.
+    Index(u32),
+    /// Request a signed gain in tenths of a decibel.
+    TenthsDb(i32),
+}
+
 /// Sends commands to the `rtl_tcp` server.
-///
-/// # TODO
-///
-/// Implement `set_tuner_gain`. What argument should this method take, or should
-/// the method be split into set mode, set gain in tenths of a dB, and index.
 #[derive(Debug)]
 pub struct CommandSender {
     command_writer: FramedWrite<OwnedWriteHalf, CommandCodec>,
@@ -195,6 +202,27 @@ impl CommandSender {
     pub async fn set_frequency_correction(&mut self, ppm: i32) -> Result<(), Error> {
         self.send_command(Command::SetFrequencyCorrection { ppm })
             .await
+    }
+
+    /// Set automatic tuner gain or enable manual mode and send the selected
+    /// gain.
+    pub async fn set_tuner_gain(&mut self, gain: TunerGain) -> Result<(), Error> {
+        let command = match gain {
+            TunerGain::Auto => {
+                return self
+                    .send_command(Command::SetTunerGainMode {
+                        mode: TunerGainMode::Auto,
+                    })
+                    .await;
+            }
+            TunerGain::Index(index) => Command::SetTunerGainIndex { index },
+            TunerGain::TenthsDb(gain) => Command::SetTunerGain { gain },
+        };
+        self.send_command(Command::SetTunerGainMode {
+            mode: TunerGainMode::Manual,
+        })
+        .await?;
+        self.send_command(command).await
     }
 
     #[inline]
